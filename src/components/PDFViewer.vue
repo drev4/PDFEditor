@@ -233,6 +233,11 @@ watch(() => pdfStore.currentMatchIndex, async () => {
   }
 })
 
+// Expose pdfDoc for parent components (like PageThumbnails)
+defineExpose({
+  pdfDoc
+})
+
 // Lifecycle hooks
 onMounted(async () => {
   await loadPDF()

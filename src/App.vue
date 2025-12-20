@@ -111,81 +111,22 @@
 
       <!-- Document Workspace - Show when documents are loaded -->
       <template v-else>
-        <!-- Left Sidebar - Document List -->
-        <aside class="w-72 bg-white/80 backdrop-blur-lg border-r border-gray-200/50 overflow-y-auto">
-          <div class="p-6">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">
-                Documents
-              </h3>
-              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-semibold">
-                {{ pdfStore.documents.length }}
-              </span>
-            </div>
-            <div class="space-y-3">
-              <div
-                v-for="doc in pdfStore.documents"
-                :key="doc.id"
-                @click="pdfStore.setActiveDocument(doc.id)"
-                :class="[
-                  'group p-4 rounded-xl cursor-pointer transition-all duration-200',
-                  doc.id === pdfStore.activeDocumentId
-                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg scale-105'
-                    : 'bg-gray-50 hover:bg-gray-100 hover:shadow-md'
-                ]"
-              >
-                <div class="flex items-start gap-3">
-                  <div :class="[
-                    'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-                    doc.id === pdfStore.activeDocumentId
-                      ? 'bg-white/20'
-                      : 'bg-red-100'
-                  ]">
-                    <i :class="[
-                      'pi pi-file-pdf text-xl',
-                      doc.id === pdfStore.activeDocumentId
-                        ? 'text-white'
-                        : 'text-red-500'
-                    ]"></i>
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <p :class="[
-                      'text-sm font-semibold truncate',
-                      doc.id === pdfStore.activeDocumentId
-                        ? 'text-white'
-                        : 'text-gray-900'
-                    ]">
-                      {{ doc.name }}
-                    </p>
-                    <p :class="[
-                      'text-xs mt-1',
-                      doc.id === pdfStore.activeDocumentId
-                        ? 'text-blue-100'
-                        : 'text-gray-500'
-                    ]">
-                      {{ doc.numPages }} pages
-                    </p>
-                  </div>
-                  <Button
-                    v-if="doc.id === pdfStore.activeDocumentId"
-                    icon="pi pi-times"
-                    @click.stop="pdfStore.closeDocument(doc.id)"
-                    text
-                    rounded
-                    severity="secondary"
-                    size="small"
-                    class="opacity-0 group-hover:opacity-100 transition-opacity"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+        <!-- Left Sidebar - Tabbed View -->
+        <aside class="w-72 bg-white/80 backdrop-blur-lg border-r border-gray-200/50 overflow-hidden flex flex-col">
+          <TabView class="flex-1 flex flex-col sidebar-tabs">
+            <TabPanel value="0" header="Documents" class="flex-1">
+              <DocumentsList />
+            </TabPanel>
+            <TabPanel value="1" header="Pages" class="flex-1">
+              <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
+            </TabPanel>
+          </TabView>
         </aside>
 
         <!-- Center - PDF Viewer -->
         <div class="flex-1 flex">
           <div class="flex-1">
-            <PDFViewer />
+            <PDFViewer ref="pdfViewerRef" />
           </div>
 
           <!-- Right Sidebar - Editor Tools -->
@@ -214,18 +155,23 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import ProgressSpinner from 'primevue/progressspinner'
 import Toast from 'primevue/toast'
+import TabView from 'primevue/tabview'
+import TabPanel from 'primevue/tabpanel'
 import { usePdfStore } from '@/stores/pdfStore'
 import PDFViewer from '@/components/PDFViewer.vue'
 import PDFEditor from '@/components/PDFEditor.vue'
 import FileUploader from '@/components/FileUploader.vue'
+import DocumentsList from '@/components/DocumentsList.vue'
+import PageThumbnails from '@/components/PageThumbnails.vue'
 
 const pdfStore = usePdfStore()
 const toast = useToast()
+const pdfViewerRef = ref<InstanceType<typeof PDFViewer> | null>(null)
 
 const closeDocument = () => {
   if (pdfStore.activeDocumentId) {
@@ -256,5 +202,63 @@ watch(() => pdfStore.error, (error) => {
 
 .app-container {
   font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Custom styles for sidebar tabs */
+.sidebar-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sidebar-tabs :deep(.p-tabview-nav-container) {
+  background: transparent;
+  border-bottom: 1px solid rgba(229, 231, 235, 0.5);
+  padding: 0 1rem;
+}
+
+.sidebar-tabs :deep(.p-tabview-nav) {
+  background: transparent;
+  border: none;
+  gap: 0.5rem;
+}
+
+.sidebar-tabs :deep(.p-tabview-nav-link) {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  padding: 0.75rem 1rem;
+  transition: all 0.2s;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.sidebar-tabs :deep(.p-tabview-nav-link:hover) {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.05);
+  border-radius: 0.5rem;
+}
+
+.sidebar-tabs :deep(.p-highlight .p-tabview-nav-link) {
+  color: #2563eb;
+  border-bottom: 2px solid #2563eb;
+  background: transparent;
+}
+
+.sidebar-tabs :deep(.p-tabview-panels) {
+  background: transparent;
+  padding: 0;
+  flex: 1;
+  overflow: hidden;
+  border: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-tabs :deep(.p-tabview-panel) {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 </style>

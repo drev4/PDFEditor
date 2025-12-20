@@ -257,6 +257,12 @@ export const usePdfStore = defineStore('pdf', () => {
     snapToGrid.value = !snapToGrid.value
   }
 
+  const updatePageOrder = (newOrder: number[]) => {
+    if (activeDocument.value) {
+      activeDocument.value.pageOrder = newOrder
+    }
+  }
+
   return {
     // State
     documents,
@@ -306,7 +312,8 @@ export const usePdfStore = defineStore('pdf', () => {
     clearSearch,
     setIsSearching,
     toggleGrid,
-    toggleSnapToGrid
+    toggleSnapToGrid,
+    updatePageOrder
   }
 }, {
   persist: false

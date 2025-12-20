@@ -6,14 +6,20 @@ Editor y visualizador de PDFs desarrollado con Vue 3, TypeScript, Pinia, PrimeVu
 
 - **Visualización de PDFs**: Visualiza documentos PDF con controles de navegación
 - **Zoom y Rotación**: Controla el nivel de zoom y rota las páginas
+- **Vista de Miniaturas**:
+  - Previsualización de todas las páginas del documento
+  - Drag & drop para reordenar páginas
+  - El nuevo orden se aplica al PDF exportado
+  - Navegación rápida haciendo clic en cualquier miniatura
 - **Edición de PDFs**:
   - Añadir texto personalizado con diferentes tamaños y colores
   - Insertar imágenes (PNG, JPG)
   - Eliminar páginas
   - Añadir páginas en blanco
+  - Reordenar páginas mediante drag & drop
 - **Gestión de múltiples documentos**: Abre y alterna entre varios PDFs
 - **Historial de ediciones**: Seguimiento de cambios realizados
-- **Exportación**: Descarga el PDF modificado
+- **Exportación**: Descarga el PDF modificado con todos los cambios aplicados
 
 ## Tecnologías Utilizadas
 
@@ -52,12 +58,15 @@ VuePDF/
 │   │   ├── PDFToolbar.vue      # Barra de herramientas de navegación
 │   │   ├── ImageControls.vue   # Controles de manipulación de imágenes
 │   │   ├── PDFEditor.vue       # Panel de herramientas de edición
-│   │   └── FileUploader.vue    # Componente para cargar archivos
+│   │   ├── FileUploader.vue    # Componente para cargar archivos
+│   │   ├── DocumentsList.vue   # Lista de documentos abiertos
+│   │   └── PageThumbnails.vue  # Vista de miniaturas con drag & drop
 │   ├── composables/            # Lógica reutilizable
 │   │   ├── usePDFRendering.ts  # Renderizado de PDF
 │   │   ├── usePDFSearch.ts     # Búsqueda de texto
 │   │   ├── useImagePlacement.ts # Manejo de imágenes
-│   │   └── useGridOverlay.ts   # Grid de ayuda
+│   │   ├── useGridOverlay.ts   # Grid de ayuda
+│   │   └── useThumbnails.ts    # Generación de miniaturas
 │   ├── stores/
 │   │   └── pdfStore.ts         # Store de Pinia para PDFs
 │   ├── types/
@@ -117,6 +126,7 @@ Para más detalles sobre la arquitectura, ver [REFACTORING.md](REFACTORING.md)
 - [x] ✅ Búsqueda de texto en PDF (completado)
 - [x] ✅ Grid con snap-to-grid (completado)
 - [x] ✅ Diseño profesional SaaS (completado)
+- [x] ✅ Vista de miniaturas con drag & drop para reordenar (completado)
 - [ ] Soporte para anotaciones y dibujo libre
 - [ ] Firma digital
 - [ ] Fusionar múltiples PDFs
@@ -124,7 +134,6 @@ Para más detalles sobre la arquitectura, ver [REFACTORING.md](REFACTORING.md)
 - [ ] OCR (Reconocimiento de texto)
 - [ ] Modo oscuro
 - [ ] Atajos de teclado
-- [ ] Vista de miniaturas
 
 ## Licencia
 

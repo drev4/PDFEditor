@@ -8,6 +8,7 @@ export interface PDFDocument {
   scale: number
   rotation: number
   snapshots?: ArrayBuffer[] // History of PDF states for undo
+  pageOrder?: number[] // Custom page order for reordering pages
 }
 
 export interface EditAction {
