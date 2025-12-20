@@ -106,9 +106,9 @@ import { usePDFRendering } from '@/composables/usePDFRendering'
 import { usePDFSearch } from '@/composables/usePDFSearch'
 import { useImagePlacement } from '@/composables/useImagePlacement'
 import { useGridOverlay } from '@/composables/useGridOverlay'
-import PDFToolbar from './PDFToolbar.vue'
-import ImageControls from './ImageControls.vue'
-import DrawingToolbar from './DrawingToolbar.vue'
+import PDFToolbar from '../toolbars/PDFToolbar.vue'
+import ImageControls from '../toolbars/ImageControls.vue'
+import DrawingToolbar from '../toolbars/DrawingToolbar.vue'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(

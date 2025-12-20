@@ -163,11 +163,11 @@ import Toast from 'primevue/toast'
 import TabView from 'primevue/tabview'
 import TabPanel from 'primevue/tabpanel'
 import { usePdfStore } from '@/stores/pdfStore'
-import PDFViewer from '@/components/PDFViewer.vue'
-import PDFEditor from '@/components/PDFEditor.vue'
-import FileUploader from '@/components/FileUploader.vue'
-import DocumentsList from '@/components/DocumentsList.vue'
-import PageThumbnails from '@/components/PageThumbnails.vue'
+import PDFViewer from '@/components/pdf/PDFViewer.vue'
+import PDFEditor from '@/components/editor/PDFEditor.vue'
+import FileUploader from '@/components/ui/FileUploader.vue'
+import DocumentsList from '@/components/pdf/DocumentsList.vue'
+import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
 
 const pdfStore = usePdfStore()
 const toast = useToast()
