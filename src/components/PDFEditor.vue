@@ -433,7 +433,25 @@ const downloadPDF = async () => {
   if (!pdfStore.activeDocument?.arrayBuffer) return
 
   try {
-    const blob = new Blob([pdfStore.activeDocument.arrayBuffer], { type: 'application/pdf' })
+    let blobData: ArrayBuffer | Uint8Array
+
+    // If pages have been reordered, create a new PDF with the correct order
+    if (pdfStore.activeDocument.pageOrder && pdfStore.activeDocument.pageOrder.length > 0) {
+      const pdfDoc = await PDFDocument.load(pdfStore.activeDocument.arrayBuffer)
+      const newPdfDoc = await PDFDocument.create()
+
+      // Copy pages in the new order
+      for (const pageNum of pdfStore.activeDocument.pageOrder) {
+        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageNum - 1])
+        newPdfDoc.addPage(copiedPage)
+      }
+
+      blobData = await newPdfDoc.save()
+    } else {
+      blobData = pdfStore.activeDocument.arrayBuffer
+    }
+
+    const blob = new Blob([blobData as any], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -474,7 +492,7 @@ const clearSearch = () => {
 
 .editor-content {
   overflow-y: auto;
-  max-height: calc(100vh - 88px);
+  max-height: 88vh;
 }
 
 .tool-card {
