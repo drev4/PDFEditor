@@ -1,34 +1,46 @@
 <template>
-  <div class="pdf-editor bg-white border-l shadow-lg p-4">
-    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
-      <i class="pi pi-pencil"></i>
-      PDF Editor
-    </h3>
-
-    <div v-if="!pdfStore.activeDocument" class="text-center text-gray-500">
-      <p>No PDF loaded</p>
+  <div class="pdf-editor bg-white/80 backdrop-blur-lg border-l border-gray-200/50 shadow-xl">
+    <!-- Header -->
+    <div class="editor-header sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 border-b border-blue-700">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+          <i class="pi pi-sliders-h text-white text-lg"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-bold text-white">Editor Tools</h3>
+          <p class="text-xs text-blue-100">Customize your PDF</p>
+        </div>
+      </div>
     </div>
 
-    <div v-else class="space-y-4">
+    <div v-if="!pdfStore.activeDocument" class="p-6 text-center text-gray-500">
+      <i class="pi pi-info-circle text-4xl mb-2 block"></i>
+      <p class="text-sm">No PDF loaded</p>
+    </div>
+
+    <div v-else class="editor-content p-6 space-y-6">
       <!-- Search Section -->
-      <div class="editor-section">
-        <h4 class="font-medium mb-2 flex items-center gap-2">
-          <i class="pi pi-search"></i>
-          Search Text
-        </h4>
-        <div class="space-y-2">
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-blue-100">
+            <i class="pi pi-search text-blue-600"></i>
+          </div>
+          <h4 class="tool-title">Search Text</h4>
+        </div>
+        <div class="tool-body">
           <InputText
             v-model="searchText"
             placeholder="Search in PDF..."
-            class="w-full"
+            class="w-full search-input"
             @keyup.enter="performSearch"
           />
-          <div class="flex gap-2">
+          <div class="flex gap-2 mt-3">
             <Button
               label="Search"
               icon="pi pi-search"
               @click="performSearch"
               class="flex-1"
+              severity="info"
               :disabled="!searchText"
               :loading="pdfStore.isSearching"
             />
@@ -40,19 +52,23 @@
               :disabled="pdfStore.searchMatches.length === 0"
             />
           </div>
-          <div v-if="pdfStore.searchMatches.length > 0" class="flex items-center gap-2 text-sm">
-            <span>{{ pdfStore.currentMatchIndex + 1 }} / {{ pdfStore.searchMatches.length }}</span>
-            <div class="flex gap-1 ml-auto">
+          <div v-if="pdfStore.searchMatches.length > 0" class="search-results">
+            <span class="text-sm font-semibold text-gray-700">
+              {{ pdfStore.currentMatchIndex + 1 }} / {{ pdfStore.searchMatches.length }} matches
+            </span>
+            <div class="flex gap-1">
               <Button
                 icon="pi pi-chevron-up"
                 size="small"
                 outlined
+                severity="info"
                 @click="pdfStore.previousSearchMatch()"
               />
               <Button
                 icon="pi pi-chevron-down"
                 size="small"
                 outlined
+                severity="info"
                 @click="pdfStore.nextSearchMatch()"
               />
             </div>
@@ -60,21 +76,21 @@
         </div>
       </div>
 
-      <Divider />
-
       <!-- Add Text Section -->
-      <div class="editor-section">
-        <h4 class="font-medium mb-2 flex items-center gap-2">
-          <i class="pi pi-font"></i>
-          Add Text
-        </h4>
-        <div class="space-y-2">
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-indigo-100">
+            <i class="pi pi-font text-indigo-600"></i>
+          </div>
+          <h4 class="tool-title">Add Text</h4>
+        </div>
+        <div class="tool-body">
           <InputText
             v-model="textInput"
             placeholder="Enter text..."
             class="w-full"
           />
-          <div class="flex gap-2">
+          <div class="flex gap-2 mt-3">
             <InputNumber
               v-model="fontSize"
               :min="8"
@@ -82,46 +98,94 @@
               placeholder="Size"
               class="flex-1"
             />
-            <ColorPicker v-model="textColor" />
+            <div class="color-picker-wrapper">
+              <ColorPicker v-model="textColor" />
+            </div>
           </div>
           <Button
-            label="Add Text to PDF"
+            label="Add Text"
             icon="pi pi-plus"
             @click="addText"
-            class="w-full"
+            class="w-full mt-3"
+            severity="info"
             :disabled="!textInput"
           />
         </div>
       </div>
 
-      <Divider />
-
       <!-- Add Image Section -->
-      <div class="editor-section">
-        <h4 class="font-medium mb-2 flex items-center gap-2">
-          <i class="pi pi-image"></i>
-          Add Image
-        </h4>
-        <FileUpload
-          mode="basic"
-          accept="image/*"
-          :maxFileSize="5000000"
-          @select="handleImageUpload"
-          :auto="true"
-          chooseLabel="Select Image"
-          class="w-full"
-        />
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-purple-100">
+            <i class="pi pi-image text-purple-600"></i>
+          </div>
+          <h4 class="tool-title">Add Image</h4>
+        </div>
+        <div class="tool-body">
+          <FileUpload
+            mode="basic"
+            accept="image/*"
+            :maxFileSize="5000000"
+            @select="handleImageUpload"
+            :auto="true"
+            chooseLabel="Select Image"
+            chooseIcon="pi pi-image"
+            class="w-full image-upload-btn"
+            severity="secondary"
+          />
+          <p class="text-xs text-gray-500 mt-2">Max size: 5MB</p>
+        </div>
       </div>
 
-      <Divider />
+      <!-- Grid Settings -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-teal-100">
+            <i class="pi pi-th-large text-teal-600"></i>
+          </div>
+          <h4 class="tool-title">Grid Settings</h4>
+        </div>
+        <div class="tool-body">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-medium text-gray-700">Show Grid</span>
+            <Button
+              :icon="pdfStore.gridEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'"
+              @click="pdfStore.toggleGrid()"
+              :severity="pdfStore.gridEnabled ? 'info' : 'secondary'"
+              outlined
+              size="small"
+            />
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-700">Snap to Grid</span>
+            <Button
+              :icon="pdfStore.snapToGrid ? 'pi pi-lock' : 'pi pi-lock-open'"
+              @click="pdfStore.toggleSnapToGrid()"
+              :severity="pdfStore.snapToGrid ? 'info' : 'secondary'"
+              outlined
+              size="small"
+            />
+          </div>
+        </div>
+      </div>
 
       <!-- Page Operations -->
-      <div class="editor-section">
-        <h4 class="font-medium mb-2 flex items-center gap-2">
-          <i class="pi pi-file"></i>
-          Page Operations
-        </h4>
-        <div class="space-y-2">
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-orange-100">
+            <i class="pi pi-file text-orange-600"></i>
+          </div>
+          <h4 class="tool-title">Page Operations</h4>
+        </div>
+        <div class="tool-body space-y-2">
+          <Button
+            label="Add Blank Page"
+            icon="pi pi-plus-circle"
+            @click="addBlankPage"
+            class="w-full"
+            severity="info"
+            outlined
+          />
           <Button
             label="Delete Current Page"
             icon="pi pi-trash"
@@ -131,49 +195,50 @@
             class="w-full"
             :disabled="pdfStore.activeDocument.numPages <= 1"
           />
+        </div>
+      </div>
+
+      <!-- Edit History -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-gray-100">
+            <i class="pi pi-history text-gray-600"></i>
+          </div>
+          <div class="flex-1">
+            <h4 class="tool-title">Edit History</h4>
+            <p class="text-xs text-gray-500">{{ pdfStore.editHistory.length }} changes</p>
+          </div>
+        </div>
+        <div class="tool-body">
           <Button
-            label="Add Blank Page"
-            icon="pi pi-plus-circle"
+            label="Undo Last Edit"
+            icon="pi pi-undo"
             outlined
-            @click="addBlankPage"
+            @click="pdfStore.undoLastEdit()"
             class="w-full"
+            severity="secondary"
+            :disabled="pdfStore.editHistory.length === 0"
           />
         </div>
       </div>
 
-      <Divider />
-
       <!-- Export Section -->
-      <div class="editor-section">
-        <h4 class="font-medium mb-2 flex items-center gap-2">
-          <i class="pi pi-download"></i>
-          Export
-        </h4>
-        <Button
-          label="Download Modified PDF"
-          icon="pi pi-download"
-          @click="downloadPDF"
-          class="w-full"
-          severity="success"
-        />
-      </div>
-
-      <Divider />
-
-      <!-- Edit History -->
-      <div class="editor-section">
-        <h4 class="font-medium mb-2 flex items-center gap-2">
-          <i class="pi pi-history"></i>
-          History ({{ pdfStore.editHistory.length }})
-        </h4>
-        <Button
-          label="Undo Last Edit"
-          icon="pi pi-undo"
-          outlined
-          @click="pdfStore.undoLastEdit()"
-          class="w-full"
-          :disabled="pdfStore.editHistory.length === 0"
-        />
+      <div class="tool-card export-card">
+        <div class="tool-header">
+          <div class="tool-icon bg-green-100">
+            <i class="pi pi-download text-green-600"></i>
+          </div>
+          <h4 class="tool-title">Export PDF</h4>
+        </div>
+        <div class="tool-body">
+          <Button
+            label="Download PDF"
+            icon="pi pi-download"
+            @click="downloadPDF"
+            class="w-full download-btn"
+            severity="success"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -187,7 +252,6 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import ColorPicker from 'primevue/colorpicker'
 import FileUpload from 'primevue/fileupload'
-import Divider from 'primevue/divider'
 import { usePdfStore } from '@/stores/pdfStore'
 
 const pdfStore = usePdfStore()
@@ -399,12 +463,135 @@ const clearSearch = () => {
 
 <style scoped>
 .pdf-editor {
-  width: 320px;
+  width: 380px;
   overflow-y: auto;
   max-height: 100vh;
 }
 
-.editor-section {
-  margin-bottom: 1rem;
+.editor-header {
+  z-index: 10;
+}
+
+.editor-content {
+  overflow-y: auto;
+  max-height: calc(100vh - 88px);
+}
+
+.tool-card {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+}
+
+.tool-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.export-card {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #bbf7d0;
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tool-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.tool-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.tool-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-results {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.search-input {
+  border-radius: 8px;
+  border: 1.5px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.color-picker-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  transition: all 0.2s ease;
+}
+
+.color-picker-wrapper:hover {
+  border-color: #cbd5e1;
+}
+
+.image-upload-btn {
+  width: 100%;
+}
+
+.download-btn {
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.download-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+}
+
+/* Smooth scrollbar for editor */
+.editor-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.editor-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-content::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.editor-content::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 </style>
