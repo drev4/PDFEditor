@@ -249,6 +249,14 @@ export const usePdfStore = defineStore('pdf', () => {
     isSearching.value = value
   }
 
+  const toggleGrid = () => {
+    gridEnabled.value = !gridEnabled.value
+  }
+
+  const toggleSnapToGrid = () => {
+    snapToGrid.value = !snapToGrid.value
+  }
+
   return {
     // State
     documents,
@@ -296,7 +304,9 @@ export const usePdfStore = defineStore('pdf', () => {
     nextSearchMatch,
     previousSearchMatch,
     clearSearch,
-    setIsSearching
+    setIsSearching,
+    toggleGrid,
+    toggleSnapToGrid
   }
 }, {
   persist: false

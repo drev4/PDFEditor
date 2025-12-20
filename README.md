@@ -48,9 +48,16 @@ npm run preview
 VuePDF/
 ├── src/
 │   ├── components/
-│   │   ├── PDFViewer.vue       # Componente visualizador de PDF
-│   │   ├── PDFEditor.vue       # Componente editor de PDF
+│   │   ├── PDFViewer.vue       # Componente visualizador (refactorizado)
+│   │   ├── PDFToolbar.vue      # Barra de herramientas de navegación
+│   │   ├── ImageControls.vue   # Controles de manipulación de imágenes
+│   │   ├── PDFEditor.vue       # Panel de herramientas de edición
 │   │   └── FileUploader.vue    # Componente para cargar archivos
+│   ├── composables/            # Lógica reutilizable
+│   │   ├── usePDFRendering.ts  # Renderizado de PDF
+│   │   ├── usePDFSearch.ts     # Búsqueda de texto
+│   │   ├── useImagePlacement.ts # Manejo de imágenes
+│   │   └── useGridOverlay.ts   # Grid de ayuda
 │   ├── stores/
 │   │   └── pdfStore.ts         # Store de Pinia para PDFs
 │   ├── types/
@@ -59,6 +66,7 @@ VuePDF/
 │   ├── main.ts                 # Punto de entrada
 │   └── style.css               # Estilos globales
 ├── public/
+├── REFACTORING.md              # Documentación de refactorización
 ├── index.html
 ├── vite.config.ts
 ├── tailwind.config.js
@@ -81,15 +89,34 @@ VuePDF/
 
 ## Características Técnicas
 
+- **Arquitectura Modular**: Composables reutilizables siguiendo principios SOLID
 - **Reactive State Management**: Uso de Pinia para gestión de estado global
-- **Persistent Storage**: Los documentos abiertos persisten entre sesiones
-- **Type Safety**: TypeScript para seguridad de tipos en todo el proyecto
-- **Responsive Design**: Interfaz adaptable con Tailwind CSS
-- **Modern UI Components**: Uso de PrimeVue con tema Aura
-- **Canvas Rendering**: Renderizado eficiente de PDFs usando canvas
+- **Composition API**: Vue 3 con script setup para mejor performance
+- **Type Safety**: TypeScript en todo el proyecto
+- **Diseño Profesional SaaS**: Interfaz moderna con glassmorphism y animaciones
+- **Modern UI Components**: PrimeVue con tema personalizado
+- **Canvas Rendering**: Renderizado eficiente de PDFs con PDF.js
+- **Text Search**: Búsqueda de texto con resaltado visual
+- **Grid System**: Sistema de grilla con snap-to-grid
+- **Image Manipulation**: Drag & drop, resize, flip de imágenes
+- **Undo/Redo**: Sistema de historial de ediciones
+
+## Arquitectura
+
+El proyecto utiliza una arquitectura basada en composables para separar responsabilidades:
+
+- **Composables**: Lógica de negocio reutilizable y testeable
+- **Componentes**: UI presentacional que usa los composables
+- **Store**: Estado global centralizado con Pinia
+- **Types**: Definiciones de TypeScript compartidas
+
+Para más detalles sobre la arquitectura, ver [REFACTORING.md](REFACTORING.md)
 
 ## Mejoras Futuras
 
+- [x] ✅ Búsqueda de texto en PDF (completado)
+- [x] ✅ Grid con snap-to-grid (completado)
+- [x] ✅ Diseño profesional SaaS (completado)
 - [ ] Soporte para anotaciones y dibujo libre
 - [ ] Firma digital
 - [ ] Fusionar múltiples PDFs
@@ -98,7 +125,6 @@ VuePDF/
 - [ ] Modo oscuro
 - [ ] Atajos de teclado
 - [ ] Vista de miniaturas
-- [ ] Búsqueda de texto en PDF
 
 ## Licencia
 
