@@ -13,7 +13,7 @@
       </div>
     </div>
 
-    <div v-if="!pdfStore.activeDocument" class="p-6 text-center text-gray-500">
+    <div v-if="!documentStore.activeDocument" class="p-6 text-center text-gray-500">
       <i class="pi pi-info-circle text-4xl mb-2 block"></i>
       <p class="text-sm">No PDF loaded</p>
     </div>
@@ -42,19 +42,19 @@
               class="flex-1"
               severity="info"
               :disabled="!searchText"
-              :loading="pdfStore.isSearching"
+              :loading="searchStore.isSearching"
             />
             <Button
               icon="pi pi-times"
               @click="clearSearch"
               severity="secondary"
               outlined
-              :disabled="pdfStore.searchMatches.length === 0"
+              :disabled="searchStore.searchMatches.length === 0"
             />
           </div>
-          <div v-if="pdfStore.searchMatches.length > 0" class="search-results">
+          <div v-if="searchStore.searchMatches.length > 0" class="search-results">
             <span class="text-sm font-semibold text-gray-700">
-              {{ pdfStore.currentMatchIndex + 1 }} / {{ pdfStore.searchMatches.length }} matches
+              {{ searchStore.currentMatchIndex + 1 }} / {{ searchStore.searchMatches.length }} matches
             </span>
             <div class="flex gap-1">
               <Button
@@ -62,14 +62,14 @@
                 size="small"
                 outlined
                 severity="info"
-                @click="pdfStore.previousSearchMatch()"
+                @click="searchStore.previousSearchMatch()"
               />
               <Button
                 icon="pi pi-chevron-down"
                 size="small"
                 outlined
                 severity="info"
-                @click="pdfStore.nextSearchMatch()"
+                @click="searchStore.nextSearchMatch()"
               />
             </div>
           </div>
@@ -149,9 +149,9 @@
           <div class="flex items-center justify-between mb-3">
             <span class="text-sm font-medium text-gray-700">Show Grid</span>
             <Button
-              :icon="pdfStore.gridEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'"
-              @click="pdfStore.toggleGrid()"
-              :severity="pdfStore.gridEnabled ? 'info' : 'secondary'"
+              :icon="drawingStore.gridEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'"
+              @click="drawingStore.toggleGrid()"
+              :severity="drawingStore.gridEnabled ? 'info' : 'secondary'"
               outlined
               size="small"
             />
@@ -159,9 +159,9 @@
           <div class="flex items-center justify-between">
             <span class="text-sm font-medium text-gray-700">Snap to Grid</span>
             <Button
-              :icon="pdfStore.snapToGrid ? 'pi pi-lock' : 'pi pi-lock-open'"
-              @click="pdfStore.toggleSnapToGrid()"
-              :severity="pdfStore.snapToGrid ? 'info' : 'secondary'"
+              :icon="drawingStore.snapToGrid ? 'pi pi-lock' : 'pi pi-lock-open'"
+              @click="drawingStore.toggleSnapToGrid()"
+              :severity="drawingStore.snapToGrid ? 'info' : 'secondary'"
               outlined
               size="small"
             />
@@ -193,7 +193,7 @@
             outlined
             @click="deleteCurrentPage"
             class="w-full"
-            :disabled="pdfStore.activeDocument.numPages <= 1"
+            :disabled="documentStore.activeDocument.numPages <= 1"
           />
         </div>
       </div>
@@ -206,7 +206,7 @@
           </div>
           <div class="flex-1">
             <h4 class="tool-title">Edit History</h4>
-            <p class="text-xs text-gray-500">{{ pdfStore.editHistory.length }} changes</p>
+            <p class="text-xs text-gray-500">{{ editorStore.editHistory.length }} changes</p>
           </div>
         </div>
         <div class="tool-body">
@@ -214,10 +214,10 @@
             label="Undo Last Edit"
             icon="pi pi-undo"
             outlined
-            @click="pdfStore.undoLastEdit()"
+            @click="editorStore.undoLastEdit()"
             class="w-full"
             severity="secondary"
-            :disabled="pdfStore.editHistory.length === 0"
+            :disabled="editorStore.editHistory.length === 0"
           />
         </div>
       </div>
@@ -252,9 +252,15 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import ColorPicker from 'primevue/colorpicker'
 import FileUpload from 'primevue/fileupload'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
+import { useEditorStore } from '@/stores/editor.store'
+import { useDrawingStore } from '@/stores/drawing.store'
+import { useSearchStore } from '@/stores/search.store'
 
-const pdfStore = usePdfStore()
+const documentStore = useDocumentStore()
+const editorStore = useEditorStore()
+const drawingStore = useDrawingStore()
+const searchStore = useSearchStore()
 
 // Text editing state
 const textInput = ref('')
@@ -280,15 +286,15 @@ const hexToRgb = (hex: string) => {
 }
 
 const addText = async () => {
-  if (!textInput.value || !pdfStore.activeDocument?.arrayBuffer) return
+  if (!textInput.value || !documentStore.activeDocument?.arrayBuffer) return
 
   try {
     // Save snapshot before making changes
-    pdfStore.saveSnapshot()
+    editorStore.saveSnapshot()
 
-    const pdfDoc = await PDFDocument.load(pdfStore.activeDocument.arrayBuffer)
+    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
     const pages = pdfDoc.getPages()
-    const currentPageIndex = pdfStore.activeDocument.currentPage - 1
+    const currentPageIndex = documentStore.activeDocument.currentPage - 1
     const page = pages[currentPageIndex]
 
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -307,9 +313,9 @@ const addText = async () => {
     const pdfBytes = await pdfDoc.save()
     const newArrayBuffer = pdfBytes.buffer
 
-    pdfStore.activeDocument.arrayBuffer = newArrayBuffer
+    documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
-    pdfStore.addEditAction({
+    editorStore.addEditAction({
       type: 'text',
       page: currentPageIndex + 1,
       data: { text: textInput.value, fontSize: fontSize.value },
@@ -319,7 +325,7 @@ const addText = async () => {
     textInput.value = ''
 
     // Trigger re-render by reloading the PDF
-    pdfStore.triggerPDFReload()
+    documentStore.triggerPDFReload()
   } catch (error) {
     console.error('Error adding text:', error)
   }
@@ -327,7 +333,7 @@ const addText = async () => {
 
 const handleImageUpload = async (event: any) => {
   const file = event.files[0]
-  if (!file || !pdfStore.activeDocument?.arrayBuffer) return
+  if (!file || !documentStore.activeDocument?.arrayBuffer) return
 
   try {
     const reader = new FileReader()
@@ -353,7 +359,7 @@ const handleImageUpload = async (event: any) => {
         }
 
         // Set up image preview with calculated size and position
-        pdfStore.setImagePreview({
+        editorStore.setImagePreview({
           dataUrl,
           file,
           x: 100, // Default starting position
@@ -374,88 +380,88 @@ const handleImageUpload = async (event: any) => {
 }
 
 const deleteCurrentPage = async () => {
-  if (!pdfStore.activeDocument?.arrayBuffer) return
-  if (pdfStore.activeDocument.numPages <= 1) return
+  if (!documentStore.activeDocument?.arrayBuffer) return
+  if (documentStore.activeDocument.numPages <= 1) return
 
   try {
     // Save snapshot before making changes
-    pdfStore.saveSnapshot()
+    editorStore.saveSnapshot()
 
-    const pdfDoc = await PDFDocument.load(pdfStore.activeDocument.arrayBuffer)
-    const currentPageIndex = pdfStore.activeDocument.currentPage - 1
+    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
+    const currentPageIndex = documentStore.activeDocument.currentPage - 1
 
     pdfDoc.removePage(currentPageIndex)
 
     const pdfBytes = await pdfDoc.save()
     const newArrayBuffer = pdfBytes.buffer
 
-    pdfStore.activeDocument.arrayBuffer = newArrayBuffer
+    documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
-    pdfStore.addEditAction({
+    editorStore.addEditAction({
       type: 'delete',
       page: currentPageIndex + 1,
       data: {},
       timestamp: Date.now()
     })
 
-    if (pdfStore.activeDocument.currentPage > 1) {
-      pdfStore.setCurrentPage(pdfStore.activeDocument.currentPage - 1)
+    if (documentStore.activeDocument.currentPage > 1) {
+      documentStore.setCurrentPage(documentStore.activeDocument.currentPage - 1)
     }
 
-    pdfStore.triggerPDFReload()
+    documentStore.triggerPDFReload()
   } catch (error) {
     console.error('Error deleting page:', error)
   }
 }
 
 const addBlankPage = async () => {
-  if (!pdfStore.activeDocument?.arrayBuffer) return
+  if (!documentStore.activeDocument?.arrayBuffer) return
 
   try {
     // Save snapshot before making changes
-    pdfStore.saveSnapshot()
+    editorStore.saveSnapshot()
 
-    const pdfDoc = await PDFDocument.load(pdfStore.activeDocument.arrayBuffer)
+    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
     pdfDoc.addPage()
 
     const pdfBytes = await pdfDoc.save()
     const newArrayBuffer = pdfBytes.buffer
 
-    pdfStore.activeDocument.arrayBuffer = newArrayBuffer
+    documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
-    pdfStore.triggerPDFReload()
+    documentStore.triggerPDFReload()
   } catch (error) {
     console.error('Error adding blank page:', error)
   }
 }
 
 const downloadPDF = async () => {
-  if (!pdfStore.activeDocument?.arrayBuffer) return
+  if (!documentStore.activeDocument?.arrayBuffer) return
 
   try {
     let blobData: ArrayBuffer | Uint8Array
 
     // If pages have been reordered, create a new PDF with the correct order
-    if (pdfStore.activeDocument.pageOrder && pdfStore.activeDocument.pageOrder.length > 0) {
-      const pdfDoc = await PDFDocument.load(pdfStore.activeDocument.arrayBuffer)
+    if (documentStore.activeDocument.pageOrder && documentStore.activeDocument.pageOrder.length > 0) {
+      const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
       const newPdfDoc = await PDFDocument.create()
 
       // Copy pages in the new order
-      for (const pageNum of pdfStore.activeDocument.pageOrder) {
+      for (const pageNum of documentStore.activeDocument.pageOrder) {
         const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageNum - 1])
         newPdfDoc.addPage(copiedPage)
       }
 
       blobData = await newPdfDoc.save()
     } else {
-      blobData = pdfStore.activeDocument.arrayBuffer
+      blobData = documentStore.activeDocument.arrayBuffer
     }
 
     const blob = new Blob([blobData as any], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `edited_${pdfStore.activeDocument.name}`
+    link.download = `edited_${documentStore.activeDocument.name}`
     link.click()
     URL.revokeObjectURL(url)
   } catch (error) {
@@ -466,8 +472,8 @@ const downloadPDF = async () => {
 const performSearch = () => {
   if (!searchText.value.trim()) return
 
-  pdfStore.setSearchQuery(searchText.value)
-  pdfStore.setIsSearching(true)
+  searchStore.setSearchQuery(searchText.value)
+  searchStore.setIsSearching(true)
 
   // The actual search will be performed in PDFViewer component
   // which has access to the PDF.js document
@@ -475,7 +481,7 @@ const performSearch = () => {
 
 const clearSearch = () => {
   searchText.value = ''
-  pdfStore.clearSearch()
+  searchStore.clearSearch()
 }
 </script>
 

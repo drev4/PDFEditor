@@ -1,8 +1,12 @@
 import { ref } from 'vue'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
+import { useEditorStore } from '@/stores/editor.store'
+import { useDrawingStore } from '@/stores/drawing.store'
 
 export function useImagePlacement(canvasRef: any) {
-  const pdfStore = usePdfStore()
+  const documentStore = useDocumentStore()
+  const editorStore = useEditorStore()
+  const drawingStore = useDrawingStore()
 
   // Image drag and drop functionality
   const isDragging = ref(false)
@@ -32,18 +36,18 @@ export function useImagePlacement(canvasRef: any) {
   }
 
   const snapToGridValue = (value: number): number => {
-    if (!pdfStore.snapToGrid) return value
-    return Math.round(value / pdfStore.gridSize) * pdfStore.gridSize
+    if (!drawingStore.snapToGrid) return value
+    return Math.round(value / drawingStore.gridSize) * drawingStore.gridSize
   }
 
   const startDrag = (event: MouseEvent) => {
-    if (!pdfStore.imagePreview) return
+    if (!editorStore.imagePreview) return
 
     isDragging.value = true
     dragStartX.value = event.clientX
     dragStartY.value = event.clientY
-    imageStartX.value = pdfStore.imagePreview.x
-    imageStartY.value = pdfStore.imagePreview.y
+    imageStartX.value = editorStore.imagePreview.x
+    imageStartY.value = editorStore.imagePreview.y
 
     document.addEventListener('mousemove', onDrag)
     document.addEventListener('mouseup', stopDrag)
@@ -51,7 +55,7 @@ export function useImagePlacement(canvasRef: any) {
   }
 
   const onDrag = (event: MouseEvent) => {
-    if (!isDragging.value || !pdfStore.imagePreview) return
+    if (!isDragging.value || !editorStore.imagePreview) return
 
     const deltaX = event.clientX - dragStartX.value
     const deltaY = event.clientY - dragStartY.value
@@ -60,12 +64,12 @@ export function useImagePlacement(canvasRef: any) {
     let newY = imageStartY.value + deltaY
 
     // Apply snap to grid
-    if (pdfStore.snapToGrid) {
+    if (drawingStore.snapToGrid) {
       newX = snapToGridValue(newX)
       newY = snapToGridValue(newY)
     }
 
-    pdfStore.updateImagePreviewPosition(newX, newY)
+    editorStore.updateImagePreviewPosition(newX, newY)
   }
 
   const stopDrag = () => {
@@ -75,16 +79,16 @@ export function useImagePlacement(canvasRef: any) {
   }
 
   const startResize = (event: MouseEvent, handle: 'nw' | 'ne' | 'sw' | 'se') => {
-    if (!pdfStore.imagePreview) return
+    if (!editorStore.imagePreview) return
 
     isResizing.value = true
     resizeHandle.value = handle
     resizeStartX.value = event.clientX
     resizeStartY.value = event.clientY
-    imageStartX.value = pdfStore.imagePreview.x
-    imageStartY.value = pdfStore.imagePreview.y
-    imageStartWidth.value = pdfStore.imagePreview.width
-    imageStartHeight.value = pdfStore.imagePreview.height
+    imageStartX.value = editorStore.imagePreview.x
+    imageStartY.value = editorStore.imagePreview.y
+    imageStartWidth.value = editorStore.imagePreview.width
+    imageStartHeight.value = editorStore.imagePreview.height
 
     document.addEventListener('mousemove', onResize)
     document.addEventListener('mouseup', stopResize)
@@ -92,7 +96,7 @@ export function useImagePlacement(canvasRef: any) {
   }
 
   const onResize = (event: MouseEvent) => {
-    if (!isResizing.value || !pdfStore.imagePreview) return
+    if (!isResizing.value || !editorStore.imagePreview) return
 
     const deltaX = event.clientX - resizeStartX.value
     const deltaY = event.clientY - resizeStartY.value
@@ -105,7 +109,7 @@ export function useImagePlacement(canvasRef: any) {
     // Calculate aspect ratio
     const aspectRatio = imageStartWidth.value / imageStartHeight.value
 
-    if (pdfStore.imagePreview.maintainAspectRatio) {
+    if (editorStore.imagePreview.maintainAspectRatio) {
       // Maintain aspect ratio - use the larger delta
       switch (resizeHandle.value) {
         case 'se': // Bottom-right corner
@@ -160,15 +164,15 @@ export function useImagePlacement(canvasRef: any) {
     }
 
     // Apply snap to grid
-    if (pdfStore.snapToGrid) {
+    if (drawingStore.snapToGrid) {
       newWidth = snapToGridValue(newWidth)
       newHeight = snapToGridValue(newHeight)
       newX = snapToGridValue(newX)
       newY = snapToGridValue(newY)
     }
 
-    pdfStore.updateImagePreviewSize(newWidth, newHeight)
-    pdfStore.updateImagePreviewPosition(newX, newY)
+    editorStore.updateImagePreviewSize(newWidth, newHeight)
+    editorStore.updateImagePreviewPosition(newX, newY)
   }
 
   const stopResize = () => {
@@ -179,20 +183,20 @@ export function useImagePlacement(canvasRef: any) {
   }
 
   const confirmImagePlacement = async () => {
-    if (!pdfStore.imagePreview || !pdfStore.activeDocument?.arrayBuffer) return
+    if (!editorStore.imagePreview || !documentStore.activeDocument?.arrayBuffer) return
 
     try {
       // Save snapshot before making changes
-      pdfStore.saveSnapshot()
+      editorStore.saveSnapshot()
 
       const { PDFDocument: PDFLib } = await import('pdf-lib')
-      const pdfDoc = await PDFLib.load(pdfStore.activeDocument.arrayBuffer)
+      const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer)
       const pages = pdfDoc.getPages()
-      const currentPageIndex = pdfStore.activeDocument.currentPage - 1
+      const currentPageIndex = documentStore.activeDocument.currentPage - 1
       const page = pages[currentPageIndex]
 
       // Load the image
-      const imageFile = pdfStore.imagePreview.file
+      const imageFile = editorStore.imagePreview.file
       let imageBytes = await imageFile.arrayBuffer()
 
       // If flipped, we need to apply the transformation to the image
@@ -201,7 +205,7 @@ export function useImagePlacement(canvasRef: any) {
         const img = new Image()
         await new Promise((resolve) => {
           img.onload = resolve
-          img.src = pdfStore.imagePreview?.dataUrl || ''
+          img.src = editorStore.imagePreview?.dataUrl || ''
         })
 
         const canvas = document.createElement('canvas')
@@ -251,22 +255,22 @@ export function useImagePlacement(canvasRef: any) {
       const scaleFactor = pageHeight / canvasHeight
 
       // PDF coordinates are from bottom-left, canvas is from top-left
-      const pdfX = pdfStore.imagePreview.x * scaleFactor
-      const pdfY = pageHeight - (pdfStore.imagePreview.y * scaleFactor) - (pdfStore.imagePreview.height * scaleFactor)
+      const pdfX = editorStore.imagePreview.x * scaleFactor
+      const pdfY = pageHeight - (editorStore.imagePreview.y * scaleFactor) - (editorStore.imagePreview.height * scaleFactor)
 
       page.drawImage(image, {
         x: pdfX,
         y: pdfY,
-        width: pdfStore.imagePreview.width * scaleFactor,
-        height: pdfStore.imagePreview.height * scaleFactor
+        width: editorStore.imagePreview.width * scaleFactor,
+        height: editorStore.imagePreview.height * scaleFactor
       })
 
       const pdfBytes = await pdfDoc.save()
       const newArrayBuffer = pdfBytes.buffer as ArrayBuffer
 
-      pdfStore.activeDocument.arrayBuffer = newArrayBuffer
+      documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
-      pdfStore.addEditAction({
+      editorStore.addEditAction({
         type: 'image',
         page: currentPageIndex + 1,
         data: { fileName: imageFile.name },
@@ -277,8 +281,8 @@ export function useImagePlacement(canvasRef: any) {
       flipHorizontal.value = false
       flipVertical.value = false
 
-      pdfStore.clearImagePreview()
-      pdfStore.triggerPDFReload()
+      editorStore.clearImagePreview()
+      documentStore.triggerPDFReload()
     } catch (error) {
       console.error('Error adding image:', error)
     }
@@ -288,7 +292,7 @@ export function useImagePlacement(canvasRef: any) {
     // Reset flip state
     flipHorizontal.value = false
     flipVertical.value = false
-    pdfStore.clearImagePreview()
+    editorStore.clearImagePreview()
   }
 
   return {

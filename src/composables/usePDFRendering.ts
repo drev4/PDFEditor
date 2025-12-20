@@ -1,9 +1,9 @@
 import { ref, shallowRef } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
 
 export function usePDFRendering() {
-  const pdfStore = usePdfStore()
+  const documentStore = useDocumentStore()
 
   const pdfDoc = shallowRef<any>(null)
   const renderTask = shallowRef<any>(null)
@@ -12,7 +12,7 @@ export function usePDFRendering() {
   const textLayerRef = ref<HTMLDivElement | null>(null)
 
   const loadPDF = async () => {
-    if (!pdfStore.activeDocument?.arrayBuffer) return
+    if (!documentStore.activeDocument?.arrayBuffer) return
 
     // Clean up previous document
     if (pdfDoc.value) {
@@ -36,7 +36,7 @@ export function usePDFRendering() {
 
     try {
       // Create a copy of the ArrayBuffer to avoid detached buffer issues
-      const originalBuffer = pdfStore.activeDocument.arrayBuffer
+      const originalBuffer = documentStore.activeDocument.arrayBuffer
       const bufferCopy = originalBuffer.slice(0)
 
       const loadingTask = pdfjsLib.getDocument({
@@ -45,7 +45,7 @@ export function usePDFRendering() {
 
       const pdf = await loadingTask.promise
       pdfDoc.value = pdf
-      pdfStore.updateDocumentPages(pdfStore.activeDocument.id, pdf.numPages)
+      documentStore.updateDocumentPages(documentStore.activeDocument.id, pdf.numPages)
 
       await renderPage()
     } catch (error) {
@@ -56,7 +56,7 @@ export function usePDFRendering() {
 
   const renderPage = async () => {
     if (!pdfDoc.value || !canvasRef.value) return
-    if (!pdfStore.activeDocument) return
+    if (!documentStore.activeDocument) return
 
     // Cancel previous render task if exists
     if (renderTask.value) {
@@ -69,9 +69,9 @@ export function usePDFRendering() {
     }
 
     try {
-      const currentPage = pdfStore.activeDocument.currentPage
-      const scale = pdfStore.activeDocument.scale
-      const rotation = pdfStore.activeDocument.rotation
+      const currentPage = documentStore.activeDocument.currentPage
+      const scale = documentStore.activeDocument.scale
+      const rotation = documentStore.activeDocument.rotation
 
       const page = await pdfDoc.value.getPage(currentPage)
       const canvas = canvasRef.value
@@ -105,7 +105,7 @@ export function usePDFRendering() {
 
   const renderTextLayer = async () => {
     if (!textLayerRef.value || !pdfDoc.value || !canvasRef.value) return
-    if (!pdfStore.activeDocument) return
+    if (!documentStore.activeDocument) return
 
     const textLayerDiv = textLayerRef.value
     const mainCanvas = canvasRef.value
@@ -114,12 +114,12 @@ export function usePDFRendering() {
     textLayerDiv.innerHTML = ''
 
     try {
-      const page = await pdfDoc.value.getPage(pdfStore.activeDocument.currentPage)
+      const page = await pdfDoc.value.getPage(documentStore.activeDocument.currentPage)
       const textContent = await page.getTextContent()
 
       // Get viewport at base scale to get correct height
       const baseViewport = page.getViewport({ scale: 1.0 })
-      const currentScale = pdfStore.activeDocument.scale
+      const currentScale = documentStore.activeDocument.scale
 
       // Set text layer dimensions to match canvas exactly
       textLayerDiv.style.width = `${mainCanvas.width}px`

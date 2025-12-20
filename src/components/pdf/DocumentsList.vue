@@ -5,17 +5,17 @@
         Documents
       </h3>
       <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-semibold">
-        {{ pdfStore.documents.length }}
+        {{ documentStore.documents.length }}
       </span>
     </div>
     <div class="space-y-3">
       <div
-        v-for="doc in pdfStore.documents"
+        v-for="doc in documentStore.documents"
         :key="doc.id"
-        @click="pdfStore.setActiveDocument(doc.id)"
+        @click="documentStore.setActiveDocument(doc.id)"
         :class="[
           'group p-4 rounded-xl cursor-pointer transition-all duration-200',
-          doc.id === pdfStore.activeDocumentId
+          doc.id === documentStore.activeDocumentId
             ? 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg scale-105'
             : 'bg-gray-50 hover:bg-gray-100 hover:shadow-md'
         ]"
@@ -23,13 +23,13 @@
         <div class="flex items-start gap-3">
           <div :class="[
             'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-            doc.id === pdfStore.activeDocumentId
+            doc.id === documentStore.activeDocumentId
               ? 'bg-white/20'
               : 'bg-red-100'
           ]">
             <i :class="[
               'pi pi-file-pdf text-xl',
-              doc.id === pdfStore.activeDocumentId
+              doc.id === documentStore.activeDocumentId
                 ? 'text-white'
                 : 'text-red-500'
             ]"></i>
@@ -37,7 +37,7 @@
           <div class="flex-1 min-w-0">
             <p :class="[
               'text-sm font-semibold truncate',
-              doc.id === pdfStore.activeDocumentId
+              doc.id === documentStore.activeDocumentId
                 ? 'text-white'
                 : 'text-gray-900'
             ]">
@@ -45,7 +45,7 @@
             </p>
             <p :class="[
               'text-xs mt-1',
-              doc.id === pdfStore.activeDocumentId
+              doc.id === documentStore.activeDocumentId
                 ? 'text-blue-100'
                 : 'text-gray-500'
             ]">
@@ -53,9 +53,9 @@
             </p>
           </div>
           <Button
-            v-if="doc.id === pdfStore.activeDocumentId"
+            v-if="doc.id === documentStore.activeDocumentId"
             icon="pi pi-times"
-            @click.stop="pdfStore.closeDocument(doc.id)"
+            @click.stop="documentStore.closeDocument(doc.id)"
             text
             rounded
             severity="secondary"
@@ -70,9 +70,9 @@
 
 <script setup lang="ts">
 import Button from 'primevue/button'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
 
-const pdfStore = usePdfStore()
+const documentStore = useDocumentStore()
 </script>
 
 <style scoped>

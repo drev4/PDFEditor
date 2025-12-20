@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted, type Ref } from 'vue'
 
 export function useToolbarDrag(toolbarRef: Ref<HTMLElement | null>) {
-  const position = ref({ x: 80, y: 150 })
+  const position = ref({ x: 350, y: 150 })
   const isDragging = ref(false)
   const dragOffset = ref({ x: 0, y: 0 })
 

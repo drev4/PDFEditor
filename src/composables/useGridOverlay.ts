@@ -1,7 +1,7 @@
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDrawingStore } from '@/stores/drawing.store'
 
 export function useGridOverlay(canvasRef: any, gridCanvasRef: any) {
-  const pdfStore = usePdfStore()
+  const drawingStore = useDrawingStore()
 
   const drawGrid = () => {
     if (!gridCanvasRef.value || !canvasRef.value) return
@@ -20,9 +20,9 @@ export function useGridOverlay(canvasRef: any, gridCanvasRef: any) {
     ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height)
 
     // If grid is disabled, just clear and return
-    if (!pdfStore.gridEnabled) return
+    if (!drawingStore.gridEnabled) return
 
-    const gridSize = pdfStore.gridSize
+    const gridSize = drawingStore.gridSize
 
     // Draw grid lines
     ctx.strokeStyle = 'rgba(200, 200, 200, 0.3)'

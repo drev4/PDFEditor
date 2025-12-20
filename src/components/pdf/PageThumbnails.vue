@@ -6,7 +6,7 @@
           Pages
         </h3>
         <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full font-semibold">
-          {{ pdfStore.activeDocument?.numPages || 0 }}
+          {{ documentStore.activeDocument?.numPages || 0 }}
         </span>
       </div>
     </div>
@@ -82,14 +82,14 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue'
 import ProgressSpinner from 'primevue/progressspinner'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
 import { useThumbnails } from '@/composables/useThumbnails'
 
 const props = defineProps<{
   pdfDoc: any
 }>()
 
-const pdfStore = usePdfStore()
+const documentStore = useDocumentStore()
 const { generateThumbnail } = useThumbnails()
 
 const thumbnails = ref<Map<number, string>>(new Map())
@@ -99,17 +99,17 @@ const isLoading = ref(false)
 const draggedPage = ref<number | null>(null)
 const dropTargetPage = ref<number | null>(null)
 
-const totalPages = computed(() => pdfStore.activeDocument?.numPages || 0)
-const currentPage = computed(() => pdfStore.activeDocument?.currentPage || 1)
+const totalPages = computed(() => documentStore.activeDocument?.numPages || 0)
+const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
 
 // Page order - initially just sequential
 const pageOrder = computed(() => {
-  if (!pdfStore.activeDocument) return []
-  return pdfStore.activeDocument.pageOrder || Array.from({ length: totalPages.value }, (_, i) => i + 1)
+  if (!documentStore.activeDocument) return []
+  return documentStore.activeDocument.pageOrder || Array.from({ length: totalPages.value }, (_, i) => i + 1)
 })
 
 const goToPage = (pageNum: number) => {
-  pdfStore.setCurrentPage(pageNum)
+  documentStore.setCurrentPage(pageNum)
 }
 
 // Drag and drop handlers
@@ -151,7 +151,7 @@ const onDrop = (event: DragEvent, targetPageNum: number) => {
   currentOrder.splice(targetIndex, 0, removed)
 
   // Update store
-  pdfStore.updatePageOrder(currentOrder)
+  documentStore.updatePageOrder(currentOrder)
 
   // Clear drop target
   dropTargetPage.value = null
@@ -215,7 +215,7 @@ const loadThumbnails = async () => {
 
 // Watch for active document ID changes AND pdfDoc availability
 watch(
-  [() => pdfStore.activeDocument?.id, () => props.pdfDoc],
+  [() => documentStore.activeDocument?.id, () => props.pdfDoc],
   ([newId, newPdfDoc]) => {
     if (newId && newPdfDoc) {
       // Document changed or PDF loaded, wait a bit for PDF to fully load, then reload thumbnails
@@ -231,7 +231,7 @@ watch(
 
 onMounted(() => {
   // Initial load if pdfDoc is already available
-  if (props.pdfDoc && pdfStore.activeDocument) {
+  if (props.pdfDoc && documentStore.activeDocument) {
     setTimeout(() => {
       loadThumbnails()
     }, 300)

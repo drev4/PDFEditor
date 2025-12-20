@@ -1,18 +1,20 @@
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
+import { useSearchStore } from '@/stores/search.store'
 
 export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) {
-  const pdfStore = usePdfStore()
+  const documentStore = useDocumentStore()
+  const searchStore = useSearchStore()
 
   const searchTextInPDF = async () => {
-    if (!pdfDoc.value || !pdfStore.searchQuery) {
-      pdfStore.setSearchMatches([])
-      pdfStore.setIsSearching(false)
+    if (!pdfDoc.value || !searchStore.searchQuery) {
+      searchStore.setSearchMatches([])
+      searchStore.setIsSearching(false)
       return
     }
 
     try {
       const matches: any[] = []
-      const query = pdfStore.searchQuery.toLowerCase()
+      const query = searchStore.searchQuery.toLowerCase()
 
       // Search in all pages - use scale 1.0 to get base coordinates
       for (let pageNum = 1; pageNum <= pdfDoc.value.numPages; pageNum++) {
@@ -48,19 +50,19 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
         })
       }
 
-      pdfStore.setSearchMatches(matches)
-      pdfStore.setIsSearching(false)
+      searchStore.setSearchMatches(matches)
+      searchStore.setIsSearching(false)
 
       // Draw highlights for current page
       await drawSearchHighlights()
     } catch (error) {
       console.error('Error searching text:', error)
-      pdfStore.setIsSearching(false)
+      searchStore.setIsSearching(false)
     }
   }
 
   const drawSearchHighlights = async () => {
-    if (!searchCanvasRef.value || !canvasRef.value || !pdfStore.activeDocument) return
+    if (!searchCanvasRef.value || !canvasRef.value || !documentStore.activeDocument) return
 
     const searchCanvas = searchCanvasRef.value
     const mainCanvas = canvasRef.value
@@ -75,17 +77,17 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
     ctx.clearRect(0, 0, searchCanvas.width, searchCanvas.height)
 
     // Draw highlights for matches on current page
-    const currentPageMatches = pdfStore.searchMatches.filter(
-      (match: any) => match.pageIndex === pdfStore.activeDocument!.currentPage - 1
+    const currentPageMatches = searchStore.searchMatches.filter(
+      (match: any) => match.pageIndex === documentStore.activeDocument!.currentPage - 1
     )
 
     if (!pdfDoc.value) return
 
     // Get the current scale to apply to base coordinates
-    const currentScale = pdfStore.activeDocument.scale
+    const currentScale = documentStore.activeDocument.scale
 
     currentPageMatches.forEach((match: any) => {
-      const isCurrentMatch = pdfStore.searchMatches.indexOf(match) === pdfStore.currentMatchIndex
+      const isCurrentMatch = searchStore.searchMatches.indexOf(match) === searchStore.currentMatchIndex
 
       // Highlight color: yellow for all matches, orange for current match
       ctx.fillStyle = isCurrentMatch ? 'rgba(255, 165, 0, 0.4)' : 'rgba(255, 255, 0, 0.3)'

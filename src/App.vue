@@ -19,7 +19,7 @@
 
           <!-- Actions -->
           <div class="flex items-center gap-3">
-            <FileUploader v-if="!pdfStore.activeDocument" />
+            <FileUploader v-if="!documentStore.activeDocument" />
             <template v-else>
               <FileUploader />
               <Button
@@ -40,7 +40,7 @@
     <main class="flex-1 flex overflow-hidden">
       <!-- Welcome Screen - Show when no documents -->
       <div
-        v-if="!pdfStore.hasDocuments"
+        v-if="!documentStore.hasDocuments"
         class="flex-1 flex items-center justify-center p-8"
       >
         <div class="max-w-2xl w-full">
@@ -130,7 +130,7 @@
           </div>
 
           <!-- Right Sidebar - Editor Tools -->
-          <aside v-if="pdfStore.activeDocument">
+          <aside v-if="documentStore.activeDocument">
             <PDFEditor />
           </aside>
         </div>
@@ -139,7 +139,7 @@
 
     <!-- Loading Overlay -->
     <div
-      v-if="pdfStore.isLoading"
+      v-if="documentStore.isLoading"
       class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
     >
       <div class="bg-white rounded-2xl p-8 shadow-2xl max-w-sm text-center">
@@ -162,25 +162,25 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Toast from 'primevue/toast'
 import TabView from 'primevue/tabview'
 import TabPanel from 'primevue/tabpanel'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import DocumentsList from '@/components/pdf/DocumentsList.vue'
 import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
 
-const pdfStore = usePdfStore()
+const documentStore = useDocumentStore()
 const toast = useToast()
 const pdfViewerRef = ref<InstanceType<typeof PDFViewer> | null>(null)
 
 const closeDocument = () => {
-  if (pdfStore.activeDocumentId) {
-    pdfStore.closeDocument(pdfStore.activeDocumentId)
+  if (documentStore.activeDocumentId) {
+    documentStore.closeDocument(documentStore.activeDocumentId)
   }
 }
 
 // Watch for errors
-watch(() => pdfStore.error, (error) => {
+watch(() => documentStore.error, (error) => {
   if (error) {
     toast.add({
       severity: 'error',
@@ -188,7 +188,7 @@ watch(() => pdfStore.error, (error) => {
       detail: error,
       life: 3000
     })
-    pdfStore.clearError()
+    documentStore.clearError()
   }
 })
 </script>

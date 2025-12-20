@@ -16,15 +16,15 @@
 
 <script setup lang="ts">
 import FileUpload from 'primevue/fileupload'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
 
-const pdfStore = usePdfStore()
+const documentStore = useDocumentStore()
 
 const handleFileSelect = async (event: any) => {
   const file = event.files[0]
   if (file && file.type === 'application/pdf') {
     try {
-      await pdfStore.loadPDF(file)
+      await documentStore.loadPDF(file)
     } catch (error) {
       console.error('Error loading PDF:', error)
     }

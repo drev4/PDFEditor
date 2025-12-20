@@ -1,7 +1,7 @@
 <template>
   <div class="pdf-viewer-container h-full flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
     <!-- No PDF Loaded State -->
-    <div v-if="!pdfStore.activeDocument" class="flex items-center justify-center h-full">
+    <div v-if="!documentStore.activeDocument" class="flex items-center justify-center h-full">
       <div class="text-center">
         <i class="pi pi-file-pdf text-6xl text-gray-400 mb-4"></i>
         <p class="text-gray-600 text-lg">No PDF loaded</p>
@@ -26,7 +26,7 @@
       <div class="flex-1 overflow-auto p-4 flex justify-center" ref="viewportRef">
         <div class="pdf-document-container">
           <!-- Drawing Toolbar Overlay -->
-          <DrawingToolbar v-if="pdfStore.activeDocument" />
+          <DrawingToolbar v-if="documentStore.activeDocument" />
 
           <div class="pdf-canvas-wrapper" :style="{ transform: `rotate(${rotation}deg)` }">
             <!-- Grid Overlay -->
@@ -55,17 +55,17 @@
 
             <!-- Image Preview Overlay -->
             <div
-              v-if="pdfStore.imagePreview"
+              v-if="editorStore.imagePreview"
               class="image-preview-container"
               :style="{
-                left: `${pdfStore.imagePreview.x}px`,
-                top: `${pdfStore.imagePreview.y}px`,
-                width: `${pdfStore.imagePreview.width}px`,
-                height: `${pdfStore.imagePreview.height}px`
+                left: `${editorStore.imagePreview.x}px`,
+                top: `${editorStore.imagePreview.y}px`,
+                width: `${editorStore.imagePreview.width}px`,
+                height: `${editorStore.imagePreview.height}px`
               }"
             >
               <img
-                :src="pdfStore.imagePreview.dataUrl"
+                :src="editorStore.imagePreview.dataUrl"
                 class="image-preview"
                 :style="{
                   transform: `scaleX(${flipHorizontal ? -1 : 1}) scaleY(${flipVertical ? -1 : 1})`
@@ -83,10 +83,10 @@
 
           <!-- Image Placement Controls -->
           <ImageControls
-            v-if="pdfStore.imagePreview"
-            :maintain-aspect-ratio="pdfStore.imagePreview.maintainAspectRatio"
-            @toggle-aspect-ratio="pdfStore.toggleMaintainAspectRatio()"
-            @reset-size="pdfStore.resetImageSize()"
+            v-if="editorStore.imagePreview"
+            :maintain-aspect-ratio="editorStore.imagePreview.maintainAspectRatio"
+            @toggle-aspect-ratio="editorStore.toggleMaintainAspectRatio()"
+            @reset-size="editorStore.resetImageSize()"
             @flip-horizontal="toggleFlipHorizontal"
             @flip-vertical="toggleFlipVertical"
             @confirm="confirmImagePlacement"
@@ -101,7 +101,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
-import { usePdfStore } from '@/stores/pdfStore'
+import { useDocumentStore } from '@/stores/document.store'
+import { useDrawingStore } from '@/stores/drawing.store'
+import { useEditorStore } from '@/stores/editor.store'
+import { useSearchStore } from '@/stores/search.store'
 import { usePDFRendering } from '@/composables/usePDFRendering'
 import { usePDFSearch } from '@/composables/usePDFSearch'
 import { useImagePlacement } from '@/composables/useImagePlacement'
@@ -116,7 +119,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).href
 
-const pdfStore = usePdfStore()
+const documentStore = useDocumentStore()
+const drawingStore = useDrawingStore()
+const editorStore = useEditorStore()
+const searchStore = useSearchStore()
 
 // Use composables
 const {
@@ -151,34 +157,34 @@ const {
 const { drawGrid } = useGridOverlay(canvasRef, gridCanvasRef)
 
 // Computed properties
-const currentPage = computed(() => pdfStore.activeDocument?.currentPage || 1)
-const numPages = computed(() => pdfStore.activeDocument?.numPages || 0)
-const scale = computed(() => pdfStore.activeDocument?.scale || 1.5)
-const rotation = computed(() => pdfStore.activeDocument?.rotation || 0)
+const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
+const numPages = computed(() => documentStore.activeDocument?.numPages || 0)
+const scale = computed(() => documentStore.activeDocument?.scale || 1.5)
+const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
 
 // Navigation methods
 const nextPage = () => {
   if (currentPage.value < numPages.value) {
-    pdfStore.setCurrentPage(currentPage.value + 1)
+    documentStore.setCurrentPage(currentPage.value + 1)
   }
 }
 
 const previousPage = () => {
   if (currentPage.value > 1) {
-    pdfStore.setCurrentPage(currentPage.value - 1)
+    documentStore.setCurrentPage(currentPage.value - 1)
   }
 }
 
 const zoomIn = () => {
-  pdfStore.setScale(scale.value + 0.25)
+  documentStore.setScale(scale.value + 0.25)
 }
 
 const zoomOut = () => {
-  pdfStore.setScale(scale.value - 0.25)
+  documentStore.setScale(scale.value - 0.25)
 }
 
 const rotate = () => {
-  pdfStore.setRotation(rotation.value + 90)
+  documentStore.setRotation(rotation.value + 90)
 }
 
 // Render page with all overlays
@@ -190,14 +196,14 @@ const renderPageWithOverlays = async () => {
     // Render text layer for text selection
     await renderTextLayer()
     // Draw search highlights if there are active search results
-    if (pdfStore.searchMatches.length > 0) {
+    if (searchStore.searchMatches.length > 0) {
       await drawSearchHighlights()
     }
   }
 }
 
 // Watchers
-watch(() => pdfStore.activeDocument?.id, async (newId, oldId) => {
+watch(() => documentStore.activeDocument?.id, async (newId, oldId) => {
   if (newId !== oldId) {
     await loadPDF()
   }
@@ -210,12 +216,12 @@ watch([currentPage, scale, rotation], async () => {
 })
 
 // Watch for PDF reload trigger (when PDF is edited)
-watch(() => pdfStore.pdfReloadTrigger, async () => {
+watch(() => documentStore.pdfReloadTrigger, async () => {
   await loadPDF()
 })
 
 // Watch for search query changes
-watch(() => pdfStore.searchQuery, async (newQuery) => {
+watch(() => searchStore.searchQuery, async (newQuery) => {
   if (newQuery && pdfDoc.value) {
     await searchTextInPDF()
   } else {
@@ -224,25 +230,25 @@ watch(() => pdfStore.searchQuery, async (newQuery) => {
 })
 
 // Watch for current match index changes to update highlights
-watch(() => pdfStore.currentMatchIndex, async () => {
-  if (pdfStore.searchMatches.length > 0) {
+watch(() => searchStore.currentMatchIndex, async () => {
+  if (searchStore.searchMatches.length > 0) {
     await drawSearchHighlights()
 
     // Navigate to page if current match is on different page
-    const currentMatch = pdfStore.searchMatches[pdfStore.currentMatchIndex]
+    const currentMatch = searchStore.searchMatches[searchStore.currentMatchIndex]
     if (currentMatch && currentMatch.pageIndex !== currentPage.value - 1) {
-      pdfStore.setCurrentPage(currentMatch.pageIndex + 1)
+      documentStore.setCurrentPage(currentMatch.pageIndex + 1)
     }
   }
 })
 
 // Watch for grid enabled changes to update grid overlay immediately
-watch(() => pdfStore.gridEnabled, () => {
+watch(() => drawingStore.gridEnabled, () => {
   drawGrid()
 })
 
 // Watch for snap to grid changes
-watch(() => pdfStore.snapToGrid, () => {
+watch(() => drawingStore.snapToGrid, () => {
   // Grid visibility doesn't need to change, but we might want to provide visual feedback
 })
 
