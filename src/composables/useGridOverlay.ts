@@ -4,7 +4,7 @@ export function useGridOverlay(canvasRef: any, gridCanvasRef: any) {
   const pdfStore = usePdfStore()
 
   const drawGrid = () => {
-    if (!gridCanvasRef.value || !canvasRef.value || !pdfStore.gridEnabled) return
+    if (!gridCanvasRef.value || !canvasRef.value) return
 
     const gridCanvas = gridCanvasRef.value
     const mainCanvas = canvasRef.value
@@ -16,7 +16,11 @@ export function useGridOverlay(canvasRef: any, gridCanvasRef: any) {
     const ctx = gridCanvas.getContext('2d')
     if (!ctx) return
 
+    // Always clear the canvas first
     ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height)
+
+    // If grid is disabled, just clear and return
+    if (!pdfStore.gridEnabled) return
 
     const gridSize = pdfStore.gridSize
 

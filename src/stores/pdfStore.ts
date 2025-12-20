@@ -25,15 +25,19 @@ export const usePdfStore = defineStore('pdf', () => {
   } | null>(null)
 
   // Grid settings
-  const gridEnabled = ref(true)
+  const gridEnabled = ref(false)
   const gridSize = ref(20) // Size of each grid cell in pixels (smaller = more precision)
-  const snapToGrid = ref(true)
+  const snapToGrid = ref(false)
 
   // Search state
   const searchQuery = ref('')
   const searchMatches = ref<SearchMatch[]>([])
   const currentMatchIndex = ref(-1)
   const isSearching = ref(false)
+
+  // Drawing tools state
+  const activeDrawingTool = ref<string | null>('cursor')
+  const drawingToolbarPosition = ref({ x: 80, y: 150 })
 
   // Getters
   const activeDocument = computed(() => {
@@ -263,6 +267,14 @@ export const usePdfStore = defineStore('pdf', () => {
     }
   }
 
+  const setActiveDrawingTool = (toolId: string | null) => {
+    activeDrawingTool.value = toolId
+  }
+
+  const updateDrawingToolbarPosition = (position: { x: number, y: number }) => {
+    drawingToolbarPosition.value = position
+  }
+
   return {
     // State
     documents,
@@ -279,6 +291,8 @@ export const usePdfStore = defineStore('pdf', () => {
     searchMatches,
     currentMatchIndex,
     isSearching,
+    activeDrawingTool,
+    drawingToolbarPosition,
 
     // Getters
     activeDocument,
@@ -313,7 +327,9 @@ export const usePdfStore = defineStore('pdf', () => {
     setIsSearching,
     toggleGrid,
     toggleSnapToGrid,
-    updatePageOrder
+    updatePageOrder,
+    setActiveDrawingTool,
+    updateDrawingToolbarPosition
   }
 }, {
   persist: false

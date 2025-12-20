@@ -25,10 +25,12 @@
       <!-- PDF Canvas Container -->
       <div class="flex-1 overflow-auto p-4 flex justify-center" ref="viewportRef">
         <div class="pdf-document-container">
+          <!-- Drawing Toolbar Overlay -->
+          <DrawingToolbar v-if="pdfStore.activeDocument" />
+
           <div class="pdf-canvas-wrapper" :style="{ transform: `rotate(${rotation}deg)` }">
             <!-- Grid Overlay -->
             <canvas
-              v-if="pdfStore.gridEnabled"
               ref="gridCanvasRef"
               class="grid-overlay"
             ></canvas>
@@ -106,6 +108,7 @@ import { useImagePlacement } from '@/composables/useImagePlacement'
 import { useGridOverlay } from '@/composables/useGridOverlay'
 import PDFToolbar from './PDFToolbar.vue'
 import ImageControls from './ImageControls.vue'
+import DrawingToolbar from './DrawingToolbar.vue'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -231,6 +234,16 @@ watch(() => pdfStore.currentMatchIndex, async () => {
       pdfStore.setCurrentPage(currentMatch.pageIndex + 1)
     }
   }
+})
+
+// Watch for grid enabled changes to update grid overlay immediately
+watch(() => pdfStore.gridEnabled, () => {
+  drawGrid()
+})
+
+// Watch for snap to grid changes
+watch(() => pdfStore.snapToGrid, () => {
+  // Grid visibility doesn't need to change, but we might want to provide visual feedback
 })
 
 // Expose pdfDoc for parent components (like PageThumbnails)
