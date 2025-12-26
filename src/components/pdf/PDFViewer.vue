@@ -26,7 +26,10 @@
       <div class="flex-1 overflow-auto p-4 flex justify-center" ref="viewportRef">
         <div class="pdf-document-container">
           <!-- Drawing Toolbar Overlay -->
-          <DrawingToolbar v-if="documentStore.activeDocument" />
+          <DrawingToolbar
+            v-if="documentStore.activeDocument"
+            @select-tool="handleToolSelection"
+          />
 
           <div class="pdf-canvas-wrapper" :style="{ transform: `rotate(${rotation}deg)` }">
             <!-- Grid Overlay -->
@@ -81,6 +84,34 @@
             </div>
           </div>
 
+          <!-- Text Preview Overlay -->
+          <div
+            v-if="editorStore.textPreview"
+            class="text-preview-container"
+            :style="{
+              left: `${editorStore.textPreview.x}px`,
+              top: `${editorStore.textPreview.y}px`
+            }"
+            @mousedown="startTextDrag"
+          >
+            <input
+              ref="textPreviewInput"
+              type="text"
+              class="text-preview-input"
+              :value="editorStore.textPreview.text"
+              @input="handleTextInput"
+              @mousedown.stop
+              @click.stop
+              placeholder="Escribe aquí..."
+              :style="{
+                fontSize: `${editorStore.textPreview.fontSize}px`,
+                color: editorStore.textPreview.color,
+                fontWeight: editorStore.textPreview.isBold ? 'bold' : 'normal',
+                fontStyle: editorStore.textPreview.isItalic ? 'italic' : 'normal'
+              }"
+            />
+          </div>
+
           <!-- Image Placement Controls -->
           <ImageControls
             v-if="editorStore.imagePreview"
@@ -92,14 +123,38 @@
             @confirm="confirmImagePlacement"
             @cancel="cancelImagePlacement"
           />
+
+          <!-- Text Placement Controls -->
+          <TextControls
+            v-if="editorStore.textPreview"
+            :text="editorStore.textPreview.text"
+            :font-size="editorStore.textPreview.fontSize"
+            :color="editorStore.textPreview.color"
+            :is-bold="editorStore.textPreview.isBold"
+            :is-italic="editorStore.textPreview.isItalic"
+            @update-text="editorStore.updateTextPreviewText($event)"
+            @update-font-size="editorStore.updateTextPreviewFontSize($event)"
+            @update-color="editorStore.updateTextPreviewColor($event)"
+            @toggle-bold="editorStore.toggleTextBold()"
+            @toggle-italic="editorStore.toggleTextItalic()"
+            @confirm="confirmTextPlacement"
+            @cancel="cancelTextPlacement"
+          />
         </div>
       </div>
+
+      <!-- Search Spotlight -->
+      <SearchSpotlight
+        :is-visible="showSearchSpotlight"
+        @close="showSearchSpotlight = false"
+        @search="performSpotlightSearch"
+      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { useDocumentStore } from '@/stores/document.store'
 import { useDrawingStore } from '@/stores/drawing.store'
@@ -108,10 +163,13 @@ import { useSearchStore } from '@/stores/search.store'
 import { usePDFRendering } from '@/composables/usePDFRendering'
 import { usePDFSearch } from '@/composables/usePDFSearch'
 import { useImagePlacement } from '@/composables/useImagePlacement'
+import { useTextPlacement } from '@/composables/useTextPlacement'
 import { useGridOverlay } from '@/composables/useGridOverlay'
 import PDFToolbar from '../toolbars/PDFToolbar.vue'
 import ImageControls from '../toolbars/ImageControls.vue'
+import TextControls from '../toolbars/TextControls.vue'
 import DrawingToolbar from '../toolbars/DrawingToolbar.vue'
+import SearchSpotlight from '../search/SearchSpotlight.vue'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -154,7 +212,25 @@ const {
   cancelImagePlacement
 } = useImagePlacement(canvasRef)
 
+const {
+  startDrag: startTextDrag,
+  confirmTextPlacement,
+  cancelTextPlacement
+} = useTextPlacement(canvasRef)
+
 const { drawGrid } = useGridOverlay(canvasRef, gridCanvasRef)
+
+// Search spotlight state
+const showSearchSpotlight = ref(false)
+
+// Text preview input ref
+const textPreviewInput = ref<HTMLInputElement | null>(null)
+
+// Handle text input
+const handleTextInput = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  editorStore.updateTextPreviewText(target.value)
+}
 
 // Computed properties
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
@@ -185,6 +261,83 @@ const zoomOut = () => {
 
 const rotate = () => {
   documentStore.setRotation(rotation.value + 90)
+}
+
+// Handle toolbar tool selection
+const handleToolSelection = (toolId: string) => {
+  switch (toolId) {
+    case 'search':
+      showSearchSpotlight.value = true
+      break
+    case 'text':
+      // Create a default text preview at center of canvas
+      const canvasWidth = canvasRef.value?.width || 800
+      const canvasHeight = canvasRef.value?.height || 1000
+      editorStore.setTextPreview({
+        text: '',
+        x: canvasWidth / 2 - 100,
+        y: canvasHeight / 2,
+        fontSize: 16,
+        color: '#000000',
+        isBold: false,
+        isItalic: false
+      })
+      break
+    case 'image':
+      // Trigger file input for image selection
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/*'
+      input.onchange = async (e: Event) => {
+        const target = e.target as HTMLInputElement
+        const file = target.files?.[0]
+        if (!file) return
+
+        const reader = new FileReader()
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string
+          const img = new Image()
+          img.onload = () => {
+            const maxSize = 300
+            let width = img.width
+            let height = img.height
+
+            if (width > maxSize || height > maxSize) {
+              if (width > height) {
+                height = (height / width) * maxSize
+                width = maxSize
+              } else {
+                width = (width / height) * maxSize
+                height = maxSize
+              }
+            }
+
+            editorStore.setImagePreview({
+              dataUrl,
+              file,
+              x: 100,
+              y: 100,
+              width,
+              height,
+              originalWidth: width,
+              originalHeight: height,
+              maintainAspectRatio: true
+            })
+          }
+          img.src = dataUrl
+        }
+        reader.readAsDataURL(file)
+      }
+      input.click()
+      break
+  }
+}
+
+// Handle search from spotlight
+const performSpotlightSearch = async () => {
+  if (pdfDoc.value) {
+    await searchTextInPDF()
+  }
 }
 
 // Render page with all overlays
@@ -250,6 +403,14 @@ watch(() => drawingStore.gridEnabled, () => {
 // Watch for snap to grid changes
 watch(() => drawingStore.snapToGrid, () => {
   // Grid visibility doesn't need to change, but we might want to provide visual feedback
+})
+
+// Watch for text preview creation to focus input
+watch(() => editorStore.textPreview, async (newValue) => {
+  if (newValue) {
+    await nextTick()
+    textPreviewInput.value?.focus()
+  }
 })
 
 // Expose pdfDoc for parent components (like PageThumbnails)
@@ -396,5 +557,37 @@ canvas {
   bottom: -6px;
   right: -6px;
   cursor: se-resize;
+}
+
+.text-preview-container {
+  position: absolute;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px dashed #6366f1;
+  border-radius: 4px;
+  z-index: 10;
+  cursor: move;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  min-width: 150px;
+  font-family: Helvetica, Arial, sans-serif;
+}
+
+.text-preview-container:hover {
+  border-color: #4f46e5;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.text-preview-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: text;
+  padding: 0;
+}
+
+.text-preview-input::placeholder {
+  color: #9ca3af;
 }
 </style>

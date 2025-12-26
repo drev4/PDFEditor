@@ -34,19 +34,15 @@ import { useToolbarDrag } from '@/composables/useToolbarDrag'
 
 // Tool definitions
 const tools = [
-  { id: 'cursor', label: 'Cursor', icon: 'pi pi-arrows-alt' },
-  { id: 'pencil', label: 'Dibujo', icon: 'pi pi-pencil' },
-  { id: 'text', label: 'Texto', icon: 'pi pi-font' },
-  { id: 'line', label: 'Línea', icon: 'pi pi-minus' },
-  { id: 'rectangle', label: 'Rectángulo', icon: 'pi pi-stop' },
-  { id: 'circle', label: 'Círculo', icon: 'pi pi-circle' },
-  { id: 'arrow', label: 'Flecha', icon: 'pi pi-arrow-right' }
+  { id: 'search', label: 'Buscar', icon: 'pi pi-search' },
+  { id: 'text', label: 'Texto', icon: 'pi pi-pencil' },
+  { id: 'image', label: 'Imagen', icon: 'pi pi-image' }
 ]
 
 // State
 const toolbarRef = ref<HTMLElement | null>(null)
 const isCollapsed = ref(true)
-const activeTool = ref('cursor')
+const activeTool = ref<string | null>(null)
 const collapseTimeout = ref<number | null>(null)
 
 // Use drag composable
@@ -69,10 +65,15 @@ const scheduleCollapse = () => {
   }, 200)
 }
 
+// Emits
+const emit = defineEmits<{
+  'select-tool': [toolId: string]
+}>()
+
 // Tool selection
 const selectTool = (toolId: string) => {
   activeTool.value = toolId
-  // TODO: Update store when we add functionality
+  emit('select-tool', toolId)
 }
 
 // Cleanup

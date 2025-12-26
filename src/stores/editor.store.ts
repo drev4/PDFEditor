@@ -18,6 +18,16 @@ export const useEditorStore = defineStore('editor', () => {
     maintainAspectRatio: boolean
   } | null>(null)
 
+  const textPreview = ref<{
+    text: string
+    x: number
+    y: number
+    fontSize: number
+    color: string
+    isBold: boolean
+    isItalic: boolean
+  } | null>(null)
+
   // Actions
   const addEditAction = (action: EditAction) => {
     editHistory.value.push(action)
@@ -110,10 +120,57 @@ export const useEditorStore = defineStore('editor', () => {
     imagePreview.value = null
   }
 
+  // Text preview actions
+  const setTextPreview = (preview: typeof textPreview.value) => {
+    textPreview.value = preview
+  }
+
+  const updateTextPreviewPosition = (x: number, y: number) => {
+    if (textPreview.value) {
+      textPreview.value.x = x
+      textPreview.value.y = y
+    }
+  }
+
+  const updateTextPreviewText = (text: string) => {
+    if (textPreview.value) {
+      textPreview.value.text = text
+    }
+  }
+
+  const updateTextPreviewFontSize = (fontSize: number) => {
+    if (textPreview.value) {
+      textPreview.value.fontSize = fontSize
+    }
+  }
+
+  const updateTextPreviewColor = (color: string) => {
+    if (textPreview.value) {
+      textPreview.value.color = color
+    }
+  }
+
+  const toggleTextBold = () => {
+    if (textPreview.value) {
+      textPreview.value.isBold = !textPreview.value.isBold
+    }
+  }
+
+  const toggleTextItalic = () => {
+    if (textPreview.value) {
+      textPreview.value.isItalic = !textPreview.value.isItalic
+    }
+  }
+
+  const clearTextPreview = () => {
+    textPreview.value = null
+  }
+
   return {
     // State
     editHistory,
     imagePreview,
+    textPreview,
 
     // Actions
     addEditAction,
@@ -126,7 +183,15 @@ export const useEditorStore = defineStore('editor', () => {
     resetImageSize,
     flipImageHorizontal,
     flipImageVertical,
-    clearImagePreview
+    clearImagePreview,
+    setTextPreview,
+    updateTextPreviewPosition,
+    updateTextPreviewText,
+    updateTextPreviewFontSize,
+    updateTextPreviewColor,
+    toggleTextBold,
+    toggleTextItalic,
+    clearTextPreview
   }
 }, {
   persist: false
