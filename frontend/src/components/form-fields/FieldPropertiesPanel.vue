@@ -1,7 +1,16 @@
 <template>
   <div class="field-properties-panel" v-if="formFieldsStore.selectedField">
     <div class="panel-header">
-      <h3>Propiedades del Campo</h3>
+      <div>
+        <h3>Propiedades del Campo</h3>
+        <!-- Save Status Indicator -->
+        <div class="save-status" v-if="saveStatus !== 'idle'">
+          <i v-if="saveStatus === 'saving'" class="pi pi-spin pi-spinner"></i>
+          <i v-else-if="saveStatus === 'saved'" class="pi pi-check"></i>
+          <i v-else-if="saveStatus === 'error'" class="pi pi-exclamation-triangle"></i>
+          <span>{{ saveStatusText }}</span>
+        </div>
+      </div>
       <button class="close-btn" @click="formFieldsStore.selectField(null)">
         <i class="pi pi-times"></i>
       </button>
@@ -156,8 +165,10 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import { useToast } from 'primevue/usetoast'
 
 const formFieldsStore = useFormFieldsStore()
+const toast = useToast()
 
 // Local form state
 const fieldName = ref('')
@@ -166,8 +177,31 @@ const fieldRequired = ref(false)
 const fieldBorder = ref(true)
 const fieldOptions = ref<string[]>([])
 
+// Save status tracking
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+const saveStatus = ref<SaveStatus>('idle')
+let statusTimeout: ReturnType<typeof setTimeout> | null = null
+
+const saveStatusText = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving': return 'Guardando...'
+    case 'saved': return 'Guardado'
+    case 'error': return 'Error al guardar'
+    default: return ''
+  }
+})
+
+// Debounce timer for auto-save
+let saveTimeout: ReturnType<typeof setTimeout> | null = null
+
 // Watch for selected field changes
 watch(() => formFieldsStore.selectedField, (field) => {
+  // Cancel pending save when switching fields
+  if (saveTimeout) {
+    clearTimeout(saveTimeout)
+    saveTimeout = null
+  }
+
   if (field) {
     fieldName.value = field.name
     fieldLabel.value = field.label
@@ -207,13 +241,57 @@ const getFieldTypeLabel = (type: FieldType) => {
 const updateField = () => {
   if (!formFieldsStore.selectedField) return
 
-  formFieldsStore.updateField(formFieldsStore.selectedField.id, {
+  const fieldId = formFieldsStore.selectedField.id
+
+  // Update local state immediately for responsive UI
+  formFieldsStore.updateField(fieldId, {
     name: fieldName.value,
     label: fieldLabel.value,
     required: fieldRequired.value,
     border: fieldBorder.value,
     options: hasOptions.value ? fieldOptions.value.filter(o => o.trim()) : undefined
   })
+
+  // Clear previous status timeout
+  if (statusTimeout) {
+    clearTimeout(statusTimeout)
+    statusTimeout = null
+  }
+
+  // Show saving status immediately
+  saveStatus.value = 'saving'
+
+  // Debounce server save (wait 1 second after last change)
+  if (saveTimeout) {
+    clearTimeout(saveTimeout)
+  }
+
+  saveTimeout = setTimeout(async () => {
+    try {
+      await formFieldsStore.saveField(fieldId)
+      saveStatus.value = 'saved'
+
+      // Hide "saved" message after 2 seconds
+      statusTimeout = setTimeout(() => {
+        saveStatus.value = 'idle'
+      }, 2000)
+    } catch (error) {
+      console.error('Failed to save field:', error)
+      saveStatus.value = 'error'
+
+      toast.add({
+        severity: 'error',
+        summary: 'Error al guardar',
+        detail: 'No se pudo guardar el campo. Intenta de nuevo.',
+        life: 3000
+      })
+
+      // Hide error status after 3 seconds
+      statusTimeout = setTimeout(() => {
+        saveStatus.value = 'idle'
+      }, 3000)
+    }
+  }, 1000)
 }
 
 const addOption = () => {
@@ -226,9 +304,33 @@ const removeOption = (index: number) => {
   updateField()
 }
 
-const deleteField = () => {
-  if (formFieldsStore.selectedField) {
-    formFieldsStore.deleteField(formFieldsStore.selectedField.id)
+const deleteField = async () => {
+  if (!formFieldsStore.selectedField) return
+
+  // Confirm deletion
+  const fieldName = formFieldsStore.selectedField.label || formFieldsStore.selectedField.name
+  if (!confirm(`¿Eliminar el campo "${fieldName}"?`)) {
+    return
+  }
+
+  try {
+    await formFieldsStore.deleteFieldFromServer(formFieldsStore.selectedField.id)
+
+    toast.add({
+      severity: 'success',
+      summary: 'Campo eliminado',
+      detail: `El campo "${fieldName}" ha sido eliminado`,
+      life: 3000
+    })
+  } catch (error) {
+    console.error('Failed to delete field:', error)
+
+    toast.add({
+      severity: 'error',
+      summary: 'Error al eliminar',
+      detail: 'No se pudo eliminar el campo. Intenta de nuevo.',
+      life: 3000
+    })
   }
 }
 </script>
@@ -257,6 +359,31 @@ const deleteField = () => {
   font-size: 14px;
   font-weight: 600;
   color: #374151;
+}
+
+.save-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.save-status i {
+  font-size: 10px;
+}
+
+.save-status i.pi-check {
+  color: #10b981;
+}
+
+.save-status i.pi-exclamation-triangle {
+  color: #ef4444;
+}
+
+.save-status i.pi-spinner {
+  color: #3b82f6;
 }
 
 .close-btn {

@@ -43,6 +43,8 @@
 import { ref, computed } from 'vue'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
+import { useFormManagement } from '@/composables/useFormManagement'
+import { useToast } from 'primevue/usetoast'
 import FormFieldItem from './FormFieldItem.vue'
 
 const props = defineProps<{
@@ -52,6 +54,8 @@ const props = defineProps<{
 
 const formFieldsStore = useFormFieldsStore()
 const documentStore = useDocumentStore()
+const { autoInitializeForm } = useFormManagement()
+const toast = useToast()
 
 const previewPosition = ref<{ x: number; y: number } | null>(null)
 
@@ -118,7 +122,7 @@ const handleMouseMove = (e: MouseEvent) => {
   }
 }
 
-const handleOverlayClick = (e: MouseEvent) => {
+const handleOverlayClick = async (e: MouseEvent) => {
   if (!formFieldsStore.isAddingField || !formFieldsStore.fieldTypeToAdd) {
     // If not adding, deselect current field
     formFieldsStore.selectField(null)
@@ -136,7 +140,7 @@ const handleOverlayClick = (e: MouseEvent) => {
   const uniqueName = formFieldsStore.generateUniqueFieldName(fieldType)
   const fieldNumber = uniqueName.split('_')[1] || '1'
 
-  formFieldsStore.addField({
+  const newField = formFieldsStore.addField({
     type: fieldType,
     name: uniqueName,
     label: `${getFieldTypeLabel(fieldType)} ${fieldNumber}`,
@@ -151,6 +155,31 @@ const handleOverlayClick = (e: MouseEvent) => {
     },
     options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Opción 1', 'Opción 2'] : undefined
   })
+
+  // Auto-initialize form if needed and save to server
+  try {
+    // Ensure we have a form to save to
+    await autoInitializeForm()
+
+    // Save the new field
+    await formFieldsStore.saveField(newField.id)
+
+    toast.add({
+      severity: 'success',
+      summary: 'Campo agregado',
+      detail: `${getFieldTypeLabel(fieldType)} agregado exitosamente`,
+      life: 2000
+    })
+  } catch (error) {
+    console.error('Failed to save field:', error)
+
+    toast.add({
+      severity: 'error',
+      summary: 'Error al agregar campo',
+      detail: 'No se pudo guardar el campo. Intenta de nuevo.',
+      life: 3000
+    })
+  }
 
   previewPosition.value = null
 }

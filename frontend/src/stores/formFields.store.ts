@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { fieldsService, type CreateFieldData } from '../services/fields'
+import { ApiError } from '../services/api'
+import type { Field } from '../services/forms'
 
 export type FieldType = 'text' | 'textarea' | 'checkbox' | 'radio' | 'dropdown'
 
@@ -31,6 +34,9 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   const selectedFieldId = ref<string | null>(null)
   const isAddingField = ref(false)
   const fieldTypeToAdd = ref<FieldType | null>(null)
+  const currentFormId = ref<string | null>(null)
+  const loading = ref(false)
+  const error = ref<string | null>(null)
 
   // Computed
   const selectedField = computed(() => {
@@ -169,16 +175,183 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     })
   }
 
+  // ============================================================================
+  // SERVER PERSISTENCE METHODS
+  // ============================================================================
+
+  const setCurrentForm = (formId: string | null) => {
+    currentFormId.value = formId
+  }
+
+  const loadFieldsFromForm = (formFields: Field[]) => {
+    // Convert backend Field format to FormField format
+    fields.value = formFields.map(field => ({
+      id: field.id,
+      type: field.type,
+      name: field.name,
+      label: field.label,
+      required: field.required,
+      border: true, // Default value for UI
+      position: field.position as FormField['position'],
+      options: field.options,
+      validation: field.validation
+    }))
+    selectedFieldId.value = null
+  }
+
+  const saveAllFields = async () => {
+    if (!currentFormId.value) {
+      error.value = 'No form selected'
+      return
+    }
+
+    loading.value = true
+    error.value = null
+
+    try {
+      // Convert FormField format to CreateFieldData format
+      const fieldsData: CreateFieldData[] = fields.value.map((field, index) => ({
+        type: field.type,
+        name: field.name,
+        label: field.label,
+        required: field.required,
+        position: field.position,
+        options: field.options,
+        validation: field.validation,
+        order: index
+      }))
+
+      const savedFields = await fieldsService.bulkSave(currentFormId.value, fieldsData)
+
+      // Update local fields with server IDs
+      loadFieldsFromForm(savedFields)
+
+      return savedFields
+    } catch (e) {
+      if (e instanceof ApiError) {
+        error.value = e.message
+      } else {
+        error.value = 'Failed to save fields'
+      }
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const saveField = async (fieldId: string) => {
+    if (!currentFormId.value) {
+      error.value = 'No form selected'
+      return
+    }
+
+    const field = fields.value.find(f => f.id === fieldId)
+    if (!field) {
+      error.value = 'Field not found'
+      return
+    }
+
+    loading.value = true
+    error.value = null
+
+    try {
+      const fieldData: CreateFieldData = {
+        type: field.type,
+        name: field.name,
+        label: field.label,
+        required: field.required,
+        position: field.position,
+        options: field.options,
+        validation: field.validation,
+        order: fields.value.indexOf(field)
+      }
+
+      // Check if field has a UUID (server-generated) or temp ID (local only)
+      const isServerField = field.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+
+      let savedField: Field
+      if (isServerField) {
+        // Update existing field
+        savedField = await fieldsService.update(currentFormId.value, fieldId, fieldData)
+      } else {
+        // Create new field
+        savedField = await fieldsService.create(currentFormId.value, fieldData)
+      }
+
+      // Update local field with server data
+      const index = fields.value.findIndex(f => f.id === fieldId)
+      if (index !== -1) {
+        fields.value[index] = {
+          ...field,
+          id: savedField.id // Update with server ID
+        }
+      }
+
+      return savedField
+    } catch (e) {
+      if (e instanceof ApiError) {
+        error.value = e.message
+      } else {
+        error.value = 'Failed to save field'
+      }
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const deleteFieldFromServer = async (fieldId: string) => {
+    if (!currentFormId.value) {
+      error.value = 'No form selected'
+      return
+    }
+
+    // Check if field exists on server (has UUID)
+    const isServerField = fieldId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+
+    if (!isServerField) {
+      // Field only exists locally, just remove from local state
+      deleteField(fieldId)
+      return
+    }
+
+    loading.value = true
+    error.value = null
+
+    try {
+      await fieldsService.delete(currentFormId.value, fieldId)
+
+      // Remove from local state
+      deleteField(fieldId)
+    } catch (e) {
+      if (e instanceof ApiError) {
+        error.value = e.message
+      } else {
+        error.value = 'Failed to delete field'
+      }
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const clearError = () => {
+    error.value = null
+  }
+
   return {
     // State
     fields,
     selectedFieldId,
     isAddingField,
     fieldTypeToAdd,
+    currentFormId,
+    loading,
+    error,
     // Computed
     selectedField,
     fieldsByPage,
-    // Actions
+    // Actions - Local (immediate UI updates)
     startAddingField,
     cancelAddingField,
     addField,
@@ -191,6 +364,13 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     getFieldsForPage,
     generateUniqueFieldName,
     fieldExists,
-    loadFieldsFromPDF
+    loadFieldsFromPDF,
+    // Actions - Server persistence
+    setCurrentForm,
+    loadFieldsFromForm,
+    saveAllFields,
+    saveField,
+    deleteFieldFromServer,
+    clearError
   }
 })

@@ -83,4 +83,10 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     fetchUser
   }
+}, {
+  persist: {
+    key: 'vuepdf-auth',
+    storage: localStorage,
+    paths: ['user']
+  }
 })

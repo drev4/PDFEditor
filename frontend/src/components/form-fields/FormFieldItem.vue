@@ -54,12 +54,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useFormFieldsStore, type FormField } from '@/stores/formFields.store'
+import { useToast } from 'primevue/usetoast'
 
 const props = defineProps<{
   field: FormField
 }>()
 
 const formFieldsStore = useFormFieldsStore()
+const toast = useToast()
 
 const isSelected = computed(() => formFieldsStore.selectedFieldId === props.field.id)
 
@@ -119,10 +121,24 @@ const onDrag = (e: MouseEvent) => {
   formFieldsStore.moveField(props.field.id, newX, newY)
 }
 
-const stopDrag = () => {
+const stopDrag = async () => {
   isDragging.value = false
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
+
+  // Save field position to server after drag
+  try {
+    await formFieldsStore.saveField(props.field.id)
+  } catch (error) {
+    console.error('Failed to save field position:', error)
+
+    toast.add({
+      severity: 'error',
+      summary: 'Error al guardar posición',
+      detail: 'No se pudo guardar la nueva posición del campo',
+      life: 3000
+    })
+  }
 }
 
 const startResize = (e: MouseEvent, handle: string) => {
@@ -176,11 +192,25 @@ const onResize = (e: MouseEvent) => {
   formFieldsStore.resizeField(props.field.id, newWidth, newHeight)
 }
 
-const stopResize = () => {
+const stopResize = async () => {
   isResizing.value = false
   resizeHandle.value = null
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
+
+  // Save field size to server after resize
+  try {
+    await formFieldsStore.saveField(props.field.id)
+  } catch (error) {
+    console.error('Failed to save field size:', error)
+
+    toast.add({
+      severity: 'error',
+      summary: 'Error al guardar tamaño',
+      detail: 'No se pudo guardar el nuevo tamaño del campo',
+      life: 3000
+    })
+  }
 }
 </script>
 

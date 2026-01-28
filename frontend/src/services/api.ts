@@ -38,6 +38,10 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const data = await response.json()
 
   if (!response.ok) {
+    // Si es 401, limpiar token
+    if (response.status === 401) {
+      localStorage.removeItem('token')
+    }
     throw new ApiError(response.status, data.error || 'Request failed', data.details)
   }
 
