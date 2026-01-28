@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { EditAction } from '@/types/pdf'
-import { useDocumentStore } from './document.store'
 
 export const useEditorStore = defineStore('editor', () => {
   // State
@@ -33,42 +32,22 @@ export const useEditorStore = defineStore('editor', () => {
     editHistory.value.push(action)
   }
 
-  const saveSnapshot = () => {
-    const documentStore = useDocumentStore()
-    const activeDocument = documentStore.activeDocument
-
-    if (!activeDocument?.arrayBuffer) return
-
-    const snapshot = activeDocument.arrayBuffer.slice(0)
-
-    if (!activeDocument.snapshots) {
-      activeDocument.snapshots = []
-    }
-
-    activeDocument.snapshots.push(snapshot)
-
-    if (activeDocument.snapshots.length > 10) {
-      activeDocument.snapshots.shift()
-    }
+  const saveSnapshot = async (documentId: string, arrayBuffer: ArrayBuffer) => {
+    const { useDocumentSnapshotsStore } = await import('./snapshots.store')
+    const snapshotsStore = useDocumentSnapshotsStore()
+    snapshotsStore.addSnapshot(documentId, arrayBuffer)
   }
 
-  const undoLastEdit = () => {
-    const documentStore = useDocumentStore()
-    const activeDocument = documentStore.activeDocument
-
-    if (!activeDocument) return
-
+  const undoLastEdit = async (documentId: string) => {
     if (editHistory.value.length > 0) {
       editHistory.value.pop()
     }
 
-    if (activeDocument.snapshots && activeDocument.snapshots.length > 0) {
-      const lastSnapshot = activeDocument.snapshots.pop()
-      if (lastSnapshot) {
-        activeDocument.arrayBuffer = lastSnapshot.slice(0)
-        documentStore.triggerPDFReload()
-      }
-    }
+    const { useDocumentSnapshotsStore } = await import('./snapshots.store')
+    const snapshotsStore = useDocumentSnapshotsStore()
+    const lastSnapshot = snapshotsStore.getLatestSnapshot(documentId)
+    
+    return lastSnapshot
   }
 
   const setImagePreview = (preview: typeof imagePreview.value) => {
