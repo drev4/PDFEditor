@@ -74,7 +74,7 @@ export function useTextPlacement(canvasRef: any) {
       editorStore.saveSnapshot()
 
       const { PDFDocument: PDFLib, rgb, StandardFonts } = await import('pdf-lib')
-      const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer)
+      const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
       const pages = pdfDoc.getPages()
       const currentPageIndex = documentStore.activeDocument.currentPage - 1
       const page = pages[currentPageIndex]
@@ -94,7 +94,7 @@ export function useTextPlacement(canvasRef: any) {
       // Convert hex color to RGB
       const hexToRgb = (hex: string) => {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-        return result ? {
+        return result && result[1] && result[2] && result[3] ? {
           r: parseInt(result[1], 16) / 255,
           g: parseInt(result[2], 16) / 255,
           b: parseInt(result[3], 16) / 255
@@ -103,6 +103,7 @@ export function useTextPlacement(canvasRef: any) {
 
       const color = hexToRgb(textPreview.color)
 
+      if (!page) return
       // Convert canvas coordinates to PDF coordinates
       const pageHeight = page.getHeight()
       const canvasHeight = canvasRef.value?.height || pageHeight
@@ -110,9 +111,10 @@ export function useTextPlacement(canvasRef: any) {
       // Calculate scale factor
       const scaleFactor = pageHeight / canvasHeight
 
-      // Account for container padding and border (8px top + 2px border = 10px total vertical, 12px left + 2px border = 14px total horizontal)
-      const containerPaddingX = 14
-      const containerPaddingY = 10
+      // Account for container padding (CSS: padding: 8px 12px)
+      // 12px horizontal (left), 8px vertical (top)
+      const containerPaddingX = 12
+      const containerPaddingY = 8
 
       // PDF coordinates are from bottom-left, canvas is from top-left
       // Add the padding offset to match the visual position
@@ -128,7 +130,12 @@ export function useTextPlacement(canvasRef: any) {
       })
 
       const pdfBytes = await pdfDoc.save()
-      const newArrayBuffer = pdfBytes.buffer as ArrayBuffer
+      // Create a proper ArrayBuffer copy with exact byte length
+      // pdfBytes.buffer may contain extra bytes beyond the actual PDF data
+      const newArrayBuffer = pdfBytes.buffer.slice(
+        pdfBytes.byteOffset,
+        pdfBytes.byteOffset + pdfBytes.byteLength
+      ) as ArrayBuffer
 
       documentStore.activeDocument.arrayBuffer = newArrayBuffer
 

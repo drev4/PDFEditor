@@ -1,20 +1,12 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
-import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 // https://vite.dev/config/
+// Note: pdf.worker.min.mjs is copied to public/ folder manually
 export default defineConfig({
   plugins: [
-    vue(),
-    viteStaticCopy({
-      targets: [
-        {
-          src: 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs',
-          dest: ''
-        }
-      ]
-    })
+    vue()
   ],
   resolve: {
     alias: {

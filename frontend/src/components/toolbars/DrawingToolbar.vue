@@ -25,18 +25,49 @@
         <span v-show="!isCollapsed">{{ tool.label }}</span>
       </button>
     </div>
+
+    <!-- Separator -->
+    <div class="toolbar-separator" v-show="!isCollapsed">
+      <span>Campos</span>
+    </div>
+    <div class="toolbar-separator collapsed-separator" v-show="isCollapsed"></div>
+
+    <!-- Form Field Tools -->
+    <div class="toolbar-tools field-tools">
+      <button
+        v-for="tool in fieldTools"
+        :key="tool.id"
+        :class="{ 'active': activeTool === tool.id }"
+        :title="tool.label"
+        @click="selectFieldTool(tool)"
+      >
+        <i :class="tool.icon"></i>
+        <span v-show="!isCollapsed">{{ tool.label }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { useToolbarDrag } from '@/composables/useToolbarDrag'
+import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+
+const formFieldsStore = useFormFieldsStore()
 
 // Tool definitions
 const tools = [
-  { id: 'search', label: 'Buscar', icon: 'pi pi-search' },
-  { id: 'text', label: 'Texto', icon: 'pi pi-pencil' },
-  { id: 'image', label: 'Imagen', icon: 'pi pi-image' }
+  { id: 'search', label: 'Buscar', icon: 'pi pi-search', group: 'general' },
+  { id: 'text', label: 'Texto', icon: 'pi pi-pencil', group: 'general' },
+  { id: 'image', label: 'Imagen', icon: 'pi pi-image', group: 'general' }
+]
+
+// Form field tools
+const fieldTools = [
+  { id: 'field-text', label: 'Campo texto', icon: 'pi pi-pencil', fieldType: 'text' },
+  { id: 'field-checkbox', label: 'Casilla', icon: 'pi pi-check-square', fieldType: 'checkbox' },
+  { id: 'field-radio', label: 'Opción múltiple', icon: 'pi pi-circle', fieldType: 'radio' },
+  { id: 'field-dropdown', label: 'Desplegable', icon: 'pi pi-chevron-down', fieldType: 'dropdown' }
 ]
 
 // State
@@ -73,7 +104,15 @@ const emit = defineEmits<{
 // Tool selection
 const selectTool = (toolId: string) => {
   activeTool.value = toolId
+  formFieldsStore.cancelAddingField()
   emit('select-tool', toolId)
+}
+
+// Field tool selection
+const selectFieldTool = (tool: { id: string; fieldType: string }) => {
+  activeTool.value = tool.id
+  formFieldsStore.startAddingField(tool.fieldType as FieldType)
+  emit('select-tool', tool.id)
 }
 
 // Cleanup
@@ -175,5 +214,27 @@ onUnmounted(() => {
 .collapsed .toolbar-tools button span {
   opacity: 0;
   width: 0;
+}
+
+.toolbar-separator {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 4px;
+}
+
+.collapsed-separator {
+  padding: 4px;
+  margin: 4px 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.field-tools button.active {
+  background: #dbeafe;
+  color: #2563eb;
 }
 </style>

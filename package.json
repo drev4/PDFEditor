@@ -1,45 +1,35 @@
 {
-  "name": "vuepdf",
+  "name": "vuepdf-monorepo",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "0.0.1",
+  "description": "VuePDF Forms Platform - Monorepo",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc -b && vite build",
-    "preview": "vite preview",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "start": "docker-compose up -d && npm run dev",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
+    "build:frontend": "npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "test": "npm run test --workspace=frontend",
+    "test:frontend": "npm run test --workspace=frontend",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=backend",
+    "db:push": "npm run db:push --workspace=backend",
+    "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:studio": "npm run db:studio --workspace=backend",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "setup": "npm install && npm run db:generate"
   },
-  "dependencies": {
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^5.4.296",
-    "pinia": "^3.0.3",
-    "pinia-plugin-persistedstate": "^4.5.0",
-    "primeicons": "^7.0.0",
-    "primevue": "^4.4.1",
-    "vue": "^3.5.22"
-  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
   "devDependencies": {
-    "@primevue/themes": "^4.4.1",
-    "@testing-library/user-event": "^14.6.1",
-    "@testing-library/vue": "^8.1.0",
-    "@types/node": "^24.6.0",
-    "@vitejs/plugin-vue": "^6.0.1",
-    "@vitest/coverage-v8": "^4.0.16",
-    "@vitest/ui": "^4.0.16",
-    "@vue/test-utils": "^2.4.6",
-    "@vue/tsconfig": "^0.8.1",
-    "autoprefixer": "^10.4.21",
-    "happy-dom": "^20.0.11",
-    "jsdom": "^27.4.0",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.18",
-    "typescript": "~5.9.3",
-    "vite": "^7.1.7",
-    "vite-plugin-static-copy": "^3.1.4",
-    "vitest": "^4.0.16",
-    "vue-tsc": "^3.1.0"
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
