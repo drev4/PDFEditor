@@ -161,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { useDocumentStore } from '@/stores/document.store'
 import { useDrawingStore } from '@/stores/drawing.store'
@@ -205,7 +205,7 @@ const {
   cleanup
 } = usePDFRendering()
 
-const searchCanvasRef = ref<HTMLCanvasElement | null>(null)
+const searchCanvasRef = shallowRef<HTMLCanvasElement | null>(null)
 const {
   searchTextInPDF,
   drawSearchHighlights,
@@ -237,7 +237,7 @@ const { drawGrid } = useGridOverlay(canvasRef, gridCanvasRef)
 const showSearchSpotlight = ref(false)
 
 // Text preview input ref
-const textPreviewInput = ref<HTMLInputElement | null>(null)
+const textPreviewInput = shallowRef<HTMLInputElement | null>(null)
 
 // Handle text input
 const handleTextInput = (event: Event) => {
@@ -294,6 +294,10 @@ const handleToolSelection = (toolId: string) => {
         color: '#000000',
         isBold: false,
         isItalic: false
+      })
+      // Focus input after next tick
+      nextTick(() => {
+        textPreviewInput.value?.focus()
       })
       break
     case 'image':

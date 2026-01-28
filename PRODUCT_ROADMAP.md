@@ -491,7 +491,6 @@ Decisión: TBD (Semana 1)
 
 ### Docs Internas
 - [TESTING.md](./TESTING.md) - Testing guide
-- [REFACTORING.md](./REFACTORING.md) - Architecture
 - [README.md](./README.md) - General overview
 
 ---
@@ -500,13 +499,13 @@ Decisión: TBD (Semana 1)
 
 **Product Lead:** @drev4
 **Developer:** @drev4
-**Última actualización:** 2024-12-27
+**Última actualización:** 2025-12-27
 
 ---
 
 ## 📊 CHANGELOG
 
-### 2024-12-27
+### 2025-12-27
 - Creado roadmap inicial
 - Definidas Fases 0-3
 - Identificadas 28 features

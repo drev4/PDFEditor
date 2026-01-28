@@ -1,27 +1,13 @@
 import { ref } from 'vue'
 import { useDocumentStore } from '@/stores/document.store'
 import { useEditorStore } from '@/stores/editor.store'
-import { useDrawingStore } from '@/stores/drawing.store'
+import { useDragAndDrop } from './useDragAndDrop'
+import { usePDFCoordinates } from '@/utils/pdfCoordinates'
 
 export function useImagePlacement(canvasRef: any) {
   const documentStore = useDocumentStore()
   const editorStore = useEditorStore()
-  const drawingStore = useDrawingStore()
-
-  // Image drag and drop functionality
-  const isDragging = ref(false)
-  const dragStartX = ref(0)
-  const dragStartY = ref(0)
-  const imageStartX = ref(0)
-  const imageStartY = ref(0)
-
-  // Image resize functionality
-  const isResizing = ref(false)
-  const resizeHandle = ref<'nw' | 'ne' | 'sw' | 'se' | null>(null)
-  const resizeStartX = ref(0)
-  const resizeStartY = ref(0)
-  const imageStartWidth = ref(0)
-  const imageStartHeight = ref(0)
+  const { canvasToPDF } = usePDFCoordinates()
 
   // Image flip state
   const flipHorizontal = ref(false)
@@ -35,159 +21,36 @@ export function useImagePlacement(canvasRef: any) {
     flipVertical.value = !flipVertical.value
   }
 
-  const snapToGridValue = (value: number): number => {
-    if (!drawingStore.snapToGrid) return value
-    return Math.round(value / drawingStore.gridSize) * drawingStore.gridSize
-  }
-
-  const startDrag = (event: MouseEvent) => {
-    if (!editorStore.imagePreview) return
-
-    isDragging.value = true
-    dragStartX.value = event.clientX
-    dragStartY.value = event.clientY
-    imageStartX.value = editorStore.imagePreview.x
-    imageStartY.value = editorStore.imagePreview.y
-
-    document.addEventListener('mousemove', onDrag)
-    document.addEventListener('mouseup', stopDrag)
-    event.preventDefault()
-  }
-
-  const onDrag = (event: MouseEvent) => {
-    if (!isDragging.value || !editorStore.imagePreview) return
-
-    const deltaX = event.clientX - dragStartX.value
-    const deltaY = event.clientY - dragStartY.value
-
-    let newX = imageStartX.value + deltaX
-    let newY = imageStartY.value + deltaY
-
-    // Apply snap to grid
-    if (drawingStore.snapToGrid) {
-      newX = snapToGridValue(newX)
-      newY = snapToGridValue(newY)
-    }
-
-    editorStore.updateImagePreviewPosition(newX, newY)
-  }
-
-  const stopDrag = () => {
-    isDragging.value = false
-    document.removeEventListener('mousemove', onDrag)
-    document.removeEventListener('mouseup', stopDrag)
-  }
-
-  const startResize = (event: MouseEvent, handle: 'nw' | 'ne' | 'sw' | 'se') => {
-    if (!editorStore.imagePreview) return
-
-    isResizing.value = true
-    resizeHandle.value = handle
-    resizeStartX.value = event.clientX
-    resizeStartY.value = event.clientY
-    imageStartX.value = editorStore.imagePreview.x
-    imageStartY.value = editorStore.imagePreview.y
-    imageStartWidth.value = editorStore.imagePreview.width
-    imageStartHeight.value = editorStore.imagePreview.height
-
-    document.addEventListener('mousemove', onResize)
-    document.addEventListener('mouseup', stopResize)
-    event.preventDefault()
-  }
-
-  const onResize = (event: MouseEvent) => {
-    if (!isResizing.value || !editorStore.imagePreview) return
-
-    const deltaX = event.clientX - resizeStartX.value
-    const deltaY = event.clientY - resizeStartY.value
-
-    let newWidth = imageStartWidth.value
-    let newHeight = imageStartHeight.value
-    let newX = imageStartX.value
-    let newY = imageStartY.value
-
-    // Calculate aspect ratio
-    const aspectRatio = imageStartWidth.value / imageStartHeight.value
-
-    if (editorStore.imagePreview.maintainAspectRatio) {
-      // Maintain aspect ratio - use the larger delta
-      switch (resizeHandle.value) {
-        case 'se': // Bottom-right corner
-          const seNewWidth = Math.max(50, imageStartWidth.value + deltaX)
-          newWidth = seNewWidth
-          newHeight = seNewWidth / aspectRatio
-          break
-        case 'sw': // Bottom-left corner
-          const swNewWidth = Math.max(50, imageStartWidth.value - deltaX)
-          newWidth = swNewWidth
-          newHeight = swNewWidth / aspectRatio
-          newX = imageStartX.value + (imageStartWidth.value - newWidth)
-          break
-        case 'ne': // Top-right corner
-          const neNewWidth = Math.max(50, imageStartWidth.value + deltaX)
-          newWidth = neNewWidth
-          newHeight = neNewWidth / aspectRatio
-          newY = imageStartY.value + (imageStartHeight.value - newHeight)
-          break
-        case 'nw': // Top-left corner
-          const nwNewWidth = Math.max(50, imageStartWidth.value - deltaX)
-          newWidth = nwNewWidth
-          newHeight = nwNewWidth / aspectRatio
-          newX = imageStartX.value + (imageStartWidth.value - newWidth)
-          newY = imageStartY.value + (imageStartHeight.value - newHeight)
-          break
+  // Drag and drop functionality
+  const dragAndDrop = useDragAndDrop({
+    onUpdatePosition: (x: number, y: number) => {
+      if (editorStore.imagePreview) {
+        editorStore.updateImagePreviewPosition(x, y)
       }
-    } else {
-      // Free resize
-      switch (resizeHandle.value) {
-        case 'se': // Bottom-right corner
-          newWidth = Math.max(50, imageStartWidth.value + deltaX)
-          newHeight = Math.max(50, imageStartHeight.value + deltaY)
-          break
-        case 'sw': // Bottom-left corner
-          newWidth = Math.max(50, imageStartWidth.value - deltaX)
-          newHeight = Math.max(50, imageStartHeight.value + deltaY)
-          newX = imageStartX.value + (imageStartWidth.value - newWidth)
-          break
-        case 'ne': // Top-right corner
-          newWidth = Math.max(50, imageStartWidth.value + deltaX)
-          newHeight = Math.max(50, imageStartHeight.value - deltaY)
-          newY = imageStartY.value + (imageStartHeight.value - newHeight)
-          break
-        case 'nw': // Top-left corner
-          newWidth = Math.max(50, imageStartWidth.value - deltaX)
-          newHeight = Math.max(50, imageStartHeight.value - deltaY)
-          newX = imageStartX.value + (imageStartWidth.value - newWidth)
-          newY = imageStartY.value + (imageStartHeight.value - newHeight)
-          break
+    },
+    onUpdateSize: (width: number, height: number, x: number, y: number) => {
+      if (editorStore.imagePreview) {
+        editorStore.updateImagePreviewSize(width, height)
+        editorStore.updateImagePreviewPosition(x, y)
       }
-    }
-
-    // Apply snap to grid
-    if (drawingStore.snapToGrid) {
-      newWidth = snapToGridValue(newWidth)
-      newHeight = snapToGridValue(newHeight)
-      newX = snapToGridValue(newX)
-      newY = snapToGridValue(newY)
-    }
-
-    editorStore.updateImagePreviewSize(newWidth, newHeight)
-    editorStore.updateImagePreviewPosition(newX, newY)
-  }
-
-  const stopResize = () => {
-    isResizing.value = false
-    resizeHandle.value = null
-    document.removeEventListener('mousemove', onResize)
-    document.removeEventListener('mouseup', stopResize)
-  }
+    },
+    getElementPosition: () => ({
+      x: editorStore.imagePreview?.x || 0,
+      y: editorStore.imagePreview?.y || 0
+    }),
+    getElementSize: () => ({
+      width: editorStore.imagePreview?.width || 0,
+      height: editorStore.imagePreview?.height || 0
+    }),
+    getMaintainAspectRatio: () => editorStore.imagePreview?.maintainAspectRatio ?? false
+  })
 
   const confirmImagePlacement = async () => {
     if (!editorStore.imagePreview || !documentStore.activeDocument?.arrayBuffer) return
 
     try {
       // Save snapshot before making changes
-      editorStore.saveSnapshot()
+      await editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
 
       const { PDFDocument: PDFLib } = await import('pdf-lib')
       const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
@@ -249,25 +112,32 @@ export function useImagePlacement(canvasRef: any) {
       }
 
       // Convert canvas coordinates to PDF coordinates
-      const pageHeight = page.getHeight()
-      const canvasHeight = canvasRef.value?.height || pageHeight
+      const transform = {
+        scaleFactor: page.getHeight() / (canvasRef.value?.height || page.getHeight()),
+        pageHeight: page.getHeight(),
+        canvasHeight: canvasRef.value?.height || page.getHeight(),
+        containerPaddingX: 12,
+        containerPaddingY: 8
+      }
 
-      // Calculate scale factor
-      const scaleFactor = pageHeight / canvasHeight
-
-      // PDF coordinates are from bottom-left, canvas is from top-left
-      const pdfX = editorStore.imagePreview.x * scaleFactor
-      const pdfY = pageHeight - (editorStore.imagePreview.y * scaleFactor) - (editorStore.imagePreview.height * scaleFactor)
+      const pdfCoords = canvasToPDF(
+        { 
+          x: editorStore.imagePreview.x, 
+          y: editorStore.imagePreview.y, 
+          width: editorStore.imagePreview.width,
+          height: editorStore.imagePreview.height
+        },
+        transform
+      )
 
       page.drawImage(image, {
-        x: pdfX,
-        y: pdfY,
-        width: editorStore.imagePreview.width * scaleFactor,
-        height: editorStore.imagePreview.height * scaleFactor
+        x: pdfCoords.x,
+        y: pdfCoords.y,
+        width: pdfCoords.width,
+        height: pdfCoords.height
       })
 
       const pdfBytes = await pdfDoc.save()
-      // Create a proper ArrayBuffer copy with exact byte length
       const newArrayBuffer = pdfBytes.buffer.slice(
         pdfBytes.byteOffset,
         pdfBytes.byteOffset + pdfBytes.byteLength
@@ -305,8 +175,8 @@ export function useImagePlacement(canvasRef: any) {
     flipVertical,
     toggleFlipHorizontal,
     toggleFlipVertical,
-    startDrag,
-    startResize,
+    startDrag: dragAndDrop.startDrag,
+    startResize: dragAndDrop.startResize,
     confirmImagePlacement,
     cancelImagePlacement
   }
