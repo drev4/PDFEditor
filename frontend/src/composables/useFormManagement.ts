@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useFormsStore } from '@/stores/forms.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
+import { uploadService, type UploadProgress } from '@/services/upload'
 
 /**
  * Composable para gestionar la conexión entre documentos PDF y formularios persistidos
@@ -12,11 +13,34 @@ export function useFormManagement() {
   const documentStore = useDocumentStore()
 
   const isInitializing = ref(false)
+  const uploadProgress = ref<UploadProgress | null>(null)
+  const isUploading = ref(false)
+
+  /**
+   * Upload a PDF file to the server
+   */
+  async function uploadPDF(file: File): Promise<string> {
+    try {
+      isUploading.value = true
+      uploadProgress.value = null
+
+      const response = await uploadService.uploadPDF(file, (progress) => {
+        uploadProgress.value = progress
+      })
+
+      return response.url
+    } finally {
+      isUploading.value = false
+      uploadProgress.value = null
+    }
+  }
 
   /**
    * Crea un formulario nuevo para el documento actual
+   * @param title - Título del formulario (opcional)
+   * @param pdfFile - Archivo PDF a subir (opcional)
    */
-  async function createFormForCurrentDocument(title?: string) {
+  async function createFormForCurrentDocument(title?: string, pdfFile?: File) {
     const activeDoc = documentStore.activeDocument
     if (!activeDoc) {
       throw new Error('No active document')
@@ -25,10 +49,16 @@ export function useFormManagement() {
     try {
       isInitializing.value = true
 
+      // Upload PDF if provided
+      let pdfUrl: string | undefined = undefined
+      if (pdfFile) {
+        pdfUrl = await uploadPDF(pdfFile)
+      }
+
       const form = await formsStore.createForm({
         title: title || `Form - ${activeDoc.name}`,
         description: `PDF form based on ${activeDoc.name}`,
-        pdfUrl: null // TODO: Upload PDF to storage when implemented
+        pdfUrl
       })
 
       // Set as current form in fields store
@@ -98,11 +128,32 @@ export function useFormManagement() {
     return await createFormForCurrentDocument()
   }
 
+  /**
+   * Upload a PDF and update the current form
+   */
+  async function uploadPDFForCurrentForm(file: File) {
+    if (!formFieldsStore.currentFormId) {
+      throw new Error('No current form set')
+    }
+
+    const pdfUrl = await uploadPDF(file)
+
+    await formsStore.updateForm(formFieldsStore.currentFormId, {
+      pdfUrl
+    })
+
+    return pdfUrl
+  }
+
   return {
     isInitializing,
+    isUploading,
+    uploadProgress,
     createFormForCurrentDocument,
     loadForm,
     saveCurrentForm,
-    autoInitializeForm
+    autoInitializeForm,
+    uploadPDF,
+    uploadPDFForCurrentForm
   }
 }

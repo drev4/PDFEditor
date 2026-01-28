@@ -19,6 +19,9 @@
     </div>
 
     <div v-else class="editor-content p-6 space-y-6">
+      <!-- Form Save Panel -->
+      <FormSavePanel v-if="formFieldsStore.fields.length > 0" />
+
       <!-- Search Section -->
       <div class="tool-card">
         <div class="tool-header">
@@ -257,6 +260,7 @@ import { useEditorStore } from '@/stores/editor.store'
 import { useDrawingStore } from '@/stores/drawing.store'
 import { useSearchStore } from '@/stores/search.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
+import FormSavePanel from '@/components/forms/FormSavePanel.vue'
 
 const documentStore = useDocumentStore()
 const editorStore = useEditorStore()
