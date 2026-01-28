@@ -27,6 +27,7 @@
     "backend"
   ],
   "devDependencies": {
+    "@playwright/test": "^1.58.0",
     "concurrently": "^9.1.2"
   },
   "engines": {

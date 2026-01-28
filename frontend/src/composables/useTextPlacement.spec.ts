@@ -112,12 +112,18 @@ describe('useTextPlacement', () => {
         isItalic: false
       })
 
+      // Spy on saveSnapshot
+      const saveSnapshotSpy = vi.spyOn(editorStore, 'saveSnapshot')
+
       const { confirmTextPlacement } = useTextPlacement(canvasRef)
 
       await confirmTextPlacement()
 
-      // Verify snapshot was created by checking snapshots in document
-      expect(documentStore.activeDocument?.snapshots.length).toBeGreaterThan(0)
+      // Verify snapshot was saved
+      expect(saveSnapshotSpy).toHaveBeenCalledWith(
+        documentStore.activeDocument?.id,
+        expect.any(ArrayBuffer)
+      )
     })
 
     it('maneja texto con estilos (bold, italic)', async () => {

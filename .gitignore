@@ -37,6 +37,13 @@ coverage/
 .vitest
 html/
 
+# Playwright
+playwright-report/
+test-results/
+
+# Test outputs
+backend/test-output.txt
+
 # Environment
 .env
 .env.local

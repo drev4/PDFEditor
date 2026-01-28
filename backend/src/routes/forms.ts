@@ -43,7 +43,15 @@ formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
 // POST /api/forms - Create form
 formsRouter.post('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
-    const { title, description, pdfUrl } = createFormSchema.parse(req.body)
+    const validation = createFormSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const { title, description, pdfUrl } = validation.data
 
     const form = await prisma.form.create({
       data: {
@@ -90,7 +98,15 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
 formsRouter.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const id = req.params.id as string
-    const data = updateFormSchema.parse(req.body)
+    const validation = updateFormSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const data = validation.data
 
     const existingForm = await prisma.form.findFirst({
       where: { id, userId: req.userId }
@@ -196,7 +212,15 @@ formsRouter.post('/:formId/fields', authenticate, async (req: AuthRequest, res, 
       throw new AppError(404, 'Form not found')
     }
 
-    const data = createFieldSchema.parse(req.body)
+    const validation = createFieldSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const data = validation.data
 
     const field = await prisma.field.create({
       data: {
@@ -235,7 +259,15 @@ formsRouter.put('/:formId/fields/:fieldId', authenticate, async (req: AuthReques
       throw new AppError(404, 'Field not found')
     }
 
-    const data = updateFieldSchema.parse(req.body)
+    const validation = updateFieldSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const data = validation.data
 
     const field = await prisma.field.update({
       where: { id: fieldId },
@@ -294,7 +326,15 @@ formsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequest, 
       throw new AppError(404, 'Form not found')
     }
 
-    const fieldsData = z.array(createFieldSchema).parse(req.body.fields)
+    const validation = z.array(createFieldSchema).safeParse(req.body.fields)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const fieldsData = validation.data
 
     // Delete existing fields and create new ones (simplest approach)
     await prisma.field.deleteMany({ where: { formId } })

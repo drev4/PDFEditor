@@ -5,13 +5,15 @@ import type { PDFDocument, SearchMatch, EditAction } from '@/types/pdf'
  * Create a mock PDF File object with arrayBuffer support
  */
 export const createMockPDFFile = (name = 'test.pdf', size = 1024): File => {
-  const content = 'mock pdf content'
-  const blob = new Blob([content], { type: 'application/pdf' })
+  const arrayBuffer = new ArrayBuffer(size)
+  const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
+
+  // Create a proper File object
   const file = new File([blob], name, { type: 'application/pdf' })
 
-  // Mock arrayBuffer method for File
+  // Override arrayBuffer to return the mock buffer
   Object.defineProperty(file, 'arrayBuffer', {
-    value: vi.fn().mockResolvedValue(new ArrayBuffer(size)),
+    value: vi.fn().mockResolvedValue(arrayBuffer),
     writable: true
   })
 
@@ -91,12 +93,12 @@ export const createMockImage = (width = 100, height = 100): HTMLImageElement => 
  */
 export const createMockFileReader = () => {
   const reader = {
-    readAsDataURL: vi.fn(function(this: any, file: File) {
+    readAsDataURL: vi.fn(function (this: any, file: File) {
       setTimeout(() => {
         this.onload?.({ target: { result: 'data:image/png;base64,mock' } })
       }, 0)
     }),
-    readAsArrayBuffer: vi.fn(function(this: any, file: File) {
+    readAsArrayBuffer: vi.fn(function (this: any, file: File) {
       setTimeout(() => {
         this.onload?.({ target: { result: new ArrayBuffer(100) } })
       }, 0)

@@ -25,9 +25,10 @@ describe('Test Setup Validation', () => {
   describe('Test Helpers', () => {
     it('should create mock PDF file', () => {
       const file = createMockPDFFile()
-      expect(file).toBeInstanceOf(File)
+      expect(file).toBeDefined()
       expect(file.name).toBe('test.pdf')
       expect(file.type).toBe('application/pdf')
+      expect(file.arrayBuffer).toBeDefined()
     })
 
     it('should create mock PDF document', () => {

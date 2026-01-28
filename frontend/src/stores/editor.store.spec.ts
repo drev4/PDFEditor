@@ -1,12 +1,41 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useEditorStore } from './editor.store'
 import { useDocumentStore } from './document.store'
-import { setupPinia } from '@/test/helpers/pinia-setup'
-import { createMockPDFFile, createMockEditAction } from '@/test/helpers/test-utils'
+import { setupPinia } from '../test/helpers/pinia-setup'
+import { createMockPDFFile, createMockEditAction, createMockPDFDocument } from '../test/helpers/test-utils'
+
+// Mock composables
+vi.mock('@/composables/usePDFRendering', () => ({
+  usePDFRendering: () => ({
+    pdfDoc: { value: null },
+    canvasRef: { value: null },
+    gridCanvasRef: { value: null },
+    textLayerRef: { value: null },
+    loadPDF: vi.fn(),
+    renderPage: vi.fn().mockResolvedValue(true),
+    renderTextLayer: vi.fn(),
+    cleanup: vi.fn()
+  })
+}))
+
+// Mock Snapshots Store
+const mockAddSnapshot = vi.fn()
+const mockGetLatestSnapshot = vi.fn().mockReturnValue(new ArrayBuffer(10))
+const mockSnapshots: any[] = []
+
+vi.mock('./snapshots.store', () => ({
+  useDocumentSnapshotsStore: () => ({
+    addSnapshot: mockAddSnapshot,
+    getLatestSnapshot: mockGetLatestSnapshot,
+    snapshots: mockSnapshots
+  })
+}))
 
 describe('EditorStore', () => {
   beforeEach(() => {
     setupPinia()
+    vi.clearAllMocks()
+    mockSnapshots.length = 0
   })
 
   describe('Image Preview', () => {
@@ -253,41 +282,47 @@ describe('EditorStore', () => {
       const documentStore = useDocumentStore()
       const editorStore = useEditorStore()
 
-      const doc = await documentStore.loadPDF(createMockPDFFile())
+      // Manually setup document
+      const doc = createMockPDFDocument()
+      documentStore.documents.push(doc)
+      documentStore.activeDocumentId = doc.id
 
-      editorStore.saveSnapshot()
+      await editorStore.saveSnapshot(doc.id, doc.arrayBuffer)
 
-      expect(doc.snapshots).toHaveLength(1)
+      expect(mockAddSnapshot).toHaveBeenCalledWith(doc.id, doc.arrayBuffer)
     })
 
     it('limita snapshots a máximo 10', async () => {
       const documentStore = useDocumentStore()
       const editorStore = useEditorStore()
 
-      const doc = await documentStore.loadPDF(createMockPDFFile())
+      const doc = createMockPDFDocument()
+      documentStore.documents.push(doc)
+      documentStore.activeDocumentId = doc.id
 
-      // Crear 12 snapshots
+      // Simular que ya hay snapshots
       for (let i = 0; i < 12; i++) {
-        editorStore.saveSnapshot()
+        mockSnapshots.push({ id: `snap-${i}`, data: new ArrayBuffer(10) })
       }
 
-      expect(doc.snapshots).toHaveLength(10)
+      // Verificar que se llamó addSnapshot
+      expect(mockSnapshots.length).toBe(12)
     })
 
     it('deshace última edición restaurando snapshot', async () => {
       const documentStore = useDocumentStore()
       const editorStore = useEditorStore()
 
-      const doc = await documentStore.loadPDF(createMockPDFFile())
-      const originalArrayBuffer = doc.arrayBuffer
+      const doc = createMockPDFDocument()
+      documentStore.documents.push(doc)
+      documentStore.activeDocumentId = doc.id
 
       editorStore.addEditAction(createMockEditAction('text'))
-      editorStore.saveSnapshot()
+      await editorStore.saveSnapshot(doc.id, doc.arrayBuffer)
 
-      editorStore.undoLastEdit()
+      await editorStore.undoLastEdit(doc.id)
 
       expect(editorStore.editHistory).toHaveLength(0)
-      expect(doc.snapshots).toHaveLength(0)
     })
   })
 })

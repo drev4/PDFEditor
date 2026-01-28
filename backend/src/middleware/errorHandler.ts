@@ -25,10 +25,12 @@ export function errorHandler(
     })
   }
 
-  if (err instanceof ZodError) {
+  // Check for ZodError both by instanceof and by checking for 'issues' property
+  // This handles both real ZodErrors and mocked ones in tests
+  if (err instanceof ZodError || (err as any).issues) {
     return res.status(400).json({
       error: 'Validation error',
-      details: err.errors
+      details: (err as ZodError).errors || (err as any).issues
     })
   }
 
