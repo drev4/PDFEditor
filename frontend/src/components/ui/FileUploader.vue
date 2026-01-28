@@ -25,6 +25,7 @@ const handleFileSelect = async (event: any) => {
   if (file && file.type === 'application/pdf') {
     try {
       await documentStore.loadPDF(file)
+      // Los campos del formulario se cargarán automáticamente en PDFViewer
     } catch (error) {
       console.error('Error loading PDF:', error)
     }

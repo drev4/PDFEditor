@@ -56,6 +56,13 @@
               class="text-layer"
             ></div>
 
+            <!-- Form Fields Overlay -->
+            <FormFieldsOverlay
+              v-if="canvasRef"
+              :canvas-width="canvasRef?.width || 0"
+              :canvas-height="canvasRef?.height || 0"
+            />
+
             <!-- Image Preview Overlay -->
             <div
               v-if="editorStore.imagePreview"
@@ -82,34 +89,34 @@
               <div class="resize-handle sw" @mousedown.stop="startResize($event, 'sw')"></div>
               <div class="resize-handle se" @mousedown.stop="startResize($event, 'se')"></div>
             </div>
-          </div>
 
-          <!-- Text Preview Overlay -->
-          <div
-            v-if="editorStore.textPreview"
-            class="text-preview-container"
-            :style="{
-              left: `${editorStore.textPreview.x}px`,
-              top: `${editorStore.textPreview.y}px`
-            }"
-            @mousedown="startTextDrag"
-          >
-            <input
-              ref="textPreviewInput"
-              type="text"
-              class="text-preview-input"
-              :value="editorStore.textPreview.text"
-              @input="handleTextInput"
-              @mousedown.stop
-              @click.stop
-              placeholder="Escribe aquí..."
+            <!-- Text Preview Overlay (inside pdf-canvas-wrapper for correct coordinates) -->
+            <div
+              v-if="editorStore.textPreview"
+              class="text-preview-container"
               :style="{
-                fontSize: `${editorStore.textPreview.fontSize}px`,
-                color: editorStore.textPreview.color,
-                fontWeight: editorStore.textPreview.isBold ? 'bold' : 'normal',
-                fontStyle: editorStore.textPreview.isItalic ? 'italic' : 'normal'
+                left: `${editorStore.textPreview.x}px`,
+                top: `${editorStore.textPreview.y}px`
               }"
-            />
+              @mousedown="startTextDrag"
+            >
+              <input
+                ref="textPreviewInput"
+                type="text"
+                class="text-preview-input"
+                :value="editorStore.textPreview.text"
+                @input="handleTextInput"
+                @mousedown.stop
+                @click.stop
+                placeholder="Escribe aquí..."
+                :style="{
+                  fontSize: `${editorStore.textPreview.fontSize}px`,
+                  color: editorStore.textPreview.color,
+                  fontWeight: editorStore.textPreview.isBold ? 'bold' : 'normal',
+                  fontStyle: editorStore.textPreview.isItalic ? 'italic' : 'normal'
+                }"
+              />
+            </div>
           </div>
 
           <!-- Image Placement Controls -->
@@ -170,6 +177,9 @@ import ImageControls from '../toolbars/ImageControls.vue'
 import TextControls from '../toolbars/TextControls.vue'
 import DrawingToolbar from '../toolbars/DrawingToolbar.vue'
 import SearchSpotlight from '../search/SearchSpotlight.vue'
+import FormFieldsOverlay from '../form-fields/FormFieldsOverlay.vue'
+import { useFormFieldsStore } from '@/stores/formFields.store'
+import { usePDFFieldsLoader } from '@/composables/usePDFFieldsLoader'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -181,6 +191,7 @@ const documentStore = useDocumentStore()
 const drawingStore = useDrawingStore()
 const editorStore = useEditorStore()
 const searchStore = useSearchStore()
+const formFieldsStore = useFormFieldsStore()
 
 // Use composables
 const {
@@ -217,6 +228,8 @@ const {
   confirmTextPlacement,
   cancelTextPlacement
 } = useTextPlacement(canvasRef)
+
+const { loadFieldsFromPDF } = usePDFFieldsLoader()
 
 const { drawGrid } = useGridOverlay(canvasRef, gridCanvasRef)
 
@@ -355,12 +368,25 @@ const renderPageWithOverlays = async () => {
   }
 }
 
+// Variable para rastrear el último documento para el que cargamos campos
+const lastLoadedDocId = ref<string | null>(null)
+
 // Watchers
 watch(() => documentStore.activeDocument?.id, async (newId, oldId) => {
-  if (newId !== oldId) {
+  if (newId !== oldId && newId) {
     await loadPDF()
+
+    // Solo cargar campos si es un documento diferente al último
+    if (newId !== lastLoadedDocId.value) {
+      lastLoadedDocId.value = newId
+      // Esperamos un poco para asegurar que el documento está completamente cargado
+      await nextTick()
+      setTimeout(async () => {
+        await loadFieldsFromPDF()
+      }, 500)
+    }
   }
-})
+}, { immediate: false })
 
 watch([currentPage, scale, rotation], async () => {
   if (pdfDoc.value) {
@@ -421,6 +447,15 @@ defineExpose({
 // Lifecycle hooks
 onMounted(async () => {
   await loadPDF()
+
+  // Si ya hay un documento activo al montar, cargar sus campos
+  if (documentStore.activeDocument?.id) {
+    lastLoadedDocId.value = documentStore.activeDocument.id
+    await nextTick()
+    setTimeout(async () => {
+      await loadFieldsFromPDF()
+    }, 500)
+  }
 })
 
 onUnmounted(async () => {

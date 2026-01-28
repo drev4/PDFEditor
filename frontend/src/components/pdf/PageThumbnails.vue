@@ -148,7 +148,9 @@ const onDrop = (event: DragEvent, targetPageNum: number) => {
 
   // Reorder
   const [removed] = currentOrder.splice(draggedIndex, 1)
-  currentOrder.splice(targetIndex, 0, removed)
+  if (removed !== undefined) {
+    currentOrder.splice(targetIndex, 0, removed)
+  }
 
   // Update store
   documentStore.updatePageOrder(currentOrder)

@@ -130,8 +130,10 @@
           </div>
 
           <!-- Right Sidebar - Editor Tools -->
-          <aside v-if="documentStore.activeDocument">
+          <aside v-if="documentStore.activeDocument" class="flex">
             <PDFEditor />
+            <!-- Field Properties Panel (shows when a field is selected or fields exist) -->
+            <FieldPropertiesPanel v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField" />
           </aside>
         </div>
       </template>
@@ -163,13 +165,16 @@ import Toast from 'primevue/toast'
 import TabView from 'primevue/tabview'
 import TabPanel from 'primevue/tabpanel'
 import { useDocumentStore } from '@/stores/document.store'
+import { useFormFieldsStore } from '@/stores/formFields.store'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import DocumentsList from '@/components/pdf/DocumentsList.vue'
 import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
+import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 
 const documentStore = useDocumentStore()
+const formFieldsStore = useFormFieldsStore()
 const toast = useToast()
 const pdfViewerRef = ref<InstanceType<typeof PDFViewer> | null>(null)
 

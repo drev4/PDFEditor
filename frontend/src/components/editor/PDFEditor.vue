@@ -256,11 +256,13 @@ import { useDocumentStore } from '@/stores/document.store'
 import { useEditorStore } from '@/stores/editor.store'
 import { useDrawingStore } from '@/stores/drawing.store'
 import { useSearchStore } from '@/stores/search.store'
+import { useFormFieldsStore } from '@/stores/formFields.store'
 
 const documentStore = useDocumentStore()
 const editorStore = useEditorStore()
 const drawingStore = useDrawingStore()
 const searchStore = useSearchStore()
+const formFieldsStore = useFormFieldsStore()
 
 // Text editing state
 const textInput = ref('')
@@ -275,7 +277,7 @@ const searchText = ref('')
 
 const hexToRgb = (hex: string) => {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-  if (result) {
+  if (result && result[1] && result[2] && result[3]) {
     return {
       r: parseInt(result[1], 16) / 255,
       g: parseInt(result[2], 16) / 255,
@@ -292,7 +294,7 @@ const addText = async () => {
     // Save snapshot before making changes
     editorStore.saveSnapshot()
 
-    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
+    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     const pages = pdfDoc.getPages()
     const currentPageIndex = documentStore.activeDocument.currentPage - 1
     const page = pages[currentPageIndex]
@@ -300,6 +302,7 @@ const addText = async () => {
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
     const color = hexToRgb(`#${textColor.value}`)
 
+    if (!page) return
     const { height } = page.getSize()
 
     page.drawText(textInput.value, {
@@ -311,7 +314,11 @@ const addText = async () => {
     })
 
     const pdfBytes = await pdfDoc.save()
-    const newArrayBuffer = pdfBytes.buffer
+    // Create a proper ArrayBuffer copy with exact byte length
+    const newArrayBuffer = pdfBytes.buffer.slice(
+      pdfBytes.byteOffset,
+      pdfBytes.byteOffset + pdfBytes.byteLength
+    ) as ArrayBuffer
 
     documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
@@ -387,13 +394,17 @@ const deleteCurrentPage = async () => {
     // Save snapshot before making changes
     editorStore.saveSnapshot()
 
-    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
+    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     const currentPageIndex = documentStore.activeDocument.currentPage - 1
 
     pdfDoc.removePage(currentPageIndex)
 
     const pdfBytes = await pdfDoc.save()
-    const newArrayBuffer = pdfBytes.buffer
+    // Create a proper ArrayBuffer copy with exact byte length
+    const newArrayBuffer = pdfBytes.buffer.slice(
+      pdfBytes.byteOffset,
+      pdfBytes.byteOffset + pdfBytes.byteLength
+    ) as ArrayBuffer
 
     documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
@@ -421,11 +432,15 @@ const addBlankPage = async () => {
     // Save snapshot before making changes
     editorStore.saveSnapshot()
 
-    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
+    const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     pdfDoc.addPage()
 
     const pdfBytes = await pdfDoc.save()
-    const newArrayBuffer = pdfBytes.buffer
+    // Create a proper ArrayBuffer copy with exact byte length
+    const newArrayBuffer = pdfBytes.buffer.slice(
+      pdfBytes.byteOffset,
+      pdfBytes.byteOffset + pdfBytes.byteLength
+    ) as ArrayBuffer
 
     documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
@@ -439,25 +454,129 @@ const downloadPDF = async () => {
   if (!documentStore.activeDocument?.arrayBuffer) return
 
   try {
-    let blobData: ArrayBuffer | Uint8Array
+    // Load PDF and handle page reordering if needed
+    let pdfDoc: PDFDocument
 
-    // If pages have been reordered, create a new PDF with the correct order
     if (documentStore.activeDocument.pageOrder && documentStore.activeDocument.pageOrder.length > 0) {
-      const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer)
-      const newPdfDoc = await PDFDocument.create()
+      const originalPdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
+      pdfDoc = await PDFDocument.create()
 
       // Copy pages in the new order
       for (const pageNum of documentStore.activeDocument.pageOrder) {
-        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageNum - 1])
-        newPdfDoc.addPage(copiedPage)
+        const [copiedPage] = await pdfDoc.copyPages(originalPdfDoc, [pageNum - 1])
+        pdfDoc.addPage(copiedPage)
       }
-
-      blobData = await newPdfDoc.save()
     } else {
-      blobData = documentStore.activeDocument.arrayBuffer
+      pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     }
 
-    const blob = new Blob([blobData as any], { type: 'application/pdf' })
+    // Add form fields if any exist
+    if (formFieldsStore.fields.length > 0) {
+      const form = pdfDoc.getForm()
+      const pages = pdfDoc.getPages()
+      const scale = documentStore.activeDocument.scale || 1.5
+      const borderColor = rgb(0.6, 0.6, 0.6)
+
+      for (const field of formFieldsStore.fields) {
+        const pageIndex = field.position.page - 1
+        const page = pages[pageIndex]
+
+        if (!page) continue
+
+        const pageHeight = page.getHeight()
+
+        // Convert canvas coordinates to PDF coordinates
+        const pdfX = field.position.x / scale
+        const pdfY = pageHeight - (field.position.y / scale) - (field.position.height / scale)
+        const pdfWidth = field.position.width / scale
+        const pdfHeight = field.position.height / scale
+
+        // Add field based on type
+        switch (field.type) {
+          case 'text':
+          case 'textarea': {
+            const textField = form.createTextField(field.name)
+            textField.addToPage(page, {
+              x: pdfX,
+              y: pdfY,
+              width: pdfWidth,
+              height: pdfHeight,
+              borderWidth: field.border ? 1 : 0,
+              borderColor: field.border ? borderColor : undefined
+            })
+            if (field.type === 'textarea') {
+              textField.enableMultiline()
+            }
+            break
+          }
+
+          case 'checkbox': {
+            const checkbox = form.createCheckBox(field.name)
+            checkbox.addToPage(page, {
+              x: pdfX,
+              y: pdfY,
+              width: pdfWidth,
+              height: pdfHeight,
+              borderWidth: field.border ? 1 : 0,
+              borderColor: field.border ? borderColor : undefined
+            })
+            break
+          }
+
+          case 'radio': {
+            const radioGroup = form.createRadioGroup(field.name)
+            const options = field.options || ['Option 1', 'Option 2']
+
+            // For radio buttons, create multiple options vertically
+            const optionHeight = Math.min(pdfHeight, 20)
+            const spacing = optionHeight + 5
+
+            options.forEach((option, index) => {
+              const optionY = pdfY - (index * spacing)
+              radioGroup.addOptionToPage(option, page, {
+                x: pdfX,
+                y: optionY,
+                width: optionHeight,
+                height: optionHeight,
+                borderWidth: field.border ? 1 : 0,
+                borderColor: field.border ? borderColor : undefined
+              })
+
+              // Draw label next to radio button
+              page.drawText(option, {
+                x: pdfX + optionHeight + 5,
+                y: optionY + 4,
+                size: 10,
+                color: rgb(0.2, 0.2, 0.2)
+              })
+            })
+            break
+          }
+
+          case 'dropdown': {
+            const dropdown = form.createDropdown(field.name)
+            const options = field.options || ['Option 1', 'Option 2']
+            dropdown.addOptions(options)
+            if (options.length > 0 && options[0]) {
+              dropdown.select(options[0])
+            }
+            dropdown.addToPage(page, {
+              x: pdfX,
+              y: pdfY,
+              width: pdfWidth,
+              height: pdfHeight,
+              borderWidth: field.border ? 1 : 0,
+              borderColor: field.border ? borderColor : undefined
+            })
+            break
+          }
+        }
+      }
+    }
+
+    // Save and download
+    const pdfBytes = await pdfDoc.save()
+    const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

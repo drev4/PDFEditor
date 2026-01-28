@@ -190,10 +190,11 @@ export function useImagePlacement(canvasRef: any) {
       editorStore.saveSnapshot()
 
       const { PDFDocument: PDFLib } = await import('pdf-lib')
-      const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer)
+      const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
       const pages = pdfDoc.getPages()
       const currentPageIndex = documentStore.activeDocument.currentPage - 1
       const page = pages[currentPageIndex]
+      if (!page) return
 
       // Load the image
       const imageFile = editorStore.imagePreview.file
@@ -266,7 +267,11 @@ export function useImagePlacement(canvasRef: any) {
       })
 
       const pdfBytes = await pdfDoc.save()
-      const newArrayBuffer = pdfBytes.buffer as ArrayBuffer
+      // Create a proper ArrayBuffer copy with exact byte length
+      const newArrayBuffer = pdfBytes.buffer.slice(
+        pdfBytes.byteOffset,
+        pdfBytes.byteOffset + pdfBytes.byteLength
+      ) as ArrayBuffer
 
       documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
