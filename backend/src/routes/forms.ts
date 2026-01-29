@@ -162,6 +162,12 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
       throw new AppError(404, 'Form not found')
     }
 
+    // Increment view count
+    await prisma.form.update({
+      where: { id: form.id },
+      data: { viewCount: { increment: 1 } }
+    })
+
     // Don't expose sensitive data
     const { userId, ...publicForm } = form
 

@@ -26,6 +26,18 @@ const router = createRouter({
       name: 'dashboard',
       component: () => import('@/views/DashboardView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/form/:shareId',
+      name: 'public-form',
+      component: () => import('@/views/PublicFormView.vue'),
+      meta: { public: true }
+    },
+    {
+      path: '/form/:shareId/confirmation',
+      name: 'public-form-confirmation',
+      component: () => import('@/views/PublicFormConfirmationView.vue'),
+      meta: { public: true }
     }
   ]
 })

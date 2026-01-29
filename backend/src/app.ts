@@ -5,6 +5,7 @@ import path from 'path'
 import { authRouter } from './routes/auth.js'
 import { formsRouter } from './routes/forms.js'
 import { uploadRouter } from './routes/upload.js'
+import { responsesRouter } from './routes/responses.js'
 import { errorHandler } from './middleware/errorHandler.js'
 
 dotenv.config()
@@ -30,6 +31,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth', authRouter)
 app.use('/api/forms', formsRouter)
 app.use('/api/upload', uploadRouter)
+app.use('/api/responses', responsesRouter)
 
 // Error handler
 app.use(errorHandler)
