@@ -17,6 +17,7 @@
         placeholder="John Doe"
         class="w-full"
         autocomplete="name"
+        data-testid="register-name-input"
       />
     </div>
 
@@ -34,6 +35,7 @@
         class="w-full"
         required
         autocomplete="email"
+        data-testid="register-email-input"
       />
       <small v-if="errors.email" class="text-red-500">{{ errors.email }}</small>
     </div>
@@ -54,6 +56,8 @@
         inputClass="w-full"
         required
         autocomplete="new-password"
+        inputId="register-password-input"
+        data-testid="register-password-input"
       >
         <template #footer>
           <p class="text-xs text-gray-600 mt-2">
@@ -80,6 +84,8 @@
         inputClass="w-full"
         required
         autocomplete="new-password"
+        inputId="register-confirm-password-input"
+        data-testid="register-confirm-password-input"
       />
       <small v-if="errors.confirmPassword" class="text-red-500">{{ errors.confirmPassword }}</small>
     </div>
@@ -97,6 +103,7 @@
       :loading="authStore.loading"
       class="w-full"
       size="large"
+      data-testid="register-submit-button"
     />
   </form>
 </template>

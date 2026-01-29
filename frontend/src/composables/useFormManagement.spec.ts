@@ -38,19 +38,22 @@ describe('useFormManagement', () => {
     it('should create form for active document', async () => {
       const documentStore = useDocumentStore()
       const formsStore = useFormsStore()
+      const formFieldsStore = useFormFieldsStore()
 
       await createMockDocument(documentStore)
 
       formsStore.createForm = vi.fn().mockResolvedValue(mockForm)
+      const setCurrentFormSpy = vi.spyOn(formFieldsStore, 'setCurrentForm')
 
       const { createFormForCurrentDocument } = useFormManagement()
       const form = await createFormForCurrentDocument('My Form')
 
       expect(formsStore.createForm).toHaveBeenCalledWith({
         title: 'My Form',
-        description: expect.any(String),
-        pdfUrl: null
+        description: 'PDF form based on test.pdf',
+        pdfUrl: undefined
       })
+      expect(setCurrentFormSpy).toHaveBeenCalledWith('form-1')
       expect(form.id).toBe('form-1')
     })
 

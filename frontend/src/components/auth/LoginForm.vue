@@ -19,6 +19,7 @@
         class="w-full"
         required
         autocomplete="email"
+        data-testid="login-email-input"
       />
       <small v-if="errors.email" class="text-red-500">{{ errors.email }}</small>
     </div>
@@ -39,6 +40,8 @@
         inputClass="w-full"
         required
         autocomplete="current-password"
+        inputId="login-password-input"
+        data-testid="login-password-input"
       />
       <small v-if="errors.password" class="text-red-500">{{ errors.password }}</small>
     </div>
@@ -56,6 +59,7 @@
       :loading="authStore.loading"
       class="w-full"
       size="large"
+      data-testid="login-submit-button"
     />
   </form>
 </template>
