@@ -38,6 +38,7 @@ export interface Form {
   status: FormStatus
   pdfUrl: string | null
   settings: Record<string, unknown> | null
+  viewCount: number
   createdAt: string
   updatedAt: string
   fields?: Field[]

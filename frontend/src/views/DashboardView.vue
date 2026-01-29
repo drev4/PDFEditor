@@ -137,7 +137,10 @@
             <TabPanel value="0" header="Documents" class="flex-1">
               <DocumentsList />
             </TabPanel>
-            <TabPanel value="1" header="Pages" class="flex-1">
+            <TabPanel value="1" header="Forms" class="flex-1">
+              <FormsList />
+            </TabPanel>
+            <TabPanel value="2" header="Pages" class="flex-1">
               <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
             </TabPanel>
           </TabView>
@@ -193,6 +196,7 @@ import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import DocumentsList from '@/components/pdf/DocumentsList.vue'
+import FormsList from '@/components/forms/FormsList.vue'
 import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
 import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 

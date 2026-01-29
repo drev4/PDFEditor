@@ -1,11 +1,13 @@
 <template>
   <RouterView />
+  <ConfirmDialog />
 </template>
 
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth.store'
+import ConfirmDialog from 'primevue/confirmdialog'
 
 const authStore = useAuthStore()
 
