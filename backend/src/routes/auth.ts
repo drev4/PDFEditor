@@ -44,6 +44,7 @@ authRouter.post('/register', async (req, res, next) => {
       select: { id: true, email: true, name: true, createdAt: true }
     })
 
+    // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
     const token = jwt.sign(
       { userId: user.id },
       process.env.JWT_SECRET!,
@@ -79,6 +80,7 @@ authRouter.post('/login', async (req, res, next) => {
       throw new AppError(401, 'Invalid credentials')
     }
 
+    // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
     const token = jwt.sign(
       { userId: user.id },
       process.env.JWT_SECRET!,

@@ -4,6 +4,9 @@ import { nanoid } from 'nanoid'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
+import { pdfProcessor, type ExtractedField } from '../services/pdf-processor.js'
+import fs from 'fs'
+import path from 'path'
 
 export const formsRouter = Router()
 
@@ -86,6 +89,61 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
 
     if (!form) {
       throw new AppError(404, 'Form not found')
+    }
+
+    // Sync fields from PDF if pdfUrl exists and no fields in DB
+    if (form.pdfUrl && form.fields.length === 0) {
+      try {
+        // Extract filename from URL
+        const urlParts = form.pdfUrl.split('/')
+        const filename = urlParts[urlParts.length - 1]
+        const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
+
+        // Check if PDF file exists
+        if (fs.existsSync(pdfPath)) {
+          // Read and extract fields from PDF
+          const pdfBuffer = fs.readFileSync(pdfPath)
+          const extractedFields = await pdfProcessor.extractFieldsFromPDF(pdfBuffer)
+
+          if (extractedFields.length > 0) {
+            console.log(`Found ${extractedFields.length} fields in PDF, syncing to database...`)
+
+            // Save extracted fields to database
+            await prisma.field.createMany({
+              data: extractedFields.map((field, index) => ({
+                formId: id,
+                type: field.type,
+                name: field.name,
+                label: field.label,
+                required: field.required,
+                position: field.position,
+                options: field.options || undefined,
+                validation: field.validation ? {
+                  minLength: field.validation.minLength || undefined,
+                  maxLength: field.validation.maxLength || undefined,
+                  pattern: field.validation.pattern || undefined
+                } : undefined,
+                order: index
+              }))
+            })
+
+            // Reload form with newly created fields
+            const updatedForm = await prisma.form.findFirst({
+              where: { id },
+              include: {
+                fields: { orderBy: { order: 'asc' } }
+              }
+            })
+
+            console.log(`✓ Successfully synced ${extractedFields.length} fields from PDF to database`)
+
+            return res.json({ form: updatedForm })
+          }
+        }
+      } catch (error) {
+        console.error('Error syncing fields from PDF:', error)
+        // Continue with original form even if sync fails
+      }
     }
 
     res.json({ form })
@@ -351,6 +409,50 @@ formsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequest, 
         ...field
       }))
     })
+
+    // Embed fields in the PDF if pdfUrl exists
+    if (form.pdfUrl) {
+      try {
+        // Extract filename from URL (format: http://baseurl/uploads/pdfs/filename.pdf)
+        const urlParts = form.pdfUrl.split('/')
+        const filename = urlParts[urlParts.length - 1]
+        const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
+
+        // Check if PDF file exists
+        if (fs.existsSync(pdfPath)) {
+          // Read the PDF
+          const pdfBuffer = fs.readFileSync(pdfPath)
+
+          // Convert field data to ExtractedField format for embedding
+          const fieldsToEmbed: ExtractedField[] = fieldsData.map(field => ({
+            type: field.type,
+            name: field.name,
+            label: field.label,
+            required: field.required,
+            position: field.position,
+            options: field.options || undefined,
+            validation: field.validation ? {
+              minLength: field.validation.minLength || undefined,
+              maxLength: field.validation.maxLength || undefined,
+              pattern: field.validation.pattern || undefined
+            } : undefined
+          }))
+
+          // Embed fields in the PDF
+          const modifiedPdfBuffer = await pdfProcessor.embedFieldsInPDF(pdfBuffer, fieldsToEmbed)
+
+          // Save the modified PDF back to disk
+          fs.writeFileSync(pdfPath, modifiedPdfBuffer)
+
+          console.log(`✓ Successfully embedded ${fieldsToEmbed.length} fields in PDF: ${filename}`)
+        } else {
+          console.warn(`PDF file not found at path: ${pdfPath}`)
+        }
+      } catch (error) {
+        console.error('Error embedding fields in PDF:', error)
+        // Continue even if PDF embedding fails - fields are already saved in DB
+      }
+    }
 
     // Return newly created fields
     const savedFields = await prisma.field.findMany({
