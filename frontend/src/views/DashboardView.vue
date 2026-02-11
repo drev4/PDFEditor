@@ -42,6 +42,16 @@
               />
             </template>
 
+            <!-- My Forms Button -->
+            <Button
+              icon="pi pi-list"
+              label="My Forms"
+              @click="router.push('/dashboard/forms')"
+              severity="primary"
+              outlined
+              size="small"
+            />
+
             <!-- Logout Button -->
             <Button
               icon="pi pi-sign-out"
@@ -58,10 +68,10 @@
 
     <!-- Main Content -->
     <main class="flex-1 flex overflow-hidden">
-      <!-- Welcome Screen - Show when no documents -->
+      <!-- Welcome Screen - Show when no documents are loaded -->
       <div
         v-if="!documentStore.hasDocuments"
-        class="flex-1 flex items-center justify-center p-8"
+        class="flex-1 flex items-center justify-center p-8 overflow-y-auto"
       >
         <div class="max-w-2xl w-full">
           <!-- Hero Section -->
@@ -147,7 +157,7 @@
         </aside>
 
         <!-- Center - PDF Viewer -->
-        <div class="flex-1 flex">
+        <div class="flex-1 flex overflow-hidden">
           <div class="flex-1">
             <PDFViewer ref="pdfViewerRef" />
           </div>
@@ -180,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
@@ -191,6 +201,7 @@ import TabPanel from 'primevue/tabpanel'
 import { useAuthStore } from '@/stores/auth.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
+import { useFormsStore } from '@/stores/forms.store'
 import { useFieldsErrorHandler } from '@/composables/useFieldsErrorHandler'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
@@ -203,12 +214,21 @@ import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.
 const authStore = useAuthStore()
 const documentStore = useDocumentStore()
 const formFieldsStore = useFormFieldsStore()
+const formsStore = useFormsStore()
 const router = useRouter()
 const toast = useToast()
 const pdfViewerRef = ref<InstanceType<typeof PDFViewer> | null>(null)
 
 // Initialize error handler for fields
 useFieldsErrorHandler()
+
+const showSidebar = computed(() => {
+  return documentStore.hasDocuments || formsStore.formsCount > 0 || formsStore.loading
+})
+
+onMounted(() => {
+  formsStore.fetchForms()
+})
 
 const closeDocument = () => {
   if (documentStore.activeDocumentId) {
