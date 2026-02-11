@@ -356,7 +356,7 @@ async function handleDirectPDFUpload() {
 
 async function handlePublish(formId: string) {
   try {
-    await formsService.update(formId, { status: 'published' })
+    await formsStore.updateFormStatus(formId, 'published')
 
     toast.add({
       severity: 'success',
@@ -364,11 +364,6 @@ async function handlePublish(formId: string) {
       detail: 'Form is now accepting responses',
       life: 3000
     })
-
-    // Refresh current form
-    if (formFieldsStore.currentFormId) {
-      await formsStore.fetchForm(formFieldsStore.currentFormId)
-    }
   } catch (error) {
     console.error('Error publishing form:', error)
     toast.add({
@@ -382,7 +377,7 @@ async function handlePublish(formId: string) {
 
 async function handleUnpublish(formId: string) {
   try {
-    await formsService.update(formId, { status: 'draft' })
+    await formsStore.updateFormStatus(formId, 'draft')
 
     toast.add({
       severity: 'success',
@@ -390,11 +385,6 @@ async function handleUnpublish(formId: string) {
       detail: 'Form is no longer accepting responses',
       life: 3000
     })
-
-    // Refresh current form
-    if (formFieldsStore.currentFormId) {
-      await formsStore.fetchForm(formFieldsStore.currentFormId)
-    }
   } catch (error) {
     console.error('Error unpublishing form:', error)
     toast.add({

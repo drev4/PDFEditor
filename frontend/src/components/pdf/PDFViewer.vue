@@ -27,7 +27,7 @@
         <div class="pdf-document-container">
           <!-- Drawing Toolbar Overlay -->
           <DrawingToolbar
-            v-if="documentStore.activeDocument"
+            v-if="documentStore.activeDocument && !readOnly"
             @select-tool="handleToolSelection"
           />
 
@@ -57,15 +57,17 @@
             ></div>
 
             <!-- Form Fields Overlay -->
-            <FormFieldsOverlay
-              v-if="canvasRef"
-              :canvas-width="canvasRef?.width || 0"
-              :canvas-height="canvasRef?.height || 0"
-            />
+            <slot name="fields-overlay" :width="canvasRef?.width" :height="canvasRef?.height" :scale="scale">
+              <FormFieldsOverlay
+                v-if="canvasRef && !readOnly"
+                :canvas-width="canvasRef?.width || 0"
+                :canvas-height="canvasRef?.height || 0"
+              />
+            </slot>
 
             <!-- Image Preview Overlay -->
             <div
-              v-if="editorStore.imagePreview"
+              v-if="editorStore.imagePreview && !readOnly"
               class="image-preview-container"
               :style="{
                 left: `${editorStore.imagePreview.x}px`,
@@ -92,7 +94,7 @@
 
             <!-- Text Preview Overlay (inside pdf-canvas-wrapper for correct coordinates) -->
             <div
-              v-if="editorStore.textPreview"
+              v-if="editorStore.textPreview && !readOnly"
               class="text-preview-container"
               :style="{
                 left: `${editorStore.textPreview.x}px`,
@@ -121,7 +123,7 @@
 
           <!-- Image Placement Controls -->
           <ImageControls
-            v-if="editorStore.imagePreview"
+            v-if="editorStore.imagePreview && !readOnly"
             :maintain-aspect-ratio="editorStore.imagePreview.maintainAspectRatio"
             @toggle-aspect-ratio="editorStore.toggleMaintainAspectRatio()"
             @reset-size="editorStore.resetImageSize()"
@@ -133,7 +135,7 @@
 
           <!-- Text Placement Controls -->
           <TextControls
-            v-if="editorStore.textPreview"
+            v-if="editorStore.textPreview && !readOnly"
             :text="editorStore.textPreview.text"
             :font-size="editorStore.textPreview.fontSize"
             :color="editorStore.textPreview.color"
@@ -186,6 +188,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url
 ).href
+
+const props = defineProps<{
+  readOnly?: boolean
+}>()
 
 const documentStore = useDocumentStore()
 const drawingStore = useDrawingStore()
@@ -461,7 +467,7 @@ onMounted(async () => {
     setTimeout(async () => {
       // Verificar de nuevo antes de cargar
       if (!formFieldsStore.currentFormId) {
-        console.log('Loading fields from PDF on mount for document:', documentStore.activeDocument.id)
+        console.log('Loading fields from PDF on mount for document:', documentStore.activeDocument?.id)
         await loadFieldsFromPDF()
       }
     }, 700)

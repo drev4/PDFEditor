@@ -79,13 +79,20 @@
         <!-- Actions -->
         <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
+            icon="pi pi-check-circle"
+            label="Responses"
+            @click="handleViewResponses(form.id)"
+            size="small"
+            severity="success"
+            outlined
+            class="flex-1"
+          />
+          <Button
             icon="pi pi-share-alt"
-            label="Share"
             @click="handleShare(form)"
             size="small"
             severity="info"
             outlined
-            class="flex-1"
           />
           <Button
             icon="pi pi-pencil"
@@ -122,6 +129,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
@@ -133,6 +141,7 @@ import { useFormsStore } from '@/stores/forms.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
 
+const router = useRouter()
 const toast = useToast()
 const confirm = useConfirm()
 const formsStore = useFormsStore()
@@ -175,6 +184,10 @@ function statusClass(status: string) {
 function handleShare(form: Form) {
   selectedForm.value = form
   showShareModal.value = true
+}
+
+function handleViewResponses(formId: string) {
+  router.push({ name: 'form-responses', params: { id: formId } })
 }
 
 async function handleEdit(form: Form) {
@@ -291,7 +304,7 @@ function handleDelete(form: Form) {
 
 async function handlePublish(formId: string) {
   try {
-    await formsStore.updateForm(formId, { status: 'published' })
+    await formsStore.updateFormStatus(formId, 'published')
     toast.add({
       severity: 'success',
       summary: 'Published',
@@ -314,7 +327,7 @@ async function handlePublish(formId: string) {
 
 async function handleUnpublish(formId: string) {
   try {
-    await formsStore.updateForm(formId, { status: 'draft' })
+    await formsStore.updateFormStatus(formId, 'draft')
     toast.add({
       severity: 'success',
       summary: 'Unpublished',

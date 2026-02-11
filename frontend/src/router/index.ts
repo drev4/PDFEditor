@@ -28,6 +28,18 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/dashboard/forms',
+      name: 'forms-management',
+      component: () => import('@/views/FormsManagementView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/dashboard/forms/:id/responses',
+      name: 'form-responses',
+      component: () => import('@/views/ResponsesView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/form/:shareId',
       name: 'public-form',
       component: () => import('@/views/PublicFormView.vue'),

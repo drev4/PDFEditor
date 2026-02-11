@@ -91,6 +91,11 @@ export const formsService = {
     return response.form
   },
 
+  async updateStatus(id: string, status: FormStatus): Promise<Form> {
+    const response = await api.patch<FormResponse>(`/forms/${id}/status`, { status })
+    return response.form
+  },
+
   async delete(id: string): Promise<void> {
     await api.delete(`/forms/${id}`)
   },

@@ -114,6 +114,31 @@ export const useFormsStore = defineStore('forms', () => {
     }
   }
 
+  async function updateFormStatus(id: string, status: any) {
+    loading.value = true
+    error.value = null
+    try {
+      const updatedForm = await formsService.updateStatus(id, status)
+      const index = forms.value.findIndex(f => f.id === id)
+      if (index !== -1) {
+        forms.value[index] = updatedForm
+      }
+      if (currentForm.value?.id === id) {
+        currentForm.value = updatedForm
+      }
+      return updatedForm
+    } catch (e) {
+      if (e instanceof ApiError) {
+        error.value = e.message
+      } else {
+        error.value = 'Failed to update form status'
+      }
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
   function clearCurrentForm() {
     currentForm.value = null
   }
@@ -130,6 +155,7 @@ export const useFormsStore = defineStore('forms', () => {
     fetchForm,
     createForm,
     updateForm,
+    updateFormStatus,
     deleteForm,
     clearCurrentForm
   }

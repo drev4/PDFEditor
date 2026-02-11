@@ -277,6 +277,34 @@ Content-Type: application/json
 
 ---
 
+### PATCH /api/forms/:id/status
+Actualizar solo el estado de un formulario.
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "status": "published"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "form": {
+    "id": "uuid-123",
+    "status": "published",
+    "updatedAt": "2026-02-11T10:00:00.000Z"
+  }
+}
+
+---
+
 ### DELETE /api/forms/:id
 Eliminar un formulario.
 
@@ -447,6 +475,40 @@ Content-Type: application/json
   "message": "3 fields deleted successfully"
 }
 ```
+
+---
+
+## Responses Endpoints
+
+### POST /api/responses
+Enviar una respuesta a un formulario público. No requiere autenticación.
+
+**Request:**
+```json
+{
+  "formId": "uuid-del-formulario",
+  "shareId": "share-id-del-formulario",
+  "answers": {
+    "field-id-1": "Valor de texto",
+    "field-id-2": true,
+    "field-id-3": "Opción 1"
+  }
+}
+```
+
+**Response:** `201 Created`
+```json
+{
+  "success": true,
+  "responseId": "uuid-de-la-respuesta",
+  "message": "Response submitted successfully"
+}
+```
+
+**Errores:**
+- `400 Bad Request` - Validación falló (campos requeridos, formato inválido)
+- `403 Forbidden` - El formulario no está publicado
+- `404 Not Found` - Formulario no encontrado o shareId incorrecto
 
 ---
 

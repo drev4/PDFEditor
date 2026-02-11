@@ -185,6 +185,35 @@ formsRouter.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
   }
 })
 
+// PATCH /api/forms/:id/status - Update form status
+formsRouter.patch('/:id/status', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const id = req.params.id as string
+    const { status } = req.body
+
+    if (!['draft', 'published', 'closed'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' })
+    }
+
+    const existingForm = await prisma.form.findFirst({
+      where: { id, userId: req.userId }
+    })
+
+    if (!existingForm) {
+      throw new AppError(404, 'Form not found')
+    }
+
+    const form = await prisma.form.update({
+      where: { id },
+      data: { status }
+    })
+
+    res.json({ form })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // DELETE /api/forms/:id - Delete form
 formsRouter.delete('/:id', authenticate, async (req: AuthRequest, res, next) => {
   try {
@@ -230,6 +259,109 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
     const { userId, ...publicForm } = form
 
     res.json({ form: publicForm })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// GET /api/forms/:id/responses - Get responses for a form
+formsRouter.get('/:id/responses', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const id = req.params.id as string
+    const limit = parseInt(req.query.limit as string) || 20
+    const offset = parseInt(req.query.offset as string) || 0
+
+    // Verify form ownership
+    const form = await prisma.form.findFirst({
+      where: { id, userId: req.userId }
+    })
+
+    if (!form) {
+      throw new AppError(404, 'Form not found')
+    }
+
+    // Get total count
+    const totalCount = await prisma.response.count({
+      where: { formId: id }
+    })
+
+    // Get responses with answers
+    const responses = await prisma.response.findMany({
+      where: { formId: id },
+      include: {
+        answers: true
+      },
+      orderBy: { submittedAt: 'desc' },
+      take: limit,
+      skip: offset
+    })
+
+    res.json({
+      responses,
+      pagination: {
+        total: totalCount,
+        limit,
+        offset
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// GET /api/forms/:id/responses/export - Export responses as CSV
+formsRouter.get('/:id/responses/export', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const id = req.params.id as string
+
+    // Verify form ownership
+    const form = await prisma.form.findFirst({
+      where: { id, userId: req.userId },
+      include: {
+        fields: { orderBy: { order: 'asc' } }
+      }
+    })
+
+    if (!form) {
+      throw new AppError(404, 'Form not found')
+    }
+
+    // Get all responses with answers
+    const responses = await prisma.response.findMany({
+      where: { formId: id },
+      include: {
+        answers: true
+      },
+      orderBy: { submittedAt: 'desc' }
+    })
+
+    // Prepare CSV headers
+    const headers = ['Date Submitted', 'IP Address', ...form.fields.map(f => f.label || f.name)]
+
+    // Prepare CSV rows
+    const csvRows = responses.map(resp => {
+      const date = resp.submittedAt.toISOString()
+      const ip = resp.ipAddress || ''
+      const answers = form.fields.map(field => {
+        const ans = resp.answers.find(a => a.fieldId === field.id)
+        let val = ans ? String(ans.value) : ''
+
+        // Escape characters for CSV
+        // 1. Double up any existing double quotes
+        // 2. Wrap the whole field in double quotes if it contains a comma, newline, or double quote
+        if (val.includes('"') || val.includes(',') || val.includes('\n') || val.includes('\r')) {
+          val = `"${val.replace(/"/g, '""')}"`
+        }
+        return val
+      })
+      return [date, ip, ...answers].join(',')
+    })
+
+    const csvContent = '\uFEFF' + [headers.map(h => `"${h.replace(/"/g, '""')}"`).join(','), ...csvRows].join('\n')
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="responses-${form.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.csv"`)
+    res.send(csvContent)
   } catch (error) {
     next(error)
   }

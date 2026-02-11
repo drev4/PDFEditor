@@ -123,28 +123,51 @@ responsesRouter.post('/', async (req: Request, res, next) => {
     const userAgent = req.headers['user-agent'] || null
 
     // Create response with answers
-    const response = await prisma.response.create({
-      data: {
-        formId,
-        ipAddress,
-        userAgent,
-        answers: {
-          create: Object.entries(answers).map(([fieldId, value]) => ({
-            fieldId,
-            value: typeof value === 'boolean' ? String(value) : value
-          }))
-        }
-      },
-      include: {
-        answers: true
-      }
+    // Filter answers to only include fields that belong to this form
+    const formFieldIds = new Set(form.fields.map(f => f.id))
+    const validAnswerEntries = Object.entries(answers).filter(([fieldId]) => {
+      const isValid = formFieldIds.has(fieldId)
+      if (!isValid) console.warn(`Skipping invalid fieldId in response: ${fieldId}`)
+      return isValid
     })
 
-    res.status(201).json({
-      success: true,
-      responseId: response.id,
-      message: 'Response submitted successfully'
-    })
+    try {
+      const response = await prisma.response.create({
+        data: {
+          formId,
+          ipAddress,
+          userAgent,
+          answers: {
+            create: validAnswerEntries.map(([fieldId, value]) => {
+              // Ensure value is always a string and not undefined/null
+              let stringValue = ''
+              if (value === true || value === false) {
+                stringValue = String(value)
+              } else if (value !== null && value !== undefined) {
+                stringValue = String(value)
+              }
+
+              return {
+                fieldId,
+                value: stringValue
+              }
+            })
+          }
+        },
+        include: {
+          answers: true
+        }
+      })
+
+      res.status(201).json({
+        success: true,
+        responseId: response.id,
+        message: 'Response submitted successfully'
+      })
+    } catch (prismaError) {
+      console.error('Prisma Error creating response:', prismaError)
+      throw prismaError // Will be caught by errorHandler
+    }
   } catch (error) {
     next(error)
   }
