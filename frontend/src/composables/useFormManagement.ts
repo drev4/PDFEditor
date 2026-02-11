@@ -18,8 +18,9 @@ export function useFormManagement() {
 
   /**
    * Upload a PDF file to the server
+   * Returns the PDF URL and extracted fields count
    */
-  async function uploadPDF(file: File): Promise<string> {
+  async function uploadPDF(file: File): Promise<{ url: string; extractedFieldsCount: number }> {
     try {
       isUploading.value = true
       uploadProgress.value = null
@@ -28,7 +29,30 @@ export function useFormManagement() {
         uploadProgress.value = progress
       })
 
-      return response.url
+      // If the PDF has extracted fields, load them into the store
+      let extractedFieldsCount = 0
+      if (response.fields && response.fields.length > 0) {
+        console.log(`PDF uploaded with ${response.fields.length} extracted fields`)
+
+        // Convert extracted fields to store format and load them
+        formFieldsStore.loadFieldsFromPDF(response.fields.map(field => ({
+          type: field.type,
+          name: field.name,
+          label: field.label,
+          required: field.required,
+          position: field.position,
+          options: field.options,
+          border: true, // Default to having border
+          validation: field.validation
+        })))
+
+        extractedFieldsCount = response.fields.length
+      }
+
+      return {
+        url: response.url,
+        extractedFieldsCount
+      }
     } finally {
       isUploading.value = false
       uploadProgress.value = null
@@ -40,7 +64,7 @@ export function useFormManagement() {
    * @param title - Título del formulario (opcional)
    * @param pdfFile - Archivo PDF a subir (opcional)
    */
-  async function createFormForCurrentDocument(title?: string, pdfFile?: File) {
+  async function createFormForCurrentDocument(title?: string, pdfFile?: File, description?: string) {
     const activeDoc = documentStore.activeDocument
     if (!activeDoc) {
       throw new Error('No active document')
@@ -51,13 +75,16 @@ export function useFormManagement() {
 
       // Upload PDF if provided
       let pdfUrl: string | undefined = undefined
+      let extractedFieldsCount = 0
       if (pdfFile) {
-        pdfUrl = await uploadPDF(pdfFile)
+        const uploadResult = await uploadPDF(pdfFile)
+        pdfUrl = uploadResult.url
+        extractedFieldsCount = uploadResult.extractedFieldsCount
       }
 
       const form = await formsStore.createForm({
         title: title || `Form - ${activeDoc.name}`,
-        description: `PDF form based on ${activeDoc.name}`,
+        description: description || undefined,
         pdfUrl
       })
 
@@ -65,9 +92,12 @@ export function useFormManagement() {
       formFieldsStore.setCurrentForm(form.id)
 
       // Save any existing local fields to the new form
+      // This includes both manually added fields and extracted fields from the PDF
       if (formFieldsStore.fields.length > 0) {
         await formFieldsStore.saveAllFields()
       }
+
+      console.log(`Form created with ${extractedFieldsCount} fields extracted from PDF`)
 
       return form
     } finally {
@@ -130,19 +160,26 @@ export function useFormManagement() {
 
   /**
    * Upload a PDF and update the current form
+   * Automatically loads extracted fields from the PDF
    */
   async function uploadPDFForCurrentForm(file: File) {
     if (!formFieldsStore.currentFormId) {
       throw new Error('No current form set')
     }
 
-    const pdfUrl = await uploadPDF(file)
+    const uploadResult = await uploadPDF(file)
 
     await formsStore.updateForm(formFieldsStore.currentFormId, {
-      pdfUrl
+      pdfUrl: uploadResult.url
     })
 
-    return pdfUrl
+    // Save the extracted fields if any
+    if (uploadResult.extractedFieldsCount > 0) {
+      await formFieldsStore.saveAllFields()
+      console.log(`Saved ${uploadResult.extractedFieldsCount} fields extracted from PDF`)
+    }
+
+    return uploadResult
   }
 
   return {

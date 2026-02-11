@@ -29,6 +29,17 @@ export function useFormFieldsExport() {
 
       if (!page) continue
 
+      // Check if field already exists and remove it to avoid duplicates
+      try {
+        const existingField = form.getFieldMaybe(field.name)
+        if (existingField) {
+          console.log(`Removing existing field "${field.name}" before recreating`)
+          form.removeField(existingField)
+        }
+      } catch (e) {
+        // Field doesn't exist, which is fine
+      }
+
       const pageHeight = page.getHeight()
 
       // Convert canvas coordinates to PDF coordinates

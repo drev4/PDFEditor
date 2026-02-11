@@ -372,22 +372,24 @@ const renderPageWithOverlays = async () => {
   }
 }
 
-// Variable para rastrear el último documento para el que cargamos campos
-const lastLoadedDocId = ref<string | null>(null)
-
 // Watchers
 watch(() => documentStore.activeDocument?.id, async (newId, oldId) => {
   if (newId !== oldId && newId) {
     await loadPDF()
 
-    // Solo cargar campos si es un documento diferente al último
-    if (newId !== lastLoadedDocId.value) {
-      lastLoadedDocId.value = newId
+    // SIEMPRE intentar cargar campos del PDF cuando cambia el documento
+    // SOLO si NO hay un formulario actual (para no sobrescribir campos de BD)
+    if (!formFieldsStore.currentFormId) {
       // Esperamos un poco para asegurar que el documento está completamente cargado
+      // Y para dar tiempo a FormSavePanel a limpiar campos si es necesario
       await nextTick()
       setTimeout(async () => {
-        await loadFieldsFromPDF()
-      }, 500)
+        // Verificar de nuevo que no hay formulario antes de cargar
+        if (!formFieldsStore.currentFormId) {
+          console.log('Loading fields from PDF for document:', newId)
+          await loadFieldsFromPDF()
+        }
+      }, 700) // 700ms para asegurar que FormSavePanel terminó de limpiar
     }
   }
 }, { immediate: false })
@@ -453,12 +455,16 @@ onMounted(async () => {
   await loadPDF()
 
   // Si ya hay un documento activo al montar, cargar sus campos
-  if (documentStore.activeDocument?.id) {
-    lastLoadedDocId.value = documentStore.activeDocument.id
+  // SOLO si NO hay un formulario actual
+  if (documentStore.activeDocument?.id && !formFieldsStore.currentFormId) {
     await nextTick()
     setTimeout(async () => {
-      await loadFieldsFromPDF()
-    }, 500)
+      // Verificar de nuevo antes de cargar
+      if (!formFieldsStore.currentFormId) {
+        console.log('Loading fields from PDF on mount for document:', documentStore.activeDocument.id)
+        await loadFieldsFromPDF()
+      }
+    }, 700)
   }
 })
 

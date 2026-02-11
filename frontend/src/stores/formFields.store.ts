@@ -191,7 +191,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       name: field.name,
       label: field.label,
       required: field.required,
-      border: true, // Default value for UI
+      border: false, // Default value for UI - transparent without border
       position: field.position as FormField['position'],
       options: field.options,
       validation: field.validation
@@ -209,15 +209,15 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     error.value = null
 
     try {
-      // Convert FormField format to CreateFieldData format
+      // Convert FormField format to CreateFieldData format with validation
       const fieldsData: CreateFieldData[] = fields.value.map((field, index) => ({
         type: field.type,
-        name: field.name,
-        label: field.label,
+        name: field.name || `field_${Date.now()}_${index}`, // Ensure name is not empty
+        label: field.label || field.name || 'Untitled Field', // Ensure label is not empty (min 1 char required)
         required: field.required,
         position: field.position,
-        options: field.options,
-        validation: field.validation,
+        options: field.options && field.options.length > 0 ? field.options : undefined, // Only send if not empty
+        validation: field.validation && Object.keys(field.validation).length > 0 ? field.validation : undefined, // Only send if not empty
         order: index
       }))
 
@@ -255,14 +255,15 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     error.value = null
 
     try {
+      // Prepare field data and ensure it meets backend validation requirements
       const fieldData: CreateFieldData = {
         type: field.type,
-        name: field.name,
-        label: field.label,
+        name: field.name || `field_${Date.now()}`, // Ensure name is not empty
+        label: field.label || field.name || 'Untitled Field', // Ensure label is not empty
         required: field.required,
         position: field.position,
-        options: field.options,
-        validation: field.validation,
+        options: field.options && field.options.length > 0 ? field.options : undefined, // Only send if not empty
+        validation: field.validation && Object.keys(field.validation).length > 0 ? field.validation : undefined, // Only send if not empty
         order: fields.value.indexOf(field)
       }
 

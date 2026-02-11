@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="overlayRef"
     class="form-fields-overlay"
     :class="{ 'adding-mode': formFieldsStore.isAddingField }"
     @click="handleOverlayClick"
@@ -57,6 +58,7 @@ const documentStore = useDocumentStore()
 const { autoInitializeForm } = useFormManagement()
 const toast = useToast()
 
+const overlayRef = ref<HTMLDivElement | null>(null)
 const previewPosition = ref<{ x: number; y: number } | null>(null)
 
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
@@ -106,30 +108,30 @@ const getFieldTypeLabel = (type: FieldType) => {
 }
 
 const handleMouseMove = (e: MouseEvent) => {
-  if (!formFieldsStore.isAddingField) {
+  if (!formFieldsStore.isAddingField || !overlayRef.value) {
     previewPosition.value = null
     return
   }
 
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const rect = overlayRef.value.getBoundingClientRect()
   const x = e.clientX - rect.left - defaultFieldSize.value.width / 2
   const y = e.clientY - rect.top - defaultFieldSize.value.height / 2
 
-  // Keep within bounds
+  // Keep within bounds using the actual rendered size of the overlay
   previewPosition.value = {
-    x: Math.max(0, Math.min(x, props.canvasWidth - defaultFieldSize.value.width)),
-    y: Math.max(0, Math.min(y, props.canvasHeight - defaultFieldSize.value.height))
+    x: Math.max(0, Math.min(x, rect.width - defaultFieldSize.value.width)),
+    y: Math.max(0, Math.min(y, rect.height - defaultFieldSize.value.height))
   }
 }
 
 const handleOverlayClick = async (e: MouseEvent) => {
-  if (!formFieldsStore.isAddingField || !formFieldsStore.fieldTypeToAdd) {
+  if (!formFieldsStore.isAddingField || !formFieldsStore.fieldTypeToAdd || !overlayRef.value) {
     // If not adding, deselect current field
     formFieldsStore.selectField(null)
     return
   }
 
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const rect = overlayRef.value.getBoundingClientRect()
   const x = e.clientX - rect.left - defaultFieldSize.value.width / 2
   const y = e.clientY - rect.top - defaultFieldSize.value.height / 2
 
@@ -145,10 +147,10 @@ const handleOverlayClick = async (e: MouseEvent) => {
     name: uniqueName,
     label: `${getFieldTypeLabel(fieldType)} ${fieldNumber}`,
     required: false,
-    border: true, // Por defecto, los campos tienen borde
+    border: false, // Por defecto, los campos son transparentes sin borde
     position: {
-      x: Math.max(0, Math.min(x, props.canvasWidth - defaultFieldSize.value.width)),
-      y: Math.max(0, Math.min(y, props.canvasHeight - defaultFieldSize.value.height)),
+      x: Math.max(0, Math.min(x, rect.width - defaultFieldSize.value.width)),
+      y: Math.max(0, Math.min(y, rect.height - defaultFieldSize.value.height)),
       width: defaultFieldSize.value.width,
       height: defaultFieldSize.value.height,
       page: currentPage.value
@@ -193,6 +195,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   width: 100%;
   height: 100%;
   pointer-events: none;
+  z-index: 8; /* Above text-layer (z-index: 7) but below image/text previews (z-index: 10) */
 }
 
 .form-fields-overlay.adding-mode {

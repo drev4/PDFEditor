@@ -487,6 +487,17 @@ const downloadPDF = async () => {
 
         if (!page) continue
 
+        // Check if field already exists and remove it to avoid duplicates
+        try {
+          const existingField = form.getFieldMaybe(field.name)
+          if (existingField) {
+            console.log(`Removing existing field "${field.name}" before recreating`)
+            form.removeField(existingField)
+          }
+        } catch (e) {
+          // Field doesn't exist, which is fine
+        }
+
         const pageHeight = page.getHeight()
 
         // Convert canvas coordinates to PDF coordinates
@@ -506,7 +517,8 @@ const downloadPDF = async () => {
               width: pdfWidth,
               height: pdfHeight,
               borderWidth: field.border ? 1 : 0,
-              borderColor: field.border ? borderColor : undefined
+              borderColor: field.border ? borderColor : undefined,
+              backgroundColor: undefined // Transparent background
             })
             if (field.type === 'textarea') {
               textField.enableMultiline()
@@ -522,7 +534,8 @@ const downloadPDF = async () => {
               width: pdfWidth,
               height: pdfHeight,
               borderWidth: field.border ? 1 : 0,
-              borderColor: field.border ? borderColor : undefined
+              borderColor: field.border ? borderColor : undefined,
+              backgroundColor: undefined // Transparent background
             })
             break
           }
@@ -543,7 +556,8 @@ const downloadPDF = async () => {
                 width: optionHeight,
                 height: optionHeight,
                 borderWidth: field.border ? 1 : 0,
-                borderColor: field.border ? borderColor : undefined
+                borderColor: field.border ? borderColor : undefined,
+                backgroundColor: undefined // Transparent background
               })
 
               // Draw label next to radio button
@@ -570,7 +584,8 @@ const downloadPDF = async () => {
               width: pdfWidth,
               height: pdfHeight,
               borderWidth: field.border ? 1 : 0,
-              borderColor: field.border ? borderColor : undefined
+              borderColor: field.border ? borderColor : undefined,
+              backgroundColor: undefined // Transparent background
             })
             break
           }

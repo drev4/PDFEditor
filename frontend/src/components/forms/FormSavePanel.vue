@@ -26,19 +26,31 @@
           class="w-full mb-3"
         />
 
-        <Button
-          label="Save Form to Cloud"
-          icon="pi pi-cloud-upload"
-          @click="handleSaveForm"
-          class="w-full save-btn"
-          severity="success"
-          :loading="formManagement.isInitializing || formManagement.isUploading"
-          :disabled="!formTitle || !hasFields"
-        />
+        <div class="flex gap-2 mb-3">
+          <Button
+            label="Upload PDF"
+            icon="pi pi-cloud-upload"
+            @click="handleDirectPDFUpload"
+            class="flex-1"
+            severity="success"
+            :loading="isUploadingPDF"
+            :disabled="!hasPDFLoaded"
+          />
+          <Button
+            label="Save Form"
+            icon="pi pi-save"
+            @click="handleSaveForm"
+            class="flex-1 save-btn"
+            severity="info"
+            outlined
+            :loading="isUploadingPDF"
+            :disabled="!formTitle || !hasPDFLoaded"
+          />
+        </div>
 
-        <p v-if="!hasFields" class="text-xs text-amber-600 mt-2 flex items-center gap-1">
-          <i class="pi pi-exclamation-triangle"></i>
-          Add at least one field before saving
+        <p class="text-xs text-gray-500">
+          <i class="pi pi-info-circle"></i>
+          Upload PDF alone or save complete form with fields
         </p>
       </div>
     </div>
@@ -53,6 +65,15 @@
           <h4 class="tool-title">Form Saved</h4>
           <p class="text-xs text-gray-500">ID: {{ formFieldsStore.currentFormId }}</p>
         </div>
+        <Button
+          icon="pi pi-times"
+          @click="handleNewForm"
+          size="small"
+          severity="secondary"
+          text
+          rounded
+          v-tooltip.left="'Start new form'"
+        />
       </div>
       <div class="tool-body space-y-2">
         <div v-if="currentForm" class="info-box">
@@ -62,6 +83,15 @@
             {{ currentForm.fields?.length || 0 }} fields • {{ currentForm.status }}
           </p>
         </div>
+
+        <Button
+          label="Share Form"
+          icon="pi pi-share-alt"
+          @click="showShareModal = true"
+          class="w-full"
+          severity="success"
+          :disabled="!currentForm?.pdfUrl"
+        />
 
         <Button
           label="Update Fields"
@@ -74,14 +104,21 @@
         />
 
         <Button
-          label="Upload PDF"
+          label="Upload PDF to Server"
           icon="pi pi-cloud-upload"
-          @click="showPDFUpload = true"
+          @click="handleDirectPDFUpload"
           class="w-full"
           severity="secondary"
           outlined
+          :loading="isUploadingPDF"
+          :disabled="!hasPDFLoaded"
           v-if="!currentForm?.pdfUrl"
         />
+
+        <p v-if="!currentForm?.pdfUrl" class="text-xs text-amber-600 flex items-center gap-1">
+          <i class="pi pi-info-circle"></i>
+          Upload PDF first to enable sharing
+        </p>
 
         <div v-else class="info-box bg-blue-50 border-blue-200">
           <div class="flex items-start gap-2">
@@ -95,46 +132,13 @@
       </div>
     </div>
 
-    <!-- PDF Upload Dialog -->
-    <Dialog
-      v-model:visible="showPDFUpload"
-      header="Upload PDF to Server"
-      :modal="true"
-      :style="{ width: '400px' }"
-    >
-      <div class="p-4">
-        <p class="text-sm text-gray-600 mb-4">
-          Upload the current PDF file to the server to make it accessible online.
-        </p>
-
-        <PDFUploadButton
-          button-text="Upload Current PDF"
-          @upload-success="handlePDFUploadSuccess"
-          @upload-error="handlePDFUploadError"
-          @file-selected="handleFileSelected"
-          :auto-upload="false"
-          ref="uploadButtonRef"
-        />
-
-        <div class="flex gap-2 mt-4">
-          <Button
-            label="Upload"
-            icon="pi pi-upload"
-            @click="triggerPDFUpload"
-            class="flex-1"
-            severity="success"
-            :loading="formManagement.isUploading"
-            :disabled="!selectedPDFFile"
-          />
-          <Button
-            label="Cancel"
-            @click="showPDFUpload = false"
-            outlined
-            severity="secondary"
-          />
-        </div>
-      </div>
-    </Dialog>
+    <!-- Share Modal -->
+    <ShareFormModal
+      v-model:visible="showShareModal"
+      :form="currentForm"
+      @publish="handlePublish"
+      @unpublish="handleUnpublish"
+    />
 
     <!-- Success Toast -->
     <Toast position="top-right" />
@@ -147,53 +151,107 @@ import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
-import Dialog from 'primevue/dialog'
 import Toast from 'primevue/toast'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useFormsStore } from '@/stores/forms.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
-import PDFUploadButton from './PDFUploadButton.vue'
+import { usePDFUpload } from '@/composables/usePDFUpload'
+import { formsService } from '@/services/forms'
+import ShareFormModal from './ShareFormModal.vue'
 
 const formFieldsStore = useFormFieldsStore()
 const formsStore = useFormsStore()
 const documentStore = useDocumentStore()
 const formManagement = useFormManagement()
+const { isUploading: isUploadingPDF, upload: uploadPDF } = usePDFUpload()
 const toast = useToast()
 
 const formTitle = ref('')
 const formDescription = ref('')
-const showPDFUpload = ref(false)
-const selectedPDFFile = ref<File | null>(null)
-const uploadButtonRef = ref<InstanceType<typeof PDFUploadButton> | null>(null)
+const showShareModal = ref(false)
 
 const hasFields = computed(() => formFieldsStore.fields.length > 0)
 const currentForm = computed(() => formsStore.currentForm)
+const hasPDFLoaded = computed(() => !!documentStore.activeDocument?.file)
 
-// Auto-populate form title from document name
-watch(() => documentStore.activeDocument, (doc) => {
+// Auto-populate form title from document name and clear form state
+watch(() => documentStore.activeDocument, async (doc, oldDoc) => {
+  // If document changed (not just first load)
+  if (doc && oldDoc && doc.id !== oldDoc.id) {
+    // Check if this document has an associated form
+    const associatedForm = formsStore.forms.find(f => {
+      const pdfFileName = f.pdfUrl?.split('/').pop()
+      return pdfFileName === doc.name
+    })
+
+    if (associatedForm) {
+      // Load the associated form and its fields
+      try {
+        await formManagement.loadForm(associatedForm.id)
+      } catch (error) {
+        console.error('Error loading associated form:', error)
+      }
+    } else {
+      // No associated form - clear state for new form
+      formFieldsStore.clearFields()
+      formFieldsStore.setCurrentForm(null)
+      formsStore.currentForm = null
+      formTitle.value = ''
+      formDescription.value = ''
+    }
+  }
+
+  // Auto-populate title from document name if empty
   if (doc && !formTitle.value) {
     formTitle.value = doc.name.replace('.pdf', '')
   }
 }, { immediate: true })
 
+function handleNewForm() {
+  // Clear form state to start new
+  formFieldsStore.clearFields()
+  formFieldsStore.setCurrentForm(null)
+  formsStore.currentForm = null
+  formTitle.value = ''
+  formDescription.value = ''
+
+  toast.add({
+    severity: 'info',
+    summary: 'New Form',
+    detail: 'Ready to create a new form',
+    life: 2000
+  })
+}
+
 async function handleSaveForm() {
-  if (!formTitle.value || !hasFields.value) return
+  if (!formTitle.value || !hasPDFLoaded.value) return
 
   try {
     // Get the current PDF file from document store
     const pdfFile = getPDFFile()
 
-    // Create form (with PDF upload if file exists)
+    if (!pdfFile) {
+      toast.add({
+        severity: 'error',
+        summary: 'No PDF',
+        detail: 'No PDF file is currently loaded',
+        life: 3000
+      })
+      return
+    }
+
+    // Create form and upload PDF
     const form = await formManagement.createFormForCurrentDocument(
       formTitle.value,
-      pdfFile || undefined
+      pdfFile,
+      formDescription.value || undefined
     )
 
     toast.add({
       severity: 'success',
       summary: 'Form Saved',
-      detail: `Form "${formTitle.value}" has been saved successfully`,
+      detail: `Form "${formTitle.value}" has been saved with PDF`,
       life: 3000
     })
 
@@ -212,12 +270,14 @@ async function handleSaveForm() {
 
 async function handleUpdateFields() {
   try {
+    const fieldCount = formFieldsStore.fields.length
     await formFieldsStore.saveAllFields()
 
+    // Show enhanced message indicating fields are embedded in PDF
     toast.add({
       severity: 'success',
-      summary: 'Fields Updated',
-      detail: 'All form fields have been saved',
+      summary: 'Fields Saved & Embedded',
+      detail: `${fieldCount} field${fieldCount !== 1 ? 's' : ''} saved and embedded in PDF`,
       life: 3000
     })
   } catch (error) {
@@ -231,46 +291,6 @@ async function handleUpdateFields() {
   }
 }
 
-function handleFileSelected(file: File) {
-  selectedPDFFile.value = file
-}
-
-async function triggerPDFUpload() {
-  if (!selectedPDFFile.value || !uploadButtonRef.value) return
-
-  try {
-    await uploadButtonRef.value.uploadFile(selectedPDFFile.value)
-  } catch (error) {
-    console.error('Error uploading PDF:', error)
-  }
-}
-
-async function handlePDFUploadSuccess(url: string) {
-  showPDFUpload.value = false
-  selectedPDFFile.value = null
-
-  toast.add({
-    severity: 'success',
-    summary: 'PDF Uploaded',
-    detail: 'PDF has been uploaded to the server',
-    life: 3000
-  })
-
-  // Refresh current form to show updated pdfUrl
-  if (formFieldsStore.currentFormId) {
-    await formsStore.fetchForm(formFieldsStore.currentFormId)
-  }
-}
-
-function handlePDFUploadError(error: string) {
-  toast.add({
-    severity: 'error',
-    summary: 'Upload Failed',
-    detail: error,
-    life: 5000
-  })
-}
-
 function getPDFFile(): File | null {
   const doc = documentStore.activeDocument
   if (!doc?.file) return null
@@ -279,6 +299,111 @@ function getPDFFile(): File | null {
 
 function getPDFFilename(url: string): string {
   return url.split('/').pop() || 'file.pdf'
+}
+
+async function handleDirectPDFUpload() {
+  const pdfFile = getPDFFile()
+
+  if (!pdfFile) {
+    toast.add({
+      severity: 'error',
+      summary: 'No PDF',
+      detail: 'No PDF file is currently loaded',
+      life: 3000
+    })
+    return
+  }
+
+  try {
+    // If no form exists, create one automatically
+    if (!formFieldsStore.currentFormId) {
+      const autoTitle = formTitle.value || documentStore.activeDocument?.name.replace('.pdf', '') || 'Untitled Form'
+
+      const form = await formManagement.createFormForCurrentDocument(
+        autoTitle,
+        undefined  // Don't upload PDF yet, we'll do it separately
+      )
+
+      formsStore.currentForm = form
+      formTitle.value = autoTitle
+    }
+
+    // Upload PDF
+    const url = await uploadPDF(pdfFile)
+
+    // Update form with PDF URL
+    await formsService.update(formFieldsStore.currentFormId!, { pdfUrl: url })
+
+    toast.add({
+      severity: 'success',
+      summary: 'PDF Uploaded',
+      detail: 'PDF has been uploaded successfully',
+      life: 3000
+    })
+
+    // Refresh current form
+    await formsStore.fetchForm(formFieldsStore.currentFormId!)
+  } catch (error) {
+    console.error('Error uploading PDF:', error)
+    toast.add({
+      severity: 'error',
+      summary: 'Upload Failed',
+      detail: error instanceof Error ? error.message : 'Failed to upload PDF',
+      life: 5000
+    })
+  }
+}
+
+async function handlePublish(formId: string) {
+  try {
+    await formsService.update(formId, { status: 'published' })
+
+    toast.add({
+      severity: 'success',
+      summary: 'Form Published',
+      detail: 'Form is now accepting responses',
+      life: 3000
+    })
+
+    // Refresh current form
+    if (formFieldsStore.currentFormId) {
+      await formsStore.fetchForm(formFieldsStore.currentFormId)
+    }
+  } catch (error) {
+    console.error('Error publishing form:', error)
+    toast.add({
+      severity: 'error',
+      summary: 'Publish Failed',
+      detail: 'Failed to publish form',
+      life: 5000
+    })
+  }
+}
+
+async function handleUnpublish(formId: string) {
+  try {
+    await formsService.update(formId, { status: 'draft' })
+
+    toast.add({
+      severity: 'success',
+      summary: 'Form Unpublished',
+      detail: 'Form is no longer accepting responses',
+      life: 3000
+    })
+
+    // Refresh current form
+    if (formFieldsStore.currentFormId) {
+      await formsStore.fetchForm(formFieldsStore.currentFormId)
+    }
+  } catch (error) {
+    console.error('Error unpublishing form:', error)
+    toast.add({
+      severity: 'error',
+      summary: 'Unpublish Failed',
+      detail: 'Failed to unpublish form',
+      life: 5000
+    })
+  }
 }
 </script>
 

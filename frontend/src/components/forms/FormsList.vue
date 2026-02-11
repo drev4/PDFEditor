@@ -121,21 +121,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import ProgressSpinner from 'primevue/progressspinner'
 import Toast from 'primevue/toast'
 import ShareFormModal from './ShareFormModal.vue'
-import { formsService, type Form } from '@/services/forms'
+import { type Form } from '@/services/forms'
+import { useFormsStore } from '@/stores/forms.store'
+import { useDocumentStore } from '@/stores/document.store'
+import { useFormManagement } from '@/composables/useFormManagement'
 
 const toast = useToast()
 const confirm = useConfirm()
+const formsStore = useFormsStore()
+const documentStore = useDocumentStore()
+const formManagement = useFormManagement()
 
-const forms = ref<Form[]>([])
-const isLoading = ref(false)
-const error = ref<string | null>(null)
+// Use store directly for real-time updates
+const forms = computed(() => formsStore.forms)
+const isLoading = computed(() => formsStore.loading)
+const error = computed(() => formsStore.error)
+
 const showShareModal = ref(false)
 const selectedForm = ref<Form | null>(null)
 
@@ -144,15 +152,10 @@ onMounted(() => {
 })
 
 async function loadForms() {
-  isLoading.value = true
-  error.value = null
   try {
-    forms.value = await formsService.list()
+    await formsStore.fetchForms()
   } catch (err: any) {
     console.error('Error loading forms:', err)
-    error.value = err.message || 'Failed to load forms'
-  } finally {
-    isLoading.value = false
   }
 }
 
@@ -174,14 +177,87 @@ function handleShare(form: Form) {
   showShareModal.value = true
 }
 
-function handleEdit(form: Form) {
-  // TODO: Implement edit functionality
-  toast.add({
-    severity: 'info',
-    summary: 'Coming Soon',
-    detail: 'Form editing will be available soon',
-    life: 3000
-  })
+async function handleEdit(form: Form) {
+  if (!form.pdfUrl) {
+    toast.add({
+      severity: 'warn',
+      summary: 'No PDF',
+      detail: 'This form has no PDF uploaded',
+      life: 3000
+    })
+    return
+  }
+
+  try {
+    // Check if we're already viewing this form
+    const isAlreadyLoaded = formsStore.currentForm?.id === form.id
+
+    if (isAlreadyLoaded) {
+      toast.add({
+        severity: 'info',
+        summary: 'Form Active',
+        detail: `"${form.title}" is already open`,
+        life: 2000
+      })
+      return
+    }
+
+    // Check if PDF is already loaded in documents
+    const pdfFileName = form.pdfUrl.split('/').pop() || `${form.title}.pdf`
+    const existingDoc = documentStore.documents.find(doc => doc.name === pdfFileName)
+
+    if (existingDoc) {
+      // PDF already loaded, just switch to it
+      toast.add({
+        severity: 'info',
+        summary: 'Loading Form',
+        detail: 'Loading fields...',
+        life: 2000
+      })
+
+      documentStore.setActiveDocument(existingDoc.id)
+      await formManagement.loadForm(form.id)
+
+      toast.add({
+        severity: 'success',
+        summary: 'Form Loaded',
+        detail: `"${form.title}" is ready to edit`,
+        life: 3000
+      })
+    } else {
+      // Download and load PDF
+      toast.add({
+        severity: 'info',
+        summary: 'Loading Form',
+        detail: 'Downloading PDF and loading fields...',
+        life: 2000
+      })
+
+      const response = await fetch(form.pdfUrl)
+      if (!response.ok) throw new Error('Failed to download PDF')
+
+      const blob = await response.blob()
+      const file = new File([blob], pdfFileName, { type: 'application/pdf' })
+
+      await documentStore.loadPDF(file)
+      await formManagement.loadForm(form.id)
+
+      toast.add({
+        severity: 'success',
+        summary: 'Form Loaded',
+        detail: `"${form.title}" is ready to edit`,
+        life: 3000
+      })
+    }
+  } catch (err) {
+    console.error('Error loading form:', err)
+    toast.add({
+      severity: 'error',
+      summary: 'Load Failed',
+      detail: err instanceof Error ? err.message : 'Failed to load form',
+      life: 5000
+    })
+  }
 }
 
 function handleDelete(form: Form) {
@@ -194,14 +270,13 @@ function handleDelete(form: Form) {
     acceptClass: 'p-button-danger',
     accept: async () => {
       try {
-        await formsService.delete(form.id)
+        await formsStore.deleteForm(form.id)
         toast.add({
           severity: 'success',
           summary: 'Deleted',
           detail: 'Form deleted successfully',
           life: 3000
         })
-        await loadForms()
       } catch (err) {
         toast.add({
           severity: 'error',
@@ -216,14 +291,13 @@ function handleDelete(form: Form) {
 
 async function handlePublish(formId: string) {
   try {
-    await formsService.update(formId, { status: 'published' })
+    await formsStore.updateForm(formId, { status: 'published' })
     toast.add({
       severity: 'success',
       summary: 'Published',
       detail: 'Form is now accepting responses',
       life: 3000
     })
-    await loadForms()
     // Update selected form
     if (selectedForm.value) {
       selectedForm.value = forms.value.find(f => f.id === formId) || null
@@ -240,14 +314,13 @@ async function handlePublish(formId: string) {
 
 async function handleUnpublish(formId: string) {
   try {
-    await formsService.update(formId, { status: 'draft' })
+    await formsStore.updateForm(formId, { status: 'draft' })
     toast.add({
       severity: 'success',
       summary: 'Unpublished',
       detail: 'Form is no longer accepting responses',
       life: 3000
     })
-    await loadForms()
     // Update selected form
     if (selectedForm.value) {
       selectedForm.value = forms.value.find(f => f.id === formId) || null

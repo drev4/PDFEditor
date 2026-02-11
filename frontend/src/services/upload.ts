@@ -1,11 +1,33 @@
 import { authService } from './auth'
+import type { FieldType } from '@/stores/formFields.store'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
+
+export interface ExtractedField {
+  type: FieldType
+  name: string
+  label: string
+  required: boolean
+  position: {
+    x: number
+    y: number
+    width: number
+    height: number
+    page: number
+  }
+  options?: string[]
+  validation?: {
+    minLength?: number
+    maxLength?: number
+    pattern?: string
+  }
+}
 
 export interface UploadResponse {
   url: string
   filename: string
   size: number
+  fields: ExtractedField[] // Campos extraídos del PDF
 }
 
 export interface UploadProgress {
