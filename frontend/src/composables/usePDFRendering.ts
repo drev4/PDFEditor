@@ -74,25 +74,42 @@ export function usePDFRendering() {
       const rotation = documentStore.activeDocument.rotation
 
       const page = await pdfDoc.value.getPage(currentPage)
-      const canvas = canvasRef.value
-      const context = canvas.getContext('2d')
+      const mainCanvas = canvasRef.value
 
-      if (!context) return
+      // CREATE OFFSCREEN CANVAS for smoother rendering (no flicker)
+      const offscreenCanvas = document.createElement('canvas')
+      const offscreenContext = offscreenCanvas.getContext('2d', { alpha: false })
+
+      if (!offscreenContext) return
 
       const viewport = page.getViewport({ scale, rotation })
 
-      canvas.height = viewport.height
-      canvas.width = viewport.width
+      offscreenCanvas.height = viewport.height
+      offscreenCanvas.width = viewport.width
+
+      // Set background to white to avoid transparent gaps
+      offscreenContext.fillStyle = '#ffffff'
+      offscreenContext.fillRect(0, 0, viewport.width, viewport.height)
 
       const renderContext = {
-        canvasContext: context,
-        viewport: viewport
+        canvasContext: offscreenContext,
+        viewport: viewport,
+        enableWebGL: true // Try to enable WebGL for faster rendering if available
       }
 
       renderTask.value = page.render(renderContext)
       await renderTask.value.promise
-      renderTask.value = null
 
+      // Update main canvas only AFTER offscreen is ready
+      mainCanvas.height = viewport.height
+      mainCanvas.width = viewport.width
+
+      const mainContext = mainCanvas.getContext('2d')
+      if (mainContext) {
+        mainContext.drawImage(offscreenCanvas, 0, 0)
+      }
+
+      renderTask.value = null
       return { page, viewport }
     } catch (error: any) {
       if (error?.name === 'RenderingCancelledException') {

@@ -6,10 +6,19 @@
         <div class="flex items-center justify-between">
           <!-- Logo and Brand -->
           <div class="flex items-center gap-3">
+            <!-- Mobile Menu Toggle -->
+            <Button
+              icon="pi pi-bars"
+              text
+              rounded
+              class="lg:hidden text-gray-600"
+              @click="mobileMenuVisible = true"
+            />
+
             <div class="bg-gradient-to-br from-blue-600 to-indigo-600 p-2.5 rounded-xl shadow-lg">
               <i class="pi pi-file-pdf text-white text-2xl"></i>
             </div>
-            <div>
+            <div class="hidden sm:block">
               <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                 PDF Editor Pro
               </h1>
@@ -18,122 +27,116 @@
           </div>
 
           <!-- User Actions -->
-          <div class="flex items-center gap-3">
-            <!-- User Info -->
-            <div class="text-right mr-2">
+          <div class="flex items-center gap-2 sm:gap-3">
+            <!-- User Info (Hidden on very small screens) -->
+            <div class="text-right mr-2 hidden md:block">
               <p class="text-sm font-medium text-gray-800">{{ authStore.user?.name || authStore.user?.email }}</p>
               <p class="text-xs text-gray-500">{{ authStore.user?.email }}</p>
             </div>
 
             <!-- Separator -->
-            <div class="h-8 w-px bg-gray-300"></div>
-
-            <!-- Upload & Close buttons (existing logic) -->
-            <FileUploader v-if="!documentStore.activeDocument" />
-            <template v-else>
-              <FileUploader />
-              <Button
-                icon="pi pi-times"
-                label="Close Document"
-                @click="closeDocument"
-                severity="secondary"
-                outlined
-                size="small"
-              />
-            </template>
+            <div class="h-8 w-px bg-gray-300 hidden sm:block"></div>
 
             <!-- My Forms Button -->
             <Button
               icon="pi pi-list"
-              label="My Forms"
+              v-tooltip.bottom="'My Forms'"
               @click="router.push('/dashboard/forms')"
               severity="primary"
               outlined
               size="small"
+              class="hidden sm:flex"
             />
+
+            <!-- Upload & Close buttons -->
+            <FileUploader v-if="!documentStore.activeDocument" />
+            <template v-else>
+              <!-- Show close button on all screens if doc active -->
+              <Button
+                icon="pi pi-times"
+                @click="closeDocument"
+                severity="secondary"
+                outlined
+                size="small"
+                v-tooltip.bottom="'Close Document'"
+              />
+            </template>
 
             <!-- Logout Button -->
             <Button
               icon="pi pi-sign-out"
-              label="Logout"
               @click="handleLogout"
               severity="danger"
               outlined
               size="small"
+              v-tooltip.bottom="'Logout'"
+              class="hidden sm:flex"
             />
           </div>
         </div>
       </div>
     </header>
 
+    <!-- Drawer for Mobile Sidebar -->
+    <Drawer v-model:visible="mobileMenuVisible" header="Dashboard Menu" class="w-80">
+      <div class="flex flex-col h-full">
+        <TabView class="flex-1 flex flex-col sidebar-tabs">
+          <TabPanel value="0" header="Docs">
+            <DocumentsList @select="mobileMenuVisible = false" />
+          </TabPanel>
+          <TabPanel value="1" header="Forms">
+            <FormsList @select="mobileMenuVisible = false" />
+          </TabPanel>
+          <TabPanel value="2" header="Pages">
+            <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
+          </TabPanel>
+        </TabView>
+        
+        <div class="p-4 border-t border-gray-100 flex flex-col gap-2">
+            <Button 
+                label="Logout" 
+                icon="pi pi-sign-out" 
+                severity="danger" 
+                text 
+                @click="handleLogout" 
+                class="w-full justify-start"
+            />
+        </div>
+      </div>
+    </Drawer>
+
     <!-- Main Content -->
     <main class="flex-1 flex overflow-hidden">
       <!-- Welcome Screen - Show when no documents are loaded -->
       <div
         v-if="!documentStore.hasDocuments"
-        class="flex-1 flex items-center justify-center p-8 overflow-y-auto"
+        class="flex-1 flex items-center justify-center p-4 sm:p-8 overflow-y-auto"
       >
         <div class="max-w-2xl w-full">
           <!-- Hero Section -->
-          <div class="text-center mb-12 animate-fade-in">
-            <div class="inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-3xl shadow-2xl mb-6 animate-float">
-              <i class="pi pi-file-pdf text-white text-5xl"></i>
+          <div class="text-center mb-8 sm:mb-12 animate-fade-in">
+            <div class="inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-3xl shadow-2xl mb-6 animate-float">
+              <i class="pi pi-file-pdf text-white text-4xl sm:text-5xl"></i>
             </div>
-            <h2 class="text-4xl font-bold text-gray-800 mb-4">
-              Welcome to PDF Editor Pro
+            <h2 class="text-3xl sm:text-4xl font-bold text-gray-800 mb-4">
+              Welcome back
             </h2>
-            <p class="text-lg text-gray-600 max-w-xl mx-auto leading-relaxed">
-              Your all-in-one solution for viewing, editing, and managing PDF documents with professional-grade tools
+            <p class="text-base sm:text-lg text-gray-600 max-w-xl mx-auto leading-relaxed">
+              Continue editing your PDF documents or manage your active forms.
             </p>
           </div>
 
           <!-- Upload Area -->
-          <div class="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 hover:shadow-2xl transition-shadow">
-            <div class="border-3 border-dashed border-blue-300 rounded-xl p-12 text-center bg-gradient-to-br from-blue-50 to-indigo-50 hover:border-blue-400 transition-colors">
-              <i class="pi pi-cloud-upload text-6xl text-blue-600 mb-4 block"></i>
-              <h3 class="text-xl font-semibold text-gray-800 mb-2">
-                Upload Your PDF
+          <div class="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 sm:p-8 mb-8 hover:shadow-2xl transition-shadow">
+            <div class="border-3 border-dashed border-blue-300 rounded-xl p-8 sm:p-12 text-center bg-gradient-to-br from-blue-50 to-indigo-50 hover:border-blue-400 transition-colors">
+              <i class="pi pi-cloud-upload text-5xl sm:text-6xl text-blue-600 mb-4 block"></i>
+              <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-2">
+                Upload New PDF
               </h3>
-              <p class="text-gray-600 mb-6">
-                Drag and drop or click to select a PDF file
+              <p class="text-sm text-gray-600 mb-6">
+                Select a file to start editing
               </p>
               <FileUploader class="inline-block" />
-              <p class="text-sm text-gray-500 mt-4">
-                Maximum file size: 50MB
-              </p>
-            </div>
-          </div>
-
-          <!-- Features Grid -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all hover:-translate-y-1">
-              <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                <i class="pi pi-eye text-blue-600 text-2xl"></i>
-              </div>
-              <h4 class="font-semibold text-gray-800 mb-2">View & Navigate</h4>
-              <p class="text-sm text-gray-600">
-                Smooth PDF viewing with zoom, rotation, and page navigation
-              </p>
-            </div>
-
-            <div class="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all hover:-translate-y-1">
-              <div class="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
-                <i class="pi pi-pencil text-indigo-600 text-2xl"></i>
-              </div>
-              <h4 class="font-semibold text-gray-800 mb-2">Edit Content</h4>
-              <p class="text-sm text-gray-600">
-                Add text, images, and annotations with precision tools
-              </p>
-            </div>
-
-            <div class="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all hover:-translate-y-1">
-              <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-                <i class="pi pi-download text-purple-600 text-2xl"></i>
-              </div>
-              <h4 class="font-semibold text-gray-800 mb-2">Export & Save</h4>
-              <p class="text-sm text-gray-600">
-                Download your edited PDFs with all changes preserved
-              </p>
             </div>
           </div>
         </div>
@@ -141,8 +144,8 @@
 
       <!-- Document Workspace - Show when documents are loaded -->
       <template v-else>
-        <!-- Left Sidebar - Tabbed View -->
-        <aside class="w-72 bg-white/80 backdrop-blur-lg border-r border-gray-200/50 overflow-hidden flex flex-col">
+        <!-- Left Sidebar - Tabbed View (Hidden on mobile, using Drawer instead) -->
+        <aside class="hidden lg:flex w-72 bg-white/80 backdrop-blur-lg border-r border-gray-200/50 overflow-hidden flex-col">
           <TabView class="flex-1 flex flex-col sidebar-tabs">
             <TabPanel value="0" header="Documents" class="flex-1">
               <DocumentsList />
@@ -157,16 +160,19 @@
         </aside>
 
         <!-- Center - PDF Viewer -->
-        <div class="flex-1 flex overflow-hidden">
-          <div class="flex-1">
+        <div class="flex-1 flex overflow-hidden flex-col md:flex-row">
+          <div class="flex-1 relative">
             <PDFViewer ref="pdfViewerRef" />
           </div>
 
-          <!-- Right Sidebar - Editor Tools -->
+          <!-- Right Sidebar - Editor Tools (Stack on smaller screens if needed, or hide) -->
           <aside v-if="documentStore.activeDocument" class="flex">
             <PDFEditor />
             <!-- Field Properties Panel (shows when a field is selected or fields exist) -->
-            <FieldPropertiesPanel v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField" />
+            <FieldPropertiesPanel 
+                v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField" 
+                class="hidden xl:flex"
+            />
           </aside>
         </div>
       </template>
@@ -194,6 +200,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
+import Drawer from 'primevue/drawer'
 import ProgressSpinner from 'primevue/progressspinner'
 import Toast from 'primevue/toast'
 import TabView from 'primevue/tabview'
@@ -218,6 +225,8 @@ const formsStore = useFormsStore()
 const router = useRouter()
 const toast = useToast()
 const pdfViewerRef = ref<InstanceType<typeof PDFViewer> | null>(null)
+
+const mobileMenuVisible = ref(false)
 
 // Initialize error handler for fields
 useFieldsErrorHandler()

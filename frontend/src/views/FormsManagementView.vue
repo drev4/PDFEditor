@@ -1,29 +1,30 @@
 <template>
   <div class="forms-management-view min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6 md:p-8">
     <div class="max-w-7xl mx-auto">
-      <!-- Header -->
-      <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <Button 
-              icon="pi pi-arrow-left" 
-              text 
-              rounded 
-              @click="router.push('/dashboard')"
-              class="text-gray-600 hover:text-blue-600"
-            />
-            <h1 class="text-3xl font-bold text-gray-900">My Forms</h1>
+      <!-- Fluid Header -->
+      <header class="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div class="flex items-start gap-4">
+          <Button 
+            icon="pi pi-arrow-left" 
+            text 
+            rounded 
+            @click="router.push('/dashboard')"
+            class="text-gray-600 hover:text-blue-600 mt-1"
+          />
+          <div>
+            <h1 class="text-3xl font-black text-gray-900 tracking-tight">My Forms</h1>
+            <p class="text-gray-500 text-sm mt-1">
+              Manage your professional PDF forms and view results.
+            </p>
           </div>
-          <p class="text-gray-600 ml-12">
-            Manage your saved PDF forms and view their responses.
-          </p>
         </div>
 
-        <div class="flex items-center gap-3 ml-12 md:ml-0">
+        <div class="flex items-center gap-3 sm:self-center pl-14 sm:pl-0">
           <Button 
             icon="pi pi-plus" 
-            label="New Form" 
+            label="New" 
             severity="primary"
+            class="shadow-lg shadow-blue-500/20 px-6"
             @click="router.push('/dashboard')"
           />
           <Button 
@@ -61,19 +62,23 @@
       </div>
 
       <!-- Forms Grid -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
         <div 
-          v-for="form in formsStore.forms" 
+          v-for="(form, index) in formsStore.forms" 
           :key="form.id"
-          class="group bg-white/70 backdrop-blur-sm rounded-2xl border border-white shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col overflow-hidden"
+          class="group bg-white/70 backdrop-blur-sm rounded-2xl border border-white shadow-sm hover:shadow-2xl transition-all duration-500 flex flex-col overflow-hidden animate-slide-up"
+          :style="{ animationDelay: `${index * 0.1}s` }"
         >
           <!-- Form Preview / Icon Area -->
-          <div class="h-40 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center relative overflow-hidden group-hover:from-blue-500/20 group-hover:to-indigo-500/20 transition-colors">
-            <i class="pi pi-file-pdf text-6xl text-blue-600/30 group-hover:scale-110 transition-transform duration-500"></i>
+          <div class="h-48 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center relative overflow-hidden group-hover:from-blue-500/15 group-hover:to-indigo-500/15 transition-all duration-700">
+            <!-- Background Decorative Shape -->
+            <div class="absolute -bottom-4 -right-4 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl group-hover:bg-blue-500/10 transition-colors"></div>
+            
+            <i class="pi pi-file-pdf text-7xl text-blue-600/30 group-hover:text-blue-600/50 group-hover:scale-110 transition-all duration-500 ease-out"></i>
             
             <!-- Status Badge -->
             <div 
-              class="absolute top-4 right-4 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
+              class="absolute top-5 right-5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider shadow-sm border border-white/50"
               :class="getStatusClass(form.status)"
             >
               {{ form.status }}
@@ -81,33 +86,40 @@
           </div>
 
           <!-- Content -->
-          <div class="p-6 flex-1 flex flex-col">
-            <h3 class="text-xl font-bold text-gray-900 mb-2 truncate" :title="form.title">
+          <div class="p-8 flex-1 flex flex-col">
+            <h3 class="text-xl font-bold text-gray-900 mb-2 truncate group-hover:text-blue-600 transition-colors" :title="form.title">
               {{ form.title }}
             </h3>
-            <p class="text-gray-500 text-sm line-clamp-2 mb-4 flex-1">
-              {{ form.description || 'No description provided.' }}
+            <p class="text-gray-500 text-sm line-clamp-2 mb-6 flex-1 leading-relaxed">
+              {{ form.description || 'Manage and view responses for this professional PDF form.' }}
             </p>
 
             <!-- Stats -->
-            <div class="flex items-center gap-4 py-4 border-y border-gray-100 mb-4">
-              <div class="flex items-center gap-2 text-xs text-gray-600">
-                <i class="pi pi-eye text-blue-500"></i>
-                <span class="font-bold">{{ form.viewCount || 0 }}</span> views
+            <div class="flex items-center gap-6 py-5 border-y border-gray-100/80 mb-6">
+              <div class="flex flex-col gap-1">
+                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Views</span>
+                <div class="flex items-center gap-2">
+                  <i class="pi pi-eye text-blue-500 text-sm"></i>
+                  <span class="font-bold text-gray-800">{{ form.viewCount || 0 }}</span>
+                </div>
               </div>
-              <div class="flex items-center gap-2 text-xs text-gray-600">
-                <i class="pi pi-check-circle text-green-500"></i>
-                <span class="font-bold">{{ form._count?.responses || 0 }}</span> responses
+              <div class="flex flex-col gap-1">
+                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Responses</span>
+                <div class="flex items-center gap-2">
+                  <i class="pi pi-check-circle text-green-500 text-sm"></i>
+                  <span class="font-bold text-gray-800">{{ form._count?.responses || 0 }}</span>
+                </div>
               </div>
             </div>
 
             <!-- Actions -->
-            <div class="grid grid-cols-2 gap-2">
+            <div class="grid grid-cols-2 gap-3">
               <Button 
                 label="Edit Fields" 
                 icon="pi pi-pencil" 
                 size="small" 
                 outlined 
+                class="hover:bg-blue-50 transition-colors"
                 @click="handleEdit(form)"
               />
               <Button 
@@ -116,6 +128,7 @@
                 size="small" 
                 severity="success" 
                 outlined 
+                class="hover:bg-green-50 transition-colors"
                 @click="viewResponses(form.id)"
               />
               <Button 
@@ -124,6 +137,7 @@
                 size="small" 
                 severity="info" 
                 outlined 
+                class="hover:bg-cyan-50 transition-colors"
                 @click="handleShare(form)"
               />
               <Button 
@@ -132,6 +146,7 @@
                 size="small" 
                 severity="danger" 
                 outlined 
+                class="hover:bg-red-50 transition-colors"
                 @click="handleDelete(form)"
               />
             </div>
@@ -264,6 +279,7 @@ function handleDelete(form: Form) {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  line-clamp: 2;
   overflow: hidden;
 }
 </style>

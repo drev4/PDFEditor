@@ -1,101 +1,107 @@
 <template>
-  <div class="min-h-screen bg-gray-50 flex flex-col">
+  <div class="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex flex-col font-sans">
     <!-- Loading State -->
-    <div v-if="isLoading" class="flex items-center justify-center min-h-screen">
-      <div class="text-center">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-        <p class="mt-4 text-gray-600">Loading form...</p>
+    <div v-if="isLoading" class="flex flex-col items-center justify-center min-h-screen animate-fade-in">
+      <div class="relative w-20 h-20 mb-8">
+        <div class="absolute inset-0 border-4 border-blue-100 rounded-2xl"></div>
+        <div class="absolute inset-0 border-4 border-blue-600 rounded-2xl border-t-transparent animate-spin"></div>
+        <i class="pi pi-file-pdf absolute inset-0 flex items-center justify-center text-3xl text-blue-600 animate-pulse"></i>
+      </div>
+      <p class="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent tracking-wide">
+        PREPARING FORM
+      </p>
+      <div class="mt-4 flex gap-1">
+        <div class="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+        <div class="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+        <div class="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce"></div>
       </div>
     </div>
 
     <!-- Error State -->
-    <div v-else-if="error" class="flex items-center justify-center min-h-screen">
-      <div class="text-center max-w-md mx-auto px-4">
-        <div class="text-red-500 mb-4">
-          <svg class="h-16 w-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-          </svg>
+    <div v-else-if="error" class="flex items-center justify-center min-h-screen px-4 animate-scale-in">
+      <div class="text-center max-w-md w-full bg-white/70 backdrop-blur-xl p-10 rounded-3xl shadow-2xl border border-white">
+        <div class="w-20 h-20 bg-red-50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-red-500 shadow-inner">
+          <i class="pi pi-exclamation-circle text-4xl"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-900 mb-2">Form Not Available</h2>
-        <p class="text-gray-600">{{ error }}</p>
+        <h2 class="text-2xl font-black text-gray-900 mb-3">Something went wrong</h2>
+        <p class="text-gray-600 leading-relaxed mb-8">{{ error }}</p>
+        <button 
+          @click="router.go(0)"
+          class="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold hover:bg-black transition-all shadow-lg hover:shadow-black/20"
+        >
+          Try Again
+        </button>
       </div>
     </div>
 
     <!-- Form Content -->
-    <div v-else-if="form" class="flex-1 flex flex-col h-screen">
-      <!-- Header -->
-      <header class="bg-white shadow-sm z-10">
-        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div>
-            <h1 class="text-xl font-bold text-gray-900">{{ title }}</h1>
-            <p v-if="description" class="text-sm text-gray-500 mt-1">{{ description }}</p>
+    <div v-else-if="form" class="flex-1 flex flex-col h-screen overflow-hidden">
+      <!-- Premium Glass Header -->
+      <header class="bg-white/70 backdrop-blur-xl border-b border-white z-30 shadow-sm">
+        <div class="max-w-screen-2xl mx-auto px-6 py-4 flex justify-between items-center gap-4">
+          <div class="flex items-center gap-4 animate-fade-in">
+            <div class="bg-gradient-to-br from-blue-600 to-indigo-600 p-2 rounded-xl shadow-lg shadow-blue-500/20">
+              <i class="pi pi-file-pdf text-white text-xl"></i>
+            </div>
+            <div class="overflow-hidden">
+              <h1 class="text-lg font-black text-gray-900 truncate tracking-tight">{{ title }}</h1>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+                <p class="text-[10px] uppercase font-bold text-gray-500 tracking-widest truncate">Live Form</p>
+              </div>
+            </div>
           </div>
-          <div class="flex items-center space-x-4">
-            <!-- Draft Status -->
-            <span class="text-xs text-gray-400 hidden sm:inline-block transition-opacity duration-500" v-if="responsesStore.hasUnsavedChanges || responsesStore.lastSaved">
-               {{ responsesStore.isSaving ? 'Saving draft...' : 'Draft saved' }}
-            </span>
+
+          <div class="flex items-center gap-4">
+            <!-- Save Status Indicator -->
+            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 rounded-lg border border-slate-200/50 transition-all" v-if="responsesStore.hasUnsavedChanges || responsesStore.lastSaved">
+               <i class="pi text-[10px]" :class="responsesStore.isSaving ? 'pi-spin pi-spinner text-blue-500' : 'pi-check text-green-500'"></i>
+               <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  {{ responsesStore.isSaving ? 'Syncing...' : 'Encrypted & Saved' }}
+               </span>
+            </div>
             
-            <span class="text-sm text-gray-500">
-              {{ responsesStore.totalFields }} field{{ responsesStore.totalFields !== 1 ? 's' : '' }} filled
-            </span>
+            <div class="h-6 w-px bg-slate-200 mx-1 hidden md:block"></div>
+
             <button
               @click="handleSubmit"
               :disabled="isSubmitting"
-              class="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="relative group px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
             >
-              <span v-if="isSubmitting" class="flex items-center">
-                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Sending...
-              </span>
-              <span v-else>Submit</span>
+              <div v-if="isSubmitting" class="flex items-center gap-2">
+                <i class="pi pi-spin pi-spinner text-sm"></i>
+                <span class="tracking-tight">SENDING...</span>
+              </div>
+              <div v-else class="flex items-center gap-2">
+                <span class="tracking-tight">SUBMIT FORM</span>
+                <i class="pi pi-arrow-right text-xs group-hover:translate-x-1 transition-transform"></i>
+              </div>
             </button>
           </div>
         </div>
       </header>
 
-      <!-- Submit Error Alert -->
-      <div v-if="submitError" class="bg-red-50 border-b border-red-200">
-        <div class="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
-          <div class="flex">
-            <div class="flex-shrink-0">
-              <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <h3 class="text-sm font-medium text-red-800">Error submitting response</h3>
-              <p class="text-sm text-red-700 mt-1">{{ submitError }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Main Content (PDF Viewer) -->
-      <main class="flex-1 overflow-hidden relative">
-        <div v-if="loadingPdf" class="absolute inset-0 flex items-center justify-center bg-gray-50 z-20">
-          <div class="text-center">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-            <p class="mt-2 text-sm text-gray-500">Loading document...</p>
-          </div>
+      <!-- Main Visual Workspace -->
+      <main class="flex-1 overflow-hidden relative bg-slate-200/30">
+        <div v-if="loadingPdf" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/80 backdrop-blur-sm z-20 animate-fade-in">
+          <ProgressSpinner style="width: 40px; height: 40px" strokeWidth="4" />
+          <p class="mt-4 text-[10px] font-black tracking-[0.2em] text-blue-600 uppercase">Generating Document</p>
         </div>
         
-        <PDFViewer :read-only="true">
-          <template #fields-overlay="{ scale }">
-            <PublicFormFieldsOverlay
-              :fields="fields"
-              :scale="scale"
-              :validation-errors="validationErrors"
-              @field-change="handleFieldChange"
-            />
-          </template>
-        </PDFViewer>
+        <div class="h-full w-full animate-scale-in">
+          <PDFViewer :read-only="true">
+            <template #fields-overlay="{ scale }">
+              <PublicFormFieldsOverlay
+                :fields="fields"
+                :scale="scale"
+                :validation-errors="validationErrors"
+                @field-change="handleFieldChange"
+              />
+            </template>
+          </PDFViewer>
+        </div>
       </main>
 
-      <!-- Submit Preview Modal -->
       <SubmitPreviewModal
         v-model:visible="showPreview"
         :fields="fields"
@@ -110,6 +116,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ProgressSpinner from 'primevue/progressspinner'
 import { usePublicForm } from '../composables/usePublicForm'
 import { useResponseSubmit } from '../composables/useResponseSubmit'
 import { useFormValidation } from '../composables/useFormValidation'

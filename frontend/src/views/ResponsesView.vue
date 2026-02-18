@@ -21,7 +21,7 @@
           </p>
         </div>
 
-        <div class="flex items-center gap-3 ml-12 md:ml-0">
+        <div class="flex items-center gap-3 ml-12 md:ml-0 translate-y-0 opacity-100 transition-all duration-500 delay-100">
           <Button 
             icon="pi pi-download" 
             label="Export CSV" 
@@ -43,7 +43,7 @@
       </header>
 
       <!-- Main Content -->
-      <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl border border-white overflow-hidden">
+      <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl border border-white overflow-hidden animate-scale-in">
         <DataTable
           :value="formattedResponses"
           :loading="loading"
@@ -82,8 +82,8 @@
             style="min-width: 150px"
           >
             <template #body="{ data, field }">
-              <div class="truncate max-w-xs" v-tooltip.top="String(data[field] || '')">
-                {{ data[field] || '-' }}
+              <div class="truncate max-w-xs" v-tooltip.top="String(data[field as string] || '')">
+                {{ data[field as string] || '-' }}
               </div>
             </template>
           </Column>
