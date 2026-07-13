@@ -1,56 +1,32 @@
-import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { defineStore } from 'pinia'
 import type { EditAction } from '@/types/pdf'
+import type { ImagePreview, TextPreview } from '@/types/common'
+import { useDocumentSnapshotsStore } from './snapshots.store'
 
 export const useEditorStore = defineStore('editor', () => {
-  // State
   const editHistory = ref<EditAction[]>([])
-  const imagePreview = ref<{
-    dataUrl: string
-    file: File
-    x: number
-    y: number
-    width: number
-    height: number
-    originalWidth: number
-    originalHeight: number
-    maintainAspectRatio: boolean
-  } | null>(null)
+  const imagePreview = ref<ImagePreview | null>(null)
+  const textPreview = ref<TextPreview | null>(null)
 
-  const textPreview = ref<{
-    text: string
-    x: number
-    y: number
-    fontSize: number
-    color: string
-    isBold: boolean
-    isItalic: boolean
-  } | null>(null)
+  const snapshotsStore = useDocumentSnapshotsStore()
 
-  // Actions
   const addEditAction = (action: EditAction) => {
     editHistory.value.push(action)
   }
 
-  const saveSnapshot = async (documentId: string, arrayBuffer: ArrayBuffer) => {
-    const { useDocumentSnapshotsStore } = await import('./snapshots.store')
-    const snapshotsStore = useDocumentSnapshotsStore()
+  const saveSnapshot = (documentId: string, arrayBuffer: ArrayBuffer) => {
     snapshotsStore.addSnapshot(documentId, arrayBuffer)
   }
 
-  const undoLastEdit = async (documentId: string) => {
+  const undoLastEdit = (documentId: string) => {
     if (editHistory.value.length > 0) {
       editHistory.value.pop()
     }
-
-    const { useDocumentSnapshotsStore } = await import('./snapshots.store')
-    const snapshotsStore = useDocumentSnapshotsStore()
-    const lastSnapshot = snapshotsStore.getLatestSnapshot(documentId)
-    
-    return lastSnapshot
+    return snapshotsStore.getLatestSnapshot(documentId)
   }
 
-  const setImagePreview = (preview: typeof imagePreview.value) => {
+  const setImagePreview = (preview: ImagePreview | null) => {
     imagePreview.value = preview
   }
 
@@ -81,26 +57,11 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
-  const flipImageHorizontal = () => {
-    if (imagePreview.value) {
-      return true
-    }
-    return false
-  }
-
-  const flipImageVertical = () => {
-    if (imagePreview.value) {
-      return true
-    }
-    return false
-  }
-
   const clearImagePreview = () => {
     imagePreview.value = null
   }
 
-  // Text preview actions
-  const setTextPreview = (preview: typeof textPreview.value) => {
+  const setTextPreview = (preview: TextPreview | null) => {
     textPreview.value = preview
   }
 
@@ -146,12 +107,9 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   return {
-    // State
     editHistory,
     imagePreview,
     textPreview,
-
-    // Actions
     addEditAction,
     saveSnapshot,
     undoLastEdit,
@@ -160,8 +118,6 @@ export const useEditorStore = defineStore('editor', () => {
     updateImagePreviewSize,
     toggleMaintainAspectRatio,
     resetImageSize,
-    flipImageHorizontal,
-    flipImageVertical,
     clearImagePreview,
     setTextPreview,
     updateTextPreviewPosition,

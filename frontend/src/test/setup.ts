@@ -3,22 +3,47 @@ import { config } from '@vue/test-utils'
 
 // Mock localStorage
 const localStorageMock: Storage = {
-  getItem: vi.fn((key: string) => null),
-  setItem: vi.fn((key: string, value: string) => {}),
-  removeItem: vi.fn((key: string) => {}),
+  getItem: vi.fn((key: string) => {
+    const store: Record<string, string> = {}
+    return store[key] || null
+  }),
+  setItem: vi.fn((key: string, value: string) => {
+    const store: Record<string, string> = {}
+    store[key] = value
+  }),
+  removeItem: vi.fn((key: string) => {
+    const store: Record<string, string> = {}
+    delete store[key]
+  }),
   clear: vi.fn(),
   key: vi.fn((index: number) => null),
   length: 0
 }
 
+// Create a real storage implementation for tests
+let storageData: Record<string, string> = {}
+
 Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
+  value: {
+    getItem: (key: string) => storageData[key] || null,
+    setItem: (key: string, value: string) => {
+      storageData[key] = value
+    },
+    removeItem: (key: string) => {
+      delete storageData[key]
+    },
+    clear: () => {
+      storageData = {}
+    },
+    key: (index: number) => null,
+    length: 0
+  },
   writable: true
 })
 
 // Mock sessionStorage
 Object.defineProperty(window, 'sessionStorage', {
-  value: localStorageMock,
+  value: window.localStorage,
   writable: true
 })
 
@@ -104,9 +129,25 @@ vi.mock('pdfjs-dist', () => ({
   version: '5.0.0'
 }))
 
+// Mock PrimeVue Toast globally
+const mockToast = {
+  add: vi.fn(),
+  removeGroup: vi.fn(),
+  removeAllGroups: vi.fn()
+}
+
+vi.mock('primevue/usetoast', () => ({
+  useToast: () => mockToast
+}))
+
 // Configure Vue Test Utils
 config.global.stubs = {
   Teleport: true,
+}
+
+// Provide mock toast globally
+config.global.provide = {
+  toast: mockToast
 }
 
 // Suppress console warnings in tests (optional)

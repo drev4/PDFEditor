@@ -14,8 +14,7 @@ model User {
   name         String?
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-
-  forms Form[]
+  forms        Form[]
 
   @@map("users")
 }
@@ -31,19 +30,13 @@ model Form {
   settings    Json?
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
-
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fields    Field[]
-  responses Response[]
+  viewCount   Int        @default(0) @map("view_count")
+  fields      Field[]
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  responses   Response[]
 
   @@index([userId])
   @@map("forms")
-}
-
-enum FormStatus {
-  draft
-  published
-  closed
 }
 
 model Field {
@@ -53,25 +46,16 @@ model Field {
   name       String
   label      String
   required   Boolean   @default(false)
-  position   Json      // { x, y, width, height, page }
-  options    Json?     // Para radio/dropdown: ["op1", "op2"]
-  validation Json?     // { minLength, maxLength, pattern }
+  position   Json
+  options    Json?
+  validation Json?
   order      Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
-
-  form    Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
-  answers Answer[]
+  answers    Answer[]
+  form       Form      @relation(fields: [formId], references: [id], onDelete: Cascade)
 
   @@index([formId])
   @@map("fields")
-}
-
-enum FieldType {
-  text
-  textarea
-  checkbox
-  radio
-  dropdown
 }
 
 model Response {
@@ -81,9 +65,8 @@ model Response {
   ipAddress   String?  @map("ip_address")
   userAgent   String?  @map("user_agent")
   pdfUrl      String?  @map("pdf_url")
-
-  form    Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
-  answers Answer[]
+  answers     Answer[]
+  form        Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
 
   @@index([formId])
   @@index([formId, submittedAt])
@@ -91,14 +74,27 @@ model Response {
 }
 
 model Answer {
-  id         String @id @default(uuid())
-  responseId String @map("response_id")
-  fieldId    String @map("field_id")
+  id         String   @id @default(uuid())
+  responseId String   @map("response_id")
+  fieldId    String   @map("field_id")
   value      String
-
-  response Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
-  field    Field    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  field      Field    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  response   Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
 
   @@index([responseId])
   @@map("answers")
+}
+
+enum FormStatus {
+  draft
+  published
+  closed
+}
+
+enum FieldType {
+  text
+  textarea
+  checkbox
+  radio
+  dropdown
 }

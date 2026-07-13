@@ -22,7 +22,15 @@ const loginSchema = z.object({
 // POST /api/auth/register
 authRouter.post('/register', async (req, res, next) => {
   try {
-    const { email, password, name } = registerSchema.parse(req.body)
+    const validation = registerSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const { email, password, name } = validation.data
 
     const existingUser = await prisma.user.findUnique({ where: { email } })
     if (existingUser) {
@@ -36,6 +44,7 @@ authRouter.post('/register', async (req, res, next) => {
       select: { id: true, email: true, name: true, createdAt: true }
     })
 
+    // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
     const token = jwt.sign(
       { userId: user.id },
       process.env.JWT_SECRET!,
@@ -51,7 +60,15 @@ authRouter.post('/register', async (req, res, next) => {
 // POST /api/auth/login
 authRouter.post('/login', async (req, res, next) => {
   try {
-    const { email, password } = loginSchema.parse(req.body)
+    const validation = loginSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation error',
+        details: validation.error.errors
+      })
+    }
+
+    const { email, password } = validation.data
 
     const user = await prisma.user.findUnique({ where: { email } })
     if (!user) {
@@ -63,6 +80,7 @@ authRouter.post('/login', async (req, res, next) => {
       throw new AppError(401, 'Invalid credentials')
     }
 
+    // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
     const token = jwt.sign(
       { userId: user.id },
       process.env.JWT_SECRET!,

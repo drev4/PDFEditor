@@ -38,6 +38,7 @@ export interface Form {
   status: FormStatus
   pdfUrl: string | null
   settings: Record<string, unknown> | null
+  viewCount: number
   createdAt: string
   updatedAt: string
   fields?: Field[]
@@ -87,6 +88,11 @@ export const formsService = {
 
   async update(id: string, data: UpdateFormData): Promise<Form> {
     const response = await api.put<FormResponse>(`/forms/${id}`, data)
+    return response.form
+  },
+
+  async updateStatus(id: string, status: FormStatus): Promise<Form> {
+    const response = await api.patch<FormResponse>(`/forms/${id}/status`, { status })
     return response.form
   },
 

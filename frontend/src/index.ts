@@ -17,8 +17,12 @@ export * from './composables/usePDFFieldsLoader'
 export * from './composables/useFormFieldsExport'
 export * from './composables/useThumbnails'
 export * from './composables/useToolbarDrag'
+export * from './composables/useAsyncAction'
 
 export * from './utils/pdfCoordinates'
+export * from './utils/pdfFieldEmbedder'
+export * from './utils/apiUrl'
 
 export type { PDFDocument, EditAction } from './types/pdf'
+export type { PDFDocumentProxy, PDFPage, PDFPageTextItem } from './types/pdfjs'
 export type { FormField, FieldType } from './stores/formFields.store'

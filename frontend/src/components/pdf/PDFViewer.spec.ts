@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PDFViewer from './PDFViewer.vue'
-import { setupPinia } from '@/test/helpers/pinia-setup'
-import { useDocumentStore } from '@/stores/document.store'
-import { useDrawingStore } from '@/stores/drawing.store'
-import { useEditorStore } from '@/stores/editor.store'
+import { useDocumentStore } from '../../stores/document.store'
+import { useEditorStore } from '../../stores/editor.store'
+import { createPinia, setActivePinia } from 'pinia'
+import PrimeVue from 'primevue/config'
 
 // Mock composables
 vi.mock('@/composables/usePDFRendering', () => ({
@@ -57,12 +57,13 @@ vi.mock('@/composables/useGridOverlay', () => ({
 
 describe('PDFViewer', () => {
   beforeEach(() => {
-    setupPinia()
+    setActivePinia(createPinia())
   })
 
-  it('muestra estado "No PDF loaded" cuando no hay documento activo', () => {
-    const wrapper = mount(PDFViewer, {
+  const mountComponent = () => {
+    return mount(PDFViewer, {
       global: {
+        plugins: [PrimeVue],
         stubs: {
           PDFToolbar: true,
           DrawingToolbar: true,
@@ -72,7 +73,10 @@ describe('PDFViewer', () => {
         }
       }
     })
+  }
 
+  it('muestra estado "No PDF loaded" cuando no hay documento activo', () => {
+    const wrapper = mountComponent()
     expect(wrapper.text()).toContain('No PDF loaded')
   })
 
@@ -88,21 +92,12 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     expect(wrapper.findComponent({ name: 'PDFToolbar' }).exists()).toBe(true)
   })
 
@@ -118,21 +113,12 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const toolbar = wrapper.findComponent({ name: 'PDFToolbar' })
     await toolbar.vm.$emit('next-page')
 
@@ -151,21 +137,12 @@ describe('PDFViewer', () => {
       currentPage: 2,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const toolbar = wrapper.findComponent({ name: 'PDFToolbar' })
     await toolbar.vm.$emit('previous-page')
 
@@ -184,21 +161,12 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const toolbar = wrapper.findComponent({ name: 'PDFToolbar' })
     await toolbar.vm.$emit('zoom-in')
 
@@ -217,21 +185,12 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const toolbar = wrapper.findComponent({ name: 'PDFToolbar' })
     await toolbar.vm.$emit('zoom-out')
 
@@ -250,21 +209,12 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const toolbar = wrapper.findComponent({ name: 'PDFToolbar' })
     await toolbar.vm.$emit('rotate')
 
@@ -283,25 +233,16 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const drawingToolbar = wrapper.findComponent({ name: 'DrawingToolbar' })
     await drawingToolbar.vm.$emit('select-tool', 'search')
-
     await wrapper.vm.$nextTick()
+
     const searchSpotlight = wrapper.findComponent({ name: 'SearchSpotlight' })
     expect(searchSpotlight.props('isVisible')).toBe(true)
   })
@@ -320,25 +261,16 @@ describe('PDFViewer', () => {
       currentPage: 1,
       scale: 1.5,
       rotation: 0,
-      pageOrder: [1, 2, 3]
+      pageOrder: [1, 2, 3],
+      snapshots: [],
+      arrayBuffer: new ArrayBuffer(0)
     }]
 
-    const wrapper = mount(PDFViewer, {
-      global: {
-        stubs: {
-          PDFToolbar: true,
-          DrawingToolbar: true,
-          ImageControls: true,
-          TextControls: true,
-          SearchSpotlight: true
-        }
-      }
-    })
-
+    const wrapper = mountComponent()
     const drawingToolbar = wrapper.findComponent({ name: 'DrawingToolbar' })
     await drawingToolbar.vm.$emit('select-tool', 'text')
-
     await wrapper.vm.$nextTick()
+
     expect(editorStore.textPreview).toBeTruthy()
     expect(editorStore.textPreview?.text).toBe('')
   })

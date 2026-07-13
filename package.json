@@ -13,6 +13,15 @@
     "build:backend": "npm run build --workspace=backend",
     "test": "npm run test --workspace=frontend",
     "test:frontend": "npm run test --workspace=frontend",
+    "test:backend": "npm run test --workspace=backend",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "test:all": "npm run test:frontend && npm run test:backend && npm run test:e2e",
+    "test:coverage": "npm run test:coverage --workspace=frontend && npm run test:coverage --workspace=backend",
+    "test:coverage:frontend": "npm run test:coverage --workspace=frontend",
+    "test:coverage:backend": "npm run test:coverage --workspace=backend",
     "lint": "npm run lint --workspaces --if-present",
     "db:generate": "npm run db:generate --workspace=backend",
     "db:push": "npm run db:push --workspace=backend",
@@ -27,6 +36,7 @@
     "backend"
   ],
   "devDependencies": {
+    "@playwright/test": "^1.58.0",
     "concurrently": "^9.1.2"
   },
   "engines": {

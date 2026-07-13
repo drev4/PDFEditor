@@ -19,6 +19,9 @@
     </div>
 
     <div v-else class="editor-content p-6 space-y-6">
+      <!-- Form Save Panel -->
+      <FormSavePanel v-if="formFieldsStore.fields.length > 0" />
+
       <!-- Search Section -->
       <div class="tool-card">
         <div class="tool-header">
@@ -214,7 +217,7 @@
             label="Undo Last Edit"
             icon="pi pi-undo"
             outlined
-            @click="editorStore.undoLastEdit()"
+            @click="undoEdit"
             class="w-full"
             severity="secondary"
             :disabled="editorStore.editHistory.length === 0"
@@ -257,6 +260,8 @@ import { useEditorStore } from '@/stores/editor.store'
 import { useDrawingStore } from '@/stores/drawing.store'
 import { useSearchStore } from '@/stores/search.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
+import { embedFieldsInPDF, type EmbedField } from '@/utils/pdfFieldEmbedder'
+import FormSavePanel from '@/components/forms/FormSavePanel.vue'
 
 const documentStore = useDocumentStore()
 const editorStore = useEditorStore()
@@ -292,7 +297,7 @@ const addText = async () => {
 
   try {
     // Save snapshot before making changes
-    editorStore.saveSnapshot()
+    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     const pages = pdfDoc.getPages()
@@ -338,7 +343,7 @@ const addText = async () => {
   }
 }
 
-const handleImageUpload = async (event: any) => {
+const handleImageUpload = async (event: { files: File[] }) => {
   const file = event.files[0]
   if (!file || !documentStore.activeDocument?.arrayBuffer) return
 
@@ -392,7 +397,7 @@ const deleteCurrentPage = async () => {
 
   try {
     // Save snapshot before making changes
-    editorStore.saveSnapshot()
+    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     const currentPageIndex = documentStore.activeDocument.currentPage - 1
@@ -430,7 +435,7 @@ const addBlankPage = async () => {
 
   try {
     // Save snapshot before making changes
-    editorStore.saveSnapshot()
+    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     pdfDoc.addPage()
@@ -448,6 +453,16 @@ const addBlankPage = async () => {
   } catch (error) {
     console.error('Error adding blank page:', error)
   }
+}
+
+const undoEdit = () => {
+  if (!documentStore.activeDocument) return
+
+  const restoredArrayBuffer = editorStore.undoLastEdit(documentStore.activeDocument.id)
+  if (!restoredArrayBuffer) return
+
+  documentStore.activeDocument.arrayBuffer = restoredArrayBuffer
+  documentStore.triggerPDFReload()
 }
 
 const downloadPDF = async () => {
@@ -472,106 +487,19 @@ const downloadPDF = async () => {
 
     // Add form fields if any exist
     if (formFieldsStore.fields.length > 0) {
-      const form = pdfDoc.getForm()
-      const pages = pdfDoc.getPages()
       const scale = documentStore.activeDocument.scale || 1.5
-      const borderColor = rgb(0.6, 0.6, 0.6)
 
-      for (const field of formFieldsStore.fields) {
-        const pageIndex = field.position.page - 1
-        const page = pages[pageIndex]
+      const fields: EmbedField[] = formFieldsStore.fields.map(field => ({
+        type: field.type,
+        name: field.name,
+        label: field.label,
+        required: field.required,
+        border: field.border,
+        position: field.position,
+        options: field.options
+      }))
 
-        if (!page) continue
-
-        const pageHeight = page.getHeight()
-
-        // Convert canvas coordinates to PDF coordinates
-        const pdfX = field.position.x / scale
-        const pdfY = pageHeight - (field.position.y / scale) - (field.position.height / scale)
-        const pdfWidth = field.position.width / scale
-        const pdfHeight = field.position.height / scale
-
-        // Add field based on type
-        switch (field.type) {
-          case 'text':
-          case 'textarea': {
-            const textField = form.createTextField(field.name)
-            textField.addToPage(page, {
-              x: pdfX,
-              y: pdfY,
-              width: pdfWidth,
-              height: pdfHeight,
-              borderWidth: field.border ? 1 : 0,
-              borderColor: field.border ? borderColor : undefined
-            })
-            if (field.type === 'textarea') {
-              textField.enableMultiline()
-            }
-            break
-          }
-
-          case 'checkbox': {
-            const checkbox = form.createCheckBox(field.name)
-            checkbox.addToPage(page, {
-              x: pdfX,
-              y: pdfY,
-              width: pdfWidth,
-              height: pdfHeight,
-              borderWidth: field.border ? 1 : 0,
-              borderColor: field.border ? borderColor : undefined
-            })
-            break
-          }
-
-          case 'radio': {
-            const radioGroup = form.createRadioGroup(field.name)
-            const options = field.options || ['Option 1', 'Option 2']
-
-            // For radio buttons, create multiple options vertically
-            const optionHeight = Math.min(pdfHeight, 20)
-            const spacing = optionHeight + 5
-
-            options.forEach((option, index) => {
-              const optionY = pdfY - (index * spacing)
-              radioGroup.addOptionToPage(option, page, {
-                x: pdfX,
-                y: optionY,
-                width: optionHeight,
-                height: optionHeight,
-                borderWidth: field.border ? 1 : 0,
-                borderColor: field.border ? borderColor : undefined
-              })
-
-              // Draw label next to radio button
-              page.drawText(option, {
-                x: pdfX + optionHeight + 5,
-                y: optionY + 4,
-                size: 10,
-                color: rgb(0.2, 0.2, 0.2)
-              })
-            })
-            break
-          }
-
-          case 'dropdown': {
-            const dropdown = form.createDropdown(field.name)
-            const options = field.options || ['Option 1', 'Option 2']
-            dropdown.addOptions(options)
-            if (options.length > 0 && options[0]) {
-              dropdown.select(options[0])
-            }
-            dropdown.addToPage(page, {
-              x: pdfX,
-              y: pdfY,
-              width: pdfWidth,
-              height: pdfHeight,
-              borderWidth: field.border ? 1 : 0,
-              borderColor: field.border ? borderColor : undefined
-            })
-            break
-          }
-        }
-      }
+      await embedFieldsInPDF(pdfDoc, fields, scale)
     }
 
     // Save and download

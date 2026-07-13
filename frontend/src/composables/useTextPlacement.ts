@@ -1,12 +1,12 @@
+import type { Ref } from 'vue'
 import { useDocumentStore } from '@/stores/document.store'
 import { useEditorStore } from '@/stores/editor.store'
 import { useDragAndDrop } from './useDragAndDrop'
-import { usePDFCoordinates } from '@/utils/pdfCoordinates'
+import { hexToRgb, canvasToPDF, calculateTransform } from '@/utils/pdfCoordinates'
 
-export function useTextPlacement(canvasRef: any) {
+export function useTextPlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
   const documentStore = useDocumentStore()
   const editorStore = useEditorStore()
-  const { hexToRgb, canvasToPDF } = usePDFCoordinates()
 
   // Drag and drop functionality
   const dragAndDrop = useDragAndDrop({
@@ -59,13 +59,12 @@ export function useTextPlacement(canvasRef: any) {
       if (!page) return
       
       // Convert canvas coordinates to PDF coordinates
-      const transform = {
-        scaleFactor: page.getHeight() / (canvasRef.value?.height || page.getHeight()),
-        pageHeight: page.getHeight(),
-        canvasHeight: canvasRef.value?.height || page.getHeight(),
-        containerPaddingX: 12,
-        containerPaddingY: 8
-      }
+      const transform = calculateTransform(
+        page.getHeight(),
+        canvasRef.value?.height || page.getHeight(),
+        12,
+        8
+      )
 
       const pdfCoords = canvasToPDF(
         { x: textPreview.x, y: textPreview.y, height: textPreview.fontSize },

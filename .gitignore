@@ -26,8 +26,9 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# Claude Code
+# Local AI tooling configs
 .claude/
+.agents/
 
 # Test coverage
 coverage/
@@ -36,6 +37,15 @@ coverage/
 # Vitest
 .vitest
 html/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Test outputs
+backend/test-output.txt
+backend/test-output/
+nul
 
 # Environment
 .env
@@ -51,3 +61,7 @@ backend/prisma/*.db-journal
 
 # POC outputs
 poc/*.pdf
+
+# Uploaded files
+backend/uploads/**/*
+!backend/uploads/**/.gitkeep
