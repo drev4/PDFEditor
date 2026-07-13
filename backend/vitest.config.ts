@@ -4,6 +4,9 @@ export default defineConfig({
     test: {
         globals: true,
         environment: 'node',
+        env: {
+            JWT_SECRET: 'test-jwt-secret'
+        },
         setupFiles: ['./tests/setup.ts'],
         coverage: {
             provider: 'v8',
