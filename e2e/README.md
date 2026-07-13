@@ -1,110 +1,110 @@
 # E2E Tests - VuePDF Forms Platform
 
-Esta carpeta contiene los tests end-to-end (E2E) para VuePDF Forms Platform usando Playwright.
+This folder contains the end-to-end (E2E) tests for the VuePDF Forms Platform, using Playwright.
 
-## 📋 Estructura de Tests
+## Test Structure
 
 ### 1. `auth-flow.spec.ts` (6 tests)
-Tests del flujo completo de autenticación:
-- ✅ Registro de usuario nuevo
-- ✅ Login con credenciales existentes
-- ✅ Error con credenciales inválidas
-- ✅ Logout
-- ✅ Protección de rutas sin autenticación
-- ✅ Redirección cuando ya está autenticado
+Tests for the complete authentication flow:
+- New user registration
+- Login with existing credentials
+- Error with invalid credentials
+- Logout
+- Route protection without authentication
+- Redirection when already authenticated
 
 ### 2. `pdf-workflow.spec.ts` (7 tests)
-Tests del flujo de trabajo con PDFs:
-- ✅ Upload de PDF
-- ✅ Progreso de upload
-- ✅ Visualización de PDF
-- ✅ Toolbar del editor
-- ✅ Navegación entre vistas
-- ✅ Toolbar de campos
-- ✅ Panel de guardado
+Tests for the PDF workflow:
+- PDF upload
+- Upload progress
+- PDF viewing
+- Editor toolbar
+- Navigation between views
+- Fields toolbar
+- Save panel
 
 ### 3. `form-management.spec.ts` (9 tests)
-Tests de gestión de formularios:
-- ✅ Estado vacío al iniciar
-- ✅ Funcionalidad de upload
-- ✅ Información de usuario en header
-- ✅ Título de página correcto
-- ✅ Persistencia de sesión
-- ✅ Diseño responsive
-- ✅ Redirecciones de routing
-- ✅ Navegación entre páginas
+Form management tests:
+- Empty state on startup
+- Upload functionality
+- User information in header
+- Correct page title
+- Session persistence
+- Responsive layout
+- Routing redirects
+- Navigation between pages
 
 ### 4. `error-handling.spec.ts` (13 tests)
-Tests de manejo de errores y UX:
-- ✅ Errores de validación
-- ✅ Validación de formato de email
-- ✅ Validación de contraseñas
-- ✅ Errores de credenciales inválidas
-- ✅ Errores de red
-- ✅ Estados de carga
-- ✅ Navegación con teclado
-- ✅ Toggle de mostrar/ocultar contraseña
-- ✅ Branding consistente
-- ✅ Accesibilidad de formularios
+Error handling and UX tests:
+- Validation errors
+- Email format validation
+- Password validation
+- Invalid credentials errors
+- Network errors
+- Loading states
+- Keyboard navigation
+- Show/hide password toggle
+- Consistent branding
+- Form accessibility
 
 ### 5. `example.spec.ts` (1 test)
-Test de ejemplo inicial de Playwright.
+Initial Playwright example test.
 
-## 🚀 Ejecutar Tests
+## Running the Tests
 
-### Prerrequisitos
-1. Backend debe estar corriendo en `http://localhost:3000`
-2. Frontend debe estar corriendo en `http://localhost:5173`
-3. Base de datos PostgreSQL debe estar disponible
+### Prerequisites
+1. Backend must be running at `http://localhost:3000`
+2. Frontend must be running at `http://localhost:5173`
+3. PostgreSQL database must be available
 
-### Comandos
+### Commands
 
 ```bash
-# Ejecutar todos los tests E2E
+# Run all E2E tests
 npm run test:e2e
 
-# Ejecutar con interfaz visual (recomendado para desarrollo)
+# Run with visual UI (recommended for development)
 npm run test:e2e:ui
 
-# Ejecutar con navegador visible
+# Run with the browser visible
 npm run test:e2e:headed
 
-# Ejecutar en modo debug
+# Run in debug mode
 npm run test:e2e:debug
 
-# Ejecutar un archivo específico
+# Run a specific file
 npx playwright test e2e/auth-flow.spec.ts
 
-# Ejecutar un test específico
+# Run a specific test
 npx playwright test -g "should register a new user"
 ```
 
-## 📊 Cobertura de Tests
+## Test Coverage
 
-Total: **36 tests E2E**
+Total: **36 E2E tests**
 
-### Por Categoría:
-- Autenticación: 6 tests (17%)
+### By Category:
+- Authentication: 6 tests (17%)
 - PDF Workflow: 7 tests (19%)
-- Gestión de Formularios: 9 tests (25%)
+- Form Management: 9 tests (25%)
 - Error Handling & UX: 13 tests (36%)
-- Ejemplo: 1 test (3%)
+- Example: 1 test (3%)
 
-### Áreas Cubiertas:
-- ✅ Registro e inicio de sesión
-- ✅ Protección de rutas
-- ✅ Upload de archivos
-- ✅ Navegación y routing
-- ✅ Validación de formularios
-- ✅ Manejo de errores
-- ✅ Estados de carga
-- ✅ Accesibilidad básica
-- ✅ Responsive design
-- ✅ Persistencia de sesión
+### Areas Covered:
+- Registration and login
+- Route protection
+- File upload
+- Navigation and routing
+- Form validation
+- Error handling
+- Loading states
+- Basic accessibility
+- Responsive design
+- Session persistence
 
-## 🔧 Configuración
+## Configuration
 
-La configuración de Playwright está en [`playwright.config.ts`](../playwright.config.ts):
+The Playwright configuration lives in [`playwright.config.ts`](../playwright.config.ts):
 
 ```typescript
 {
@@ -117,9 +117,9 @@ La configuración de Playwright está en [`playwright.config.ts`](../playwright.
 }
 ```
 
-## 📝 Escribir Nuevos Tests
+## Writing New Tests
 
-### Template Básico
+### Basic Template
 
 ```typescript
 import { test, expect } from '@playwright/test';
@@ -144,72 +144,72 @@ test.describe('Feature Name', () => {
 });
 ```
 
-### Mejores Prácticas
+### Best Practices
 
-1. **Usar selectores semánticos**
+1. **Use semantic selectors**
    ```typescript
-   // ✅ Bueno
+   // Good
    page.locator('button:has-text("Submit")')
    page.locator('input[type="email"]')
 
-   // ❌ Evitar
+   // Avoid
    page.locator('.class-name-12345')
    ```
 
-2. **Emails únicos para cada test**
+2. **Unique emails for each test**
    ```typescript
    const testEmail = `test-${Date.now()}@example.com`;
    ```
 
-3. **Usar beforeEach para setup común**
+3. **Use beforeEach for shared setup**
    ```typescript
    test.beforeEach(async ({ page }) => {
-     // Login compartido
+     // Shared login
    });
    ```
 
-4. **Verificar estados de carga**
+4. **Verify loading states**
    ```typescript
    await expect(button).toBeDisabled();
    await expect(spinner).toBeVisible();
    ```
 
-5. **Timeouts apropiados**
+5. **Appropriate timeouts**
    ```typescript
    await expect(element).toBeVisible({ timeout: 5000 });
    ```
 
-## 🐛 Debugging
+## Debugging
 
-### Ver tests en UI Mode
+### View Tests in UI Mode
 ```bash
 npm run test:e2e:ui
 ```
-Esto abre una interfaz visual donde puedes:
-- Ver todos los tests
-- Ejecutar tests individuales
-- Ver screenshots y videos
-- Inspeccionar el DOM
+This opens a visual interface where you can:
+- View all tests
+- Run individual tests
+- View screenshots and videos
+- Inspect the DOM
 
 ### Debug Mode
 ```bash
 npm run test:e2e:debug
 ```
-Abre el Inspector de Playwright para debug paso a paso.
+Opens the Playwright Inspector for step-by-step debugging.
 
 ### Screenshots on Failure
-Playwright automáticamente captura screenshots cuando un test falla.
-Se guardan en `test-results/`.
+Playwright automatically captures screenshots when a test fails.
+They are saved in `test-results/`.
 
 ### Trace Viewer
 ```bash
 npx playwright show-trace trace.zip
 ```
 
-## ⚡ Performance
+## Performance
 
-### Ejecutar en Paralelo
-Por defecto, Playwright ejecuta tests en paralelo:
+### Running in Parallel
+By default, Playwright runs tests in parallel:
 ```typescript
 // playwright.config.ts
 {
@@ -218,17 +218,17 @@ Por defecto, Playwright ejecuta tests en paralelo:
 }
 ```
 
-### Retryer Failed Tests
-En CI, los tests se reintentan automáticamente:
+### Retrying Failed Tests
+In CI, tests are automatically retried:
 ```typescript
 {
   retries: process.env.CI ? 2 : 0
 }
 ```
 
-## 📈 CI/CD
+## CI/CD
 
-Para ejecutar en CI:
+To run in CI:
 
 ```yaml
 # .github/workflows/e2e.yml
@@ -242,16 +242,16 @@ Para ejecutar en CI:
   run: npm run test:e2e
 ```
 
-## 🔍 Tests Pendientes (Sprint 3)
+## Planned Tests
 
-Próximos tests a agregar:
-- [ ] Flujo de formulario público (`/form/:shareId`)
-- [ ] Submit de respuestas
-- [ ] Validación de campos en vista pública
-- [ ] Compartir formulario
-- [ ] Copy to clipboard del link
+Upcoming tests to add, covering the public form flow:
+- [ ] Public form flow (`/form/:shareId`)
+- [ ] Response submission
+- [ ] Field validation in the public view
+- [ ] Sharing a form
+- [ ] Copy link to clipboard
 
-## 📚 Recursos
+## Resources
 
 - [Playwright Docs](https://playwright.dev)
 - [Playwright Best Practices](https://playwright.dev/docs/best-practices)
@@ -260,6 +260,6 @@ Próximos tests a agregar:
 
 ---
 
-**Última actualización:** 2026-01-29
-**Total de tests:** 36
-**Cobertura:** Sprint 2 completo (Autenticación + Dashboard + Routing)
+**Last updated:** 2026-01-29
+**Total tests:** 36
+**Coverage:** Full authentication, dashboard, and routing flows

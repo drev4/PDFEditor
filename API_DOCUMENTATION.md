@@ -1,10 +1,10 @@
-# 📡 API Documentation - VuePDF Forms Platform
+# API Documentation - VuePDF Forms Platform
 
 Base URL: `http://localhost:3000/api`
 
-## 🔐 Autenticación
+## Authentication
 
-Todos los endpoints protegidos requieren un token JWT en el header:
+All protected endpoints require a JWT token in the header:
 ```
 Authorization: Bearer <token>
 ```
@@ -14,7 +14,7 @@ Authorization: Bearer <token>
 ## Auth Endpoints
 
 ### POST /api/auth/register
-Registrar un nuevo usuario.
+Register a new user.
 
 **Request:**
 ```json
@@ -38,14 +38,14 @@ Registrar un nuevo usuario.
 }
 ```
 
-**Errores:**
-- `400 Bad Request` - Validación falló
-- `409 Conflict` - Email ya existe
+**Errors:**
+- `400 Bad Request` - Validation failed
+- `409 Conflict` - Email already exists
 
 ---
 
 ### POST /api/auth/login
-Iniciar sesión con credenciales existentes.
+Log in with existing credentials.
 
 **Request:**
 ```json
@@ -68,14 +68,14 @@ Iniciar sesión con credenciales existentes.
 }
 ```
 
-**Errores:**
-- `400 Bad Request` - Validación falló
-- `401 Unauthorized` - Credenciales inválidas
+**Errors:**
+- `400 Bad Request` - Validation failed
+- `401 Unauthorized` - Invalid credentials
 
 ---
 
 ### GET /api/auth/me
-Obtener información del usuario autenticado.
+Get information about the authenticated user.
 
 **Headers:**
 ```
@@ -92,15 +92,15 @@ Authorization: Bearer <token>
 }
 ```
 
-**Errores:**
-- `401 Unauthorized` - Token inválido o expirado
+**Errors:**
+- `401 Unauthorized` - Invalid or expired token
 
 ---
 
 ## Forms Endpoints
 
 ### GET /api/forms
-Obtener todos los formularios del usuario autenticado.
+Get all forms belonging to the authenticated user.
 
 **Headers:**
 ```
@@ -131,13 +131,13 @@ Authorization: Bearer <token>
 }
 ```
 
-**Errores:**
-- `401 Unauthorized` - No autenticado
+**Errors:**
+- `401 Unauthorized` - Not authenticated
 
 ---
 
 ### POST /api/forms
-Crear un nuevo formulario.
+Create a new form.
 
 **Headers:**
 ```
@@ -172,14 +172,14 @@ Content-Type: application/json
 }
 ```
 
-**Errores:**
-- `400 Bad Request` - Validación falló
-- `401 Unauthorized` - No autenticado
+**Errors:**
+- `400 Bad Request` - Validation failed
+- `401 Unauthorized` - Not authenticated
 
 ---
 
 ### GET /api/forms/:id
-Obtener un formulario específico.
+Get a specific form.
 
 **Headers:**
 ```
@@ -221,15 +221,15 @@ Authorization: Bearer <token>
 }
 ```
 
-**Errores:**
-- `401 Unauthorized` - No autenticado
-- `403 Forbidden` - No es dueño del formulario
-- `404 Not Found` - Formulario no existe
+**Errors:**
+- `401 Unauthorized` - Not authenticated
+- `403 Forbidden` - Not the owner of the form
+- `404 Not Found` - Form does not exist
 
 ---
 
 ### PUT /api/forms/:id
-Actualizar un formulario.
+Update a form.
 
 **Headers:**
 ```
@@ -269,16 +269,16 @@ Content-Type: application/json
 }
 ```
 
-**Errores:**
-- `400 Bad Request` - Validación falló
-- `401 Unauthorized` - No autenticado
-- `403 Forbidden` - No es dueño del formulario
-- `404 Not Found` - Formulario no existe
+**Errors:**
+- `400 Bad Request` - Validation failed
+- `401 Unauthorized` - Not authenticated
+- `403 Forbidden` - Not the owner of the form
+- `404 Not Found` - Form does not exist
 
 ---
 
 ### PATCH /api/forms/:id/status
-Actualizar solo el estado de un formulario.
+Update only the status of a form.
 
 **Headers:**
 ```
@@ -302,11 +302,12 @@ Content-Type: application/json
     "updatedAt": "2026-02-11T10:00:00.000Z"
   }
 }
+```
 
 ---
 
 ### DELETE /api/forms/:id
-Eliminar un formulario.
+Delete a form.
 
 **Headers:**
 ```
@@ -320,15 +321,15 @@ Authorization: Bearer <token>
 }
 ```
 
-**Errores:**
-- `401 Unauthorized` - No autenticado
-- `403 Forbidden` - No es dueño del formulario
-- `404 Not Found` - Formulario no existe
+**Errors:**
+- `401 Unauthorized` - Not authenticated
+- `403 Forbidden` - Not the owner of the form
+- `404 Not Found` - Form does not exist
 
 ---
 
 ### GET /api/forms/public/:shareId
-Obtener un formulario público por su shareId (sin autenticación).
+Get a public form by its shareId (no authentication required).
 
 **Response:** `200 OK`
 ```json
@@ -344,15 +345,15 @@ Obtener un formulario público por su shareId (sin autenticación).
 }
 ```
 
-**Errores:**
-- `404 Not Found` - Formulario no existe o no está publicado
+**Errors:**
+- `404 Not Found` - Form does not exist or is not published
 
 ---
 
 ## Fields Endpoints
 
 ### GET /api/forms/:id/fields
-Obtener todos los campos de un formulario.
+Get all fields belonging to a form.
 
 **Headers:**
 ```
@@ -385,7 +386,7 @@ Authorization: Bearer <token>
 ---
 
 ### PUT /api/forms/:id/fields/bulk
-Actualizar o crear múltiples campos a la vez (operación bulk).
+Update or create multiple fields at once (bulk operation).
 
 **Headers:**
 ```
@@ -446,15 +447,15 @@ Content-Type: application/json
 }
 ```
 
-**Notas:**
-- Si el campo tiene `id`, se actualiza
-- Si no tiene `id`, se crea nuevo
-- Los campos existentes que no estén en el array NO se eliminan
+**Notes:**
+- If a field has an `id`, it is updated
+- If it has no `id`, a new one is created
+- Existing fields not present in the array are NOT deleted
 
 ---
 
 ### DELETE /api/forms/:id/fields/bulk
-Eliminar múltiples campos a la vez.
+Delete multiple fields at once.
 
 **Headers:**
 ```
@@ -481,17 +482,17 @@ Content-Type: application/json
 ## Responses Endpoints
 
 ### POST /api/responses
-Enviar una respuesta a un formulario público. No requiere autenticación.
+Submit a response to a public form. No authentication required.
 
 **Request:**
 ```json
 {
-  "formId": "uuid-del-formulario",
-  "shareId": "share-id-del-formulario",
+  "formId": "form-uuid",
+  "shareId": "form-share-id",
   "answers": {
-    "field-id-1": "Valor de texto",
+    "field-id-1": "Text value",
     "field-id-2": true,
-    "field-id-3": "Opción 1"
+    "field-id-3": "Option 1"
   }
 }
 ```
@@ -500,22 +501,22 @@ Enviar una respuesta a un formulario público. No requiere autenticación.
 ```json
 {
   "success": true,
-  "responseId": "uuid-de-la-respuesta",
+  "responseId": "response-uuid",
   "message": "Response submitted successfully"
 }
 ```
 
-**Errores:**
-- `400 Bad Request` - Validación falló (campos requeridos, formato inválido)
-- `403 Forbidden` - El formulario no está publicado
-- `404 Not Found` - Formulario no encontrado o shareId incorrecto
+**Errors:**
+- `400 Bad Request` - Validation failed (required fields, invalid format)
+- `403 Forbidden` - The form is not published
+- `404 Not Found` - Form not found or incorrect shareId
 
 ---
 
 ## Upload Endpoint
 
 ### POST /api/upload
-Subir un archivo PDF.
+Upload a PDF file.
 
 **Headers:**
 ```
@@ -545,21 +546,21 @@ Content-Type: application/pdf
 }
 ```
 
-**Restricciones:**
-- Tamaño máximo: 10MB
-- Tipos permitidos: `application/pdf`
-- Requiere autenticación
+**Restrictions:**
+- Maximum size: 10MB
+- Allowed types: `application/pdf`
+- Requires authentication
 
-**Errores:**
-- `400 Bad Request` - No se envió archivo o tipo inválido
-- `401 Unauthorized` - No autenticado
-- `413 Payload Too Large` - Archivo muy grande
+**Errors:**
+- `400 Bad Request` - No file sent or invalid type
+- `401 Unauthorized` - Not authenticated
+- `413 Payload Too Large` - File too large
 
 ---
 
 ## Error Responses
 
-Todos los endpoints pueden retornar estos errores comunes:
+All endpoints can return these common errors:
 
 ### 400 Bad Request
 ```json
@@ -610,17 +611,17 @@ Todos los endpoints pueden retornar estos errores comunes:
 
 ## Rate Limiting
 
-Actualmente no hay rate limiting implementado.
-**TODO Sprint 4:** Implementar rate limiting con express-rate-limit.
+Rate limiting is not currently implemented.
+**Planned:** Implement rate limiting with express-rate-limit.
 
 ---
 
-## Paginación
+## Pagination
 
-Los endpoints que retornan listas (como GET /api/forms) actualmente no tienen paginación.
-**TODO Sprint 4:** Implementar paginación con cursor o offset.
+Endpoints that return lists (such as GET /api/forms) do not currently support pagination.
+**Planned:** Implement pagination using cursor or offset.
 
-Formato planeado:
+Planned format:
 ```
 GET /api/forms?page=1&limit=20
 ```
@@ -640,12 +641,12 @@ Response:
 
 ---
 
-## Filtros y Búsqueda
+## Filtering and Search
 
-Actualmente no implementados.
-**TODO Sprint 4:** Implementar filtros y búsqueda.
+Not currently implemented.
+**Planned:** Implement filtering and search.
 
-Formato planeado:
+Planned format:
 ```
 GET /api/forms?status=published&search=contact
 ```
@@ -654,25 +655,25 @@ GET /api/forms?status=published&search=contact
 
 ## Webhooks
 
-No implementados actualmente.
-**TODO Sprint 5:** Implementar webhooks para notificar de nuevas respuestas.
+Not currently implemented.
+**Planned:** Implement webhooks to notify of new responses.
 
 ---
 
-## Versionado de API
+## API Versioning
 
-Versión actual: `v1` (implícito en `/api/*`)
+Current version: `v1` (implicit in `/api/*`)
 
-En futuras versiones se usará:
+Future versions will use:
 ```
 /api/v2/forms
 ```
 
 ---
 
-## Ejemplos de Uso con cURL
+## Usage Examples with cURL
 
-### Registro
+### Register
 ```bash
 curl -X POST http://localhost:3000/api/auth/register \
   -H "Content-Type: application/json" \
@@ -693,7 +694,7 @@ curl -X POST http://localhost:3000/api/auth/login \
   }'
 ```
 
-### Obtener Formularios
+### Get Forms
 ```bash
 curl http://localhost:3000/api/forms \
   -H "Authorization: Bearer YOUR_TOKEN_HERE"
@@ -708,9 +709,9 @@ curl -X POST http://localhost:3000/api/upload \
 
 ---
 
-## Ejemplos de Uso con Axios (Frontend)
+## Usage Examples with Axios (Frontend)
 
-### Setup Cliente
+### Client Setup
 ```typescript
 import axios from 'axios';
 
@@ -721,7 +722,7 @@ const api = axios.create({
   },
 });
 
-// Interceptor para agregar token
+// Interceptor to attach the token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -731,7 +732,7 @@ api.interceptors.request.use((config) => {
 });
 ```
 
-### Registro
+### Register
 ```typescript
 const response = await api.post('/auth/register', {
   name: 'John Doe',
@@ -743,13 +744,13 @@ const { user, token } = response.data;
 localStorage.setItem('token', token);
 ```
 
-### Obtener Formularios
+### Get Forms
 ```typescript
 const response = await api.get('/forms');
 const { forms } = response.data;
 ```
 
-### Upload con Progress
+### Upload with Progress
 ```typescript
 const formData = new FormData();
 formData.append('file', file);
@@ -769,9 +770,9 @@ const { fileUrl } = response.data;
 
 ## Database Schema
 
-Ver el schema completo en [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma).
+See the full schema in [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma).
 
-### Modelos Principales:
+### Main Models:
 
 ```prisma
 model User {
@@ -827,6 +828,6 @@ model Response {
 
 ---
 
-**Última actualización:** 2026-01-29
-**Versión API:** v1
+**Last updated:** 2026-01-29
+**API Version:** v1
 **Base URL:** http://localhost:3000/api

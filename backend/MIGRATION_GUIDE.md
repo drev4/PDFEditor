@@ -1,62 +1,62 @@
-# 📦 Guía de Migración a AcroForms
+# AcroForms Migration Guide
 
-Esta guía explica cómo migrar formularios existentes para embeber sus campos en los PDFs como AcroForms.
+This guide explains how to migrate existing forms to embed their fields into the PDFs as AcroForms.
 
 ---
 
-## 📋 Tabla de Contenidos
+## Table of Contents
 
-1. [¿Qué hace la migración?](#qué-hace-la-migración)
-2. [Pre-requisitos](#pre-requisitos)
-3. [Modo Dry-Run (Simulación)](#modo-dry-run-simulación)
-4. [Migración en Producción](#migración-en-producción)
-5. [Migración de un formulario específico](#migración-de-un-formulario-específico)
-6. [Verificación](#verificación)
+1. [What does the migration do?](#what-does-the-migration-do)
+2. [Prerequisites](#prerequisites)
+3. [Dry-Run Mode (Simulation)](#dry-run-mode-simulation)
+4. [Production Migration](#production-migration)
+5. [Migrating a specific form](#migrating-a-specific-form)
+6. [Verification](#verification)
 7. [Rollback](#rollback)
 8. [Troubleshooting](#troubleshooting)
 
 ---
 
-## ¿Qué hace la migración?
+## What does the migration do?
 
-El script de migración:
+The migration script:
 
-1. ✅ Busca formularios con campos en la base de datos
-2. ✅ Verifica que tengan un PDF asociado
-3. ✅ Lee el PDF del sistema de archivos
-4. ✅ Embebe los campos en el PDF como AcroForms estándar
-5. ✅ Crea un backup del PDF original (`.backup.pdf`)
-6. ✅ Guarda el PDF modificado
-7. ✅ Verifica que los campos se embebieron correctamente
+1. Looks up forms with fields in the database
+2. Verifies they have an associated PDF
+3. Reads the PDF from the filesystem
+4. Embeds the fields into the PDF as standard AcroForms
+5. Creates a backup of the original PDF (`.backup.pdf`)
+6. Saves the modified PDF
+7. Verifies the fields were embedded correctly
 
-### Lo que NO hace:
+### What it does NOT do:
 
-- ❌ No modifica la base de datos
-- ❌ No elimina campos de la BD
-- ❌ No cambia el comportamiento de la aplicación
-- ❌ No afecta formularios nuevos (ya se crean con AcroForms)
+- Does not modify the database
+- Does not delete fields from the DB
+- Does not change the application's behavior
+- Does not affect new forms (already created with AcroForms)
 
 ---
 
-## Pre-requisitos
+## Prerequisites
 
-### 1. Backup de la Base de Datos
+### 1. Database Backup
 
 ```bash
 # PostgreSQL
 pg_dump vuepdf > backup_vuepdf_$(date +%Y%m%d).sql
 
-# O usa tu método preferido de backup
+# Or use your preferred backup method
 ```
 
-### 2. Backup de los PDFs
+### 2. PDF Backup
 
 ```bash
 cd backend/uploads/pdfs
 tar -czf pdfs_backup_$(date +%Y%m%d).tar.gz *.pdf
 ```
 
-### 3. Compilar el Backend
+### 3. Build the Backend
 
 ```bash
 cd backend
@@ -65,149 +65,149 @@ npm run build
 
 ---
 
-## Modo Dry-Run (Simulación)
+## Dry-Run Mode (Simulation)
 
-**⚠️ IMPORTANTE:** Siempre ejecuta primero en modo dry-run para ver qué pasará.
+**IMPORTANT:** Always run in dry-run mode first to preview what will happen.
 
 ```bash
 cd backend
 npm run migrate:dry-run
 ```
 
-### Salida Esperada:
+### Expected Output:
 
 ```
-🚀 Iniciando migración de formularios a AcroForms...
+Starting form migration to AcroForms...
 
-Modo: 🔍 DRY RUN (simulación)
+Mode: DRY RUN (simulation)
 
-📊 Formularios encontrados: 15
+Forms found: 15
 
-[1/15] Procesando formulario: Solicitud de Empleo
+[1/15] Processing form: Job Application
    ID: abc-123-def
-   Campos: 8
-   📄 PDF: solicitud-empleo.pdf
-   📖 PDF leído: 245.32 KB
-   🔨 Embebiendo 8 campos...
-   ✅ Campos embebidos exitosamente
-   ✔️  Verificación: 8 campos detectados en PDF
-   🔍 DRY RUN: No se modificó el archivo
-   ✅ MIGRADO EXITOSAMENTE
+   Fields: 8
+   PDF: job-application.pdf
+   PDF read: 245.32 KB
+   Embedding 8 fields...
+   Fields embedded successfully
+   Verification: 8 fields detected in PDF
+   DRY RUN: File was not modified
+   MIGRATED SUCCESSFULLY
 
 ...
 
 ============================================================
-📊 RESUMEN DE MIGRACIÓN
+MIGRATION SUMMARY
 ============================================================
-Total de formularios:     15
-✅ Migrados exitosamente: 12
-⏭️  Omitidos (skip):       2
-❌ Fallidos:              1
+Total forms:               15
+Migrated successfully:     12
+Skipped:                   2
+Failed:                    1
 ============================================================
 
-🔍 Esto fue una simulación. Ejecuta sin --dry-run para aplicar cambios.
+This was a simulation. Run without --dry-run to apply changes.
 ```
 
-### Razones de Skip:
+### Skip Reasons:
 
-- **"No tiene PDF URL"**: El formulario no tiene PDF asociado
-- **"No tiene campos"**: El formulario está vacío
-- **"PDF ya tiene X campos embebidos"**: Ya fue migrado anteriormente
+- **"No PDF URL"**: The form has no associated PDF
+- **"No fields"**: The form is empty
+- **"PDF already has X embedded fields"**: Already migrated previously
 
 ---
 
-## Migración en Producción
+## Production Migration
 
-Una vez verificado el dry-run, ejecuta la migración real:
+Once the dry-run has been verified, run the actual migration:
 
 ```bash
 cd backend
 npm run migrate:run
 ```
 
-**⚠️ ADVERTENCIA:** Esto modifica los archivos PDF. Asegúrate de tener backups.
+**WARNING:** This modifies the PDF files. Make sure you have backups.
 
-### Durante la Migración:
+### During the Migration:
 
-- ✅ Se crean backups automáticos (`.backup.pdf`)
-- ✅ Si un formulario falla, los demás continúan
-- ✅ El log muestra progreso en tiempo real
-- ✅ Al final se muestra un resumen completo
+- Automatic backups are created (`.backup.pdf`)
+- If one form fails, the others continue
+- The log shows real-time progress
+- A full summary is shown at the end
 
 ---
 
-## Migración de un formulario específico
+## Migrating a specific form
 
-Para migrar solo un formulario (útil para testing):
+To migrate only one form (useful for testing):
 
 ```bash
-# Dry-run de un formulario
+# Dry-run for a single form
 cd backend
 npm run build
 node dist/scripts/migrate-existing-forms.js --dry-run --form-id=abc-123-def
 
-# Migración real de un formulario
+# Actual migration for a single form
 node dist/scripts/migrate-existing-forms.js --form-id=abc-123-def
 ```
 
 ---
 
-## Verificación
+## Verification
 
-### 1. Verificar en Adobe Reader
+### 1. Verify in Adobe Reader
 
-1. Descarga un PDF migrado
-2. Ábrelo en Adobe Acrobat Reader
-3. Verifica que los campos son editables
-4. Los campos deberían aparecer con bordes y ser interactivos
+1. Download a migrated PDF
+2. Open it in Adobe Acrobat Reader
+3. Verify the fields are editable
+4. The fields should appear with borders and be interactive
 
-### 2. Verificar en la Aplicación
+### 2. Verify in the Application
 
-1. Abre el formulario en tu app
-2. Los campos deberían cargarse automáticamente desde el PDF
-3. Edita y guarda - debería funcionar normalmente
+1. Open the form in your app
+2. The fields should load automatically from the PDF
+3. Edit and save - it should work normally
 
-### 3. Verificar Logs del Backend
+### 3. Verify Backend Logs
 
-El endpoint GET de formularios debería mostrar:
+The forms GET endpoint should show:
 
 ```
 PDF uploaded with 8 extracted fields
 ```
 
-Cuando carga un formulario migrado.
+When loading a migrated form.
 
 ---
 
 ## Rollback
 
-Si necesitas revertir la migración:
+If you need to revert the migration:
 
-### Opción 1: Restaurar desde Backups Automáticos
+### Option 1: Restore from Automatic Backups
 
 ```bash
 cd backend/uploads/pdfs
 
-# Ver backups disponibles
+# List available backups
 ls *.backup.pdf
 
-# Restaurar un PDF específico
-mv solicitud-empleo.backup.pdf solicitud-empleo.pdf
+# Restore a specific PDF
+mv job-application.backup.pdf job-application.pdf
 
-# Restaurar todos
+# Restore all
 for file in *.backup.pdf; do
   mv "$file" "${file%.backup.pdf}.pdf"
 done
 ```
 
-### Opción 2: Restaurar desde Backup Manual
+### Option 2: Restore from Manual Backup
 
 ```bash
 cd backend/uploads/pdfs
 tar -xzf pdfs_backup_20260129.tar.gz
 ```
 
-### Limpiar Backups Después de Verificar
+### Clean Up Backups After Verifying
 
 ```bash
 cd backend/uploads/pdfs
@@ -220,132 +220,132 @@ rm *.backup.pdf
 
 ### Error: "PDF file not found"
 
-**Causa:** El archivo PDF no existe en el sistema de archivos.
+**Cause:** The PDF file does not exist on the filesystem.
 
-**Solución:**
-1. Verifica que la ruta del PDF en la BD es correcta
-2. Verifica que el archivo existe en `backend/uploads/pdfs/`
-3. Si falta, restaura desde backup o re-sube el PDF
+**Solution:**
+1. Verify the PDF path in the DB is correct
+2. Verify the file exists at `backend/uploads/pdfs/`
+3. If missing, restore from backup or re-upload the PDF
 
 ### Error: "Verification failed: Expected X fields, found Y"
 
-**Causa:** No todos los campos se embebieron correctamente.
+**Cause:** Not all fields were embedded correctly.
 
-**Solución:**
-1. Revisa el PDF original - puede estar corrupto
-2. Verifica que los campos tienen posiciones válidas
-3. Intenta migrar ese formulario individual con más logging
-4. Si persiste, reporta el bug con el PDF de ejemplo
+**Solution:**
+1. Check the original PDF - it may be corrupted
+2. Verify the fields have valid positions
+3. Try migrating that individual form with more logging
+4. If it persists, report the bug with a sample PDF
 
 ### Error: "Invalid PDF file"
 
-**Causa:** El PDF está corrupto o no es válido.
+**Cause:** The PDF is corrupted or invalid.
 
-**Solución:**
-1. Intenta abrir el PDF en Adobe Reader
-2. Si no abre, el PDF está corrupto
-3. Re-genera o re-sube el PDF
-4. Vuelve a intentar la migración
+**Solution:**
+1. Try opening the PDF in Adobe Reader
+2. If it won't open, the PDF is corrupted
+3. Regenerate or re-upload the PDF
+4. Retry the migration
 
-### Formulario Omitido: "PDF ya tiene X campos embebidos"
+### Form Skipped: "PDF already has X embedded fields"
 
-**Causa:** El formulario ya fue migrado anteriormente.
+**Cause:** The form was already migrated previously.
 
-**Solución:**
-- ✅ Esto es correcto - no necesita migración
-- Si quieres re-migrar, elimina los campos del PDF primero
-- O simplemente déjalo - está funcionando correctamente
+**Solution:**
+- This is expected - no migration needed
+- If you want to re-migrate, remove the fields from the PDF first
+- Or simply leave it - it's working correctly
 
-### No se encontraron formularios
+### No forms found
 
-**Causa:** Todos los formularios ya fueron migrados o no cumplen criterios.
+**Cause:** All forms have already been migrated or none meet the criteria.
 
-**Solución:**
-- ✅ Esto está bien - significa que no hay trabajo por hacer
-- Verifica en la BD que hay formularios con campos
-- Verifica que tienen `pdfUrl` no nulo
+**Solution:**
+- This is fine - it means there is no work to do
+- Verify in the DB that there are forms with fields
+- Verify they have a non-null `pdfUrl`
 
 ---
 
-## Comandos Rápidos
+## Quick Commands
 
 ```bash
-# Ver cuántos formularios se migrarían
-npm run migrate:dry-run | grep "Total de formularios"
+# See how many forms would be migrated
+npm run migrate:dry-run | grep "Total forms"
 
-# Migrar todo
+# Migrate everything
 npm run migrate:run
 
-# Migrar un formulario específico
+# Migrate a specific form
 node dist/scripts/migrate-existing-forms.js --form-id=<ID>
 
-# Ver logs detallados
+# View detailed logs
 npm run migrate:run 2>&1 | tee migration.log
 
-# Limpiar backups después de verificar (CUIDADO)
+# Clean up backups after verifying (CAUTION)
 cd uploads/pdfs && rm *.backup.pdf
 ```
 
 ---
 
-## Mejores Prácticas
+## Best Practices
 
-### Antes de Migrar:
+### Before Migrating:
 
-1. ✅ Hacer backup de base de datos
-2. ✅ Hacer backup de PDFs
-3. ✅ Ejecutar dry-run primero
-4. ✅ Probar con un formulario individual
-5. ✅ Verificar en horario de baja actividad
+1. Back up the database
+2. Back up the PDFs
+3. Run a dry-run first
+4. Test with a single form
+5. Run during low-traffic hours
 
-### Durante la Migración:
+### During the Migration:
 
-1. ✅ Monitorear logs en tiempo real
-2. ✅ No interrumpir el proceso
-3. ✅ Guardar logs para referencia
+1. Monitor logs in real time
+2. Do not interrupt the process
+3. Save logs for reference
 
-### Después de Migrar:
+### After Migrating:
 
-1. ✅ Verificar con Adobe Reader
-2. ✅ Probar en la aplicación
-3. ✅ Guardar backups al menos 7 días
-4. ✅ Monitorear errores en producción
-
----
-
-## Soporte
-
-Si encuentras problemas durante la migración:
-
-1. Revisa esta guía de troubleshooting
-2. Revisa los logs de la migración
-3. Verifica los backups antes de hacer rollback
-4. Documenta el error con logs y ejemplos
+1. Verify with Adobe Reader
+2. Test in the application
+3. Keep backups for at least 7 days
+4. Monitor errors in production
 
 ---
 
-## Notas Adicionales
+## Support
+
+If you run into problems during the migration:
+
+1. Review this troubleshooting guide
+2. Review the migration logs
+3. Verify backups before rolling back
+4. Document the error with logs and examples
+
+---
+
+## Additional Notes
 
 ### Performance
 
-- ⚡ La migración procesa ~1-2 formularios por segundo
-- 📊 Para 100 formularios: ~1-2 minutos
-- 💾 Cada PDF modificado es ~igual tamaño que original
+- The migration processes ~1-2 forms per second
+- For 100 forms: ~1-2 minutes
+- Each modified PDF is roughly the same size as the original
 
-### Seguridad
+### Security
 
-- 🔒 Los backups tienen los mismos permisos que originales
-- 🔒 No se expone información sensible en logs
-- 🔒 La migración requiere acceso al sistema de archivos
+- Backups have the same permissions as the originals
+- No sensitive information is exposed in logs
+- The migration requires filesystem access
 
-### Compatibilidad
+### Compatibility
 
-- ✅ Compatible con Adobe Acrobat Reader
-- ✅ Compatible con Preview (macOS)
-- ✅ Compatible con Chrome PDF viewer
-- ✅ Compatible con Firefox PDF viewer
+- Compatible with Adobe Acrobat Reader
+- Compatible with Preview (macOS)
+- Compatible with Chrome PDF viewer
+- Compatible with Firefox PDF viewer
 
 ---
 
-**Última actualización:** 2026-01-29
-**Versión del script:** 1.0.0
+**Last updated:** 2026-01-29
+**Script version:** 1.0.0

@@ -1,33 +1,33 @@
-# 🔧 Especificaciones Técnicas - VuePDF Forms Platform
+# Technical Specifications - VuePDF Forms Platform
 
-## 📋 Índice
-1. [Arquitectura del Sistema](#arquitectura)
-2. [Feature #1: Campos PDF](#campos-pdf)
-3. [Feature #2: Backend API](#backend-api)
-4. [Feature #6: Visualizador Público](#visualizador)
-5. [Modelos de Datos](#modelos)
-6. [Seguridad](#seguridad)
+## Table of Contents
+1. [System Architecture](#architecture)
+2. [PDF Field System](#pdf-fields)
+3. [Backend API](#backend-api)
+4. [Public Form Viewer](#public-viewer)
+5. [Data Models](#backend-api)
+6. [Security](#security)
 7. [Performance](#performance)
 
 ---
 
-## 🏗️ ARQUITECTURA DEL SISTEMA <a name="arquitectura"></a>
+## System Architecture <a name="architecture"></a>
 
-### Diagrama de Alto Nivel
+### High-Level Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        USUARIOS                              │
+│                          USERS                                │
 ├─────────────────────────────────────────────────────────────┤
-│  Creador (Logged In)  │  Respondedor (Público)              │
+│  Creator (Logged In)  │  Respondent (Public)                 │
 └───────────┬───────────┴──────────────┬──────────────────────┘
             │                          │
             ▼                          ▼
 ┌───────────────────────┐    ┌────────────────────────┐
-│   FRONTEND - EDITOR   │    │ FRONTEND - VISUALIZADOR│
-│   (Vue 3 + TS)        │    │ (Vue 3 + TS)          │
-│   /dashboard          │    │ /form/:shareId        │
-│   /editor/:id         │    │ (Público)             │
+│   FRONTEND - EDITOR   │    │   FRONTEND - VIEWER    │
+│   (Vue 3 + TS)        │    │   (Vue 3 + TS)          │
+│   /dashboard          │    │ /form/:shareId          │
+│   /editor/:id         │    │ (Public)                │
 └───────────┬───────────┘    └────────┬───────────────┘
             │                         │
             └─────────┬───────────────┘
@@ -60,34 +60,34 @@
          └──────────────────┘
 ```
 
-### Flujo de Datos
+### Data Flow
 
-#### Flujo 1: Crear Formulario
+#### Flow 1: Create Form
 ```
-Usuario → Editor → Create Form
-                 → Add Fields (pdf-lib)
-                 → POST /api/forms
-                 → Upload PDF to Storage
-                 → Generate share_id
-                 → Return form URL
-```
-
-#### Flujo 2: Responder Formulario
-```
-Respondedor → /form/:shareId
-            → GET /api/public/forms/:shareId
-            → Render PDF + Fields
-            → Fill Fields
-            → Validate
-            → POST /api/forms/:id/responses
-            → Save to DB
-            → Send notification email
-            → Show confirmation
+User → Editor → Create Form
+              → Add Fields (pdf-lib)
+              → POST /api/forms
+              → Upload PDF to Storage
+              → Generate share_id
+              → Return form URL
 ```
 
-#### Flujo 3: Ver Respuestas
+#### Flow 2: Respond to Form
 ```
-Creador → Dashboard
+Respondent → /form/:shareId
+           → GET /api/public/forms/:shareId
+           → Render PDF + Fields
+           → Fill Fields
+           → Validate
+           → POST /api/forms/:id/responses
+           → Save to DB
+           → Send notification email
+           → Show confirmation
+```
+
+#### Flow 3: View Responses
+```
+Creator → Dashboard
         → GET /api/forms/:id/responses
         → Render table
         → Export CSV/Excel
@@ -96,27 +96,27 @@ Creador → Dashboard
 
 ---
 
-## 📝 FEATURE #1: CAMPOS DE FORMULARIO PDF <a name="campos-pdf"></a>
+## PDF Field System <a name="pdf-fields"></a>
 
-### Objetivo
-Permitir agregar campos interactivos a PDFs usando pdf-lib que funcionen en cualquier PDF reader (Adobe, Chrome, etc.)
+### Objective
+Allow interactive fields to be added to PDFs using pdf-lib so they work in any PDF reader (Adobe, Chrome, etc.).
 
-### Tipos de Campos (MVP)
+### Field Types (MVP)
 
 #### 1. Text Field
 ```typescript
 interface TextField {
-  id: string              // Único por formulario
+  id: string              // Unique per form
   type: 'text'
-  name: string            // Nombre del campo (para API)
-  label: string           // Label visible
+  name: string            // Field name (used by the API)
+  label: string           // Visible label
   placeholder?: string
   defaultValue?: string
   required: boolean
   maxLength?: number
   position: {
-    page: number         // Número de página (1-indexed)
-    x: number            // Coordenadas en puntos
+    page: number         // Page number (1-indexed)
+    x: number            // Coordinates in points
     y: number
     width: number
     height: number
@@ -135,7 +135,7 @@ interface TextField {
 }
 ```
 
-**Implementación con pdf-lib:**
+**Implementation with pdf-lib:**
 ```typescript
 import { PDFDocument, PDFTextField } from 'pdf-lib'
 
@@ -192,7 +192,7 @@ interface CheckboxField {
 }
 ```
 
-**Implementación:**
+**Implementation:**
 ```typescript
 async function addCheckbox(
   pdfDoc: PDFDocument,
@@ -223,7 +223,7 @@ async function addCheckbox(
 interface RadioButtonField {
   id: string
   type: 'radio'
-  name: string              // Mismo name = mismo grupo
+  name: string              // Same name = same group
   label: string
   options: Array<{
     value: string
@@ -239,7 +239,7 @@ interface RadioButtonField {
 }
 ```
 
-**Implementación:**
+**Implementation:**
 ```typescript
 async function addRadioGroup(
   pdfDoc: PDFDocument,
@@ -289,7 +289,7 @@ interface DropdownField {
 }
 ```
 
-**Implementación:**
+**Implementation:**
 ```typescript
 async function addDropdown(
   pdfDoc: PDFDocument,
@@ -317,7 +317,7 @@ async function addDropdown(
 }
 ```
 
-### Editor Visual de Campos
+### Visual Field Editor
 
 ```typescript
 // composables/useFieldEditor.ts
@@ -328,7 +328,7 @@ export function useFieldEditor() {
   const isAddingField = ref(false)
   const fieldType = ref<'text' | 'checkbox' | 'radio' | 'dropdown'>('text')
 
-  // Agregar campo al hacer click en el PDF
+  // Add a field when clicking on the PDF
   function handleCanvasClick(event: MouseEvent, pageNumber: number) {
     if (!isAddingField.value) return
 
@@ -351,7 +351,7 @@ export function useFieldEditor() {
     isAddingField.value = false
   }
 
-  // Arrastrar campo
+  // Drag a field
   function handleFieldDrag(fieldId: string, deltaX: number, deltaY: number) {
     const field = fields.value.find(f => f.id === fieldId)
     if (!field) return
@@ -360,7 +360,7 @@ export function useFieldEditor() {
     field.position.y += deltaY
   }
 
-  // Redimensionar campo
+  // Resize a field
   function handleFieldResize(fieldId: string, width: number, height: number) {
     const field = fields.value.find(f => f.id === fieldId)
     if (!field) return
@@ -369,7 +369,7 @@ export function useFieldEditor() {
     field.position.height = height
   }
 
-  // Eliminar campo
+  // Delete a field
   function deleteField(fieldId: string) {
     fields.value = fields.value.filter(f => f.id !== fieldId)
     if (selectedField.value?.id === fieldId) {
@@ -377,7 +377,7 @@ export function useFieldEditor() {
     }
   }
 
-  // Serializar campos para guardar
+  // Serialize fields for saving
   function serializeFields(): string {
     return JSON.stringify(fields.value)
   }
@@ -396,7 +396,7 @@ export function useFieldEditor() {
 }
 ```
 
-### Renderizado de Campos en Editor
+### Field Rendering in the Editor
 
 ```vue
 <!-- components/editor/FieldOverlay.vue -->
@@ -442,7 +442,7 @@ function getFieldStyle(field: FormField) {
 </script>
 ```
 
-### Guardar Formulario con Campos
+### Saving a Form with Fields
 
 ```typescript
 // stores/form.store.ts
@@ -454,7 +454,7 @@ export const useFormStore = defineStore('form', () => {
   async function saveForm() {
     if (!currentForm.value) return
 
-    // 1. Serializar campos a pdf-lib
+    // 1. Serialize fields into pdf-lib
     const pdfDoc = await PDFDocument.load(currentForm.value.pdfBytes)
 
     for (const field of fields.value) {
@@ -474,14 +474,14 @@ export const useFormStore = defineStore('form', () => {
       }
     }
 
-    // 2. Guardar PDF modificado
+    // 2. Save the modified PDF
     const pdfBytes = await pdfDoc.save()
     const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' })
 
-    // 3. Upload a storage
+    // 3. Upload to storage
     const pdfUrl = await uploadPDF(pdfBlob, currentForm.value.id)
 
-    // 4. Guardar en DB
+    // 4. Save to DB
     const formData = {
       id: currentForm.value.id,
       title: currentForm.value.title,
@@ -499,7 +499,7 @@ export const useFormStore = defineStore('form', () => {
 
     await saveForm()
 
-    // Generar share_id si no existe
+    // Generate share_id if it doesn't exist yet
     const response = await api.post(`/forms/${currentForm.value.id}/publish`)
 
     return {
@@ -519,24 +519,24 @@ export const useFormStore = defineStore('form', () => {
 
 ---
 
-## 🔌 FEATURE #2: BACKEND API <a name="backend-api"></a>
+## Backend API <a name="backend-api"></a>
 
-### Stack Recomendado: Supabase
+### Recommended Stack: Supabase
 
-**Razones:**
-1. PostgreSQL incluido
+**Reasons:**
+1. PostgreSQL included
 2. Auth out-of-the-box (JWT, email, OAuth)
 3. Row-level security (RLS)
-4. Storage incluido
+4. Storage included
 5. Realtime subscriptions
 6. Auto-generated REST API
 7. TypeScript client
 
-### Schema de Base de Datos
+### Database Schema
 
 ```sql
--- Users (manejado por Supabase Auth)
--- No necesitamos crear esta tabla
+-- Users (handled by Supabase Auth)
+-- We don't need to create this table
 
 -- Forms
 CREATE TABLE forms (
@@ -559,7 +559,7 @@ CREATE TABLE forms (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Índices
+-- Indexes
 CREATE INDEX forms_user_id_idx ON forms(user_id);
 CREATE INDEX forms_share_id_idx ON forms(share_id);
 CREATE INDEX forms_created_at_idx ON forms(created_at DESC);
@@ -575,14 +575,14 @@ CREATE TABLE responses (
   submitted_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Índices
+-- Indexes
 CREATE INDEX responses_form_id_idx ON responses(form_id);
 CREATE INDEX responses_submitted_at_idx ON responses(submitted_at DESC);
 CREATE INDEX responses_email_idx ON responses(respondent_email);
 
 -- Row Level Security (RLS)
 
--- Forms: Los usuarios solo pueden ver sus propios formularios
+-- Forms: users can only see their own forms
 ALTER TABLE forms ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view own forms"
@@ -601,7 +601,7 @@ CREATE POLICY "Users can delete own forms"
   ON forms FOR DELETE
   USING (auth.uid() = user_id);
 
--- Responses: Los usuarios pueden ver respuestas de sus formularios
+-- Responses: users can view responses to their own forms
 ALTER TABLE responses ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view responses to their forms"
@@ -626,7 +626,7 @@ CREATE POLICY "Anyone can insert responses to published forms"
 
 -- Functions
 
--- Función para generar share_id único
+-- Function to generate a unique share_id
 CREATE OR REPLACE FUNCTION generate_share_id()
 RETURNS TEXT AS $$
 DECLARE
@@ -641,14 +641,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger para generar share_id al crear form
+-- Trigger to generate share_id when a form is created
 CREATE OR REPLACE FUNCTION set_share_id()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.share_id IS NULL OR NEW.share_id = '' THEN
     NEW.share_id := generate_share_id();
 
-    -- Asegurar unicidad
+    -- Ensure uniqueness
     WHILE EXISTS (SELECT 1 FROM forms WHERE share_id = NEW.share_id) LOOP
       NEW.share_id := generate_share_id();
     END LOOP;
@@ -662,7 +662,7 @@ CREATE TRIGGER forms_share_id_trigger
   FOR EACH ROW
   EXECUTE FUNCTION set_share_id();
 
--- Trigger para updated_at
+-- Trigger for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -677,7 +677,7 @@ CREATE TRIGGER forms_updated_at_trigger
   EXECUTE FUNCTION update_updated_at();
 ```
 
-### Cliente TypeScript (Supabase)
+### TypeScript Client (Supabase)
 
 ```typescript
 // lib/supabase.ts
@@ -860,9 +860,9 @@ export const apiService = {
 
 ---
 
-## 👁️ FEATURE #6: VISUALIZADOR PÚBLICO <a name="visualizador"></a>
+## Public Form Viewer <a name="public-viewer"></a>
 
-### Componente Principal
+### Main Component
 
 ```vue
 <!-- pages/FormViewer.vue -->
@@ -874,7 +874,7 @@ export const apiService = {
       <p>{{ form?.description }}</p>
     </div>
 
-    <!-- PDF con campos superpuestos -->
+    <!-- PDF with overlaid fields -->
     <div class="pdf-container">
       <canvas ref="pdfCanvas" />
 
@@ -1032,7 +1032,7 @@ function getFieldComponent(type: string) {
 </script>
 ```
 
-### Componentes de Campos
+### Field Components
 
 ```vue
 <!-- components/viewer/TextField.vue -->
@@ -1081,53 +1081,53 @@ const fieldStyle = computed(() => ({
 
 ---
 
-## 🔒 SEGURIDAD <a name="seguridad"></a>
+## Security <a name="security"></a>
 
-### Autenticación
-- JWT tokens (manejado por Supabase)
-- Refresh tokens automáticos
+### Authentication
+- JWT tokens (handled by Supabase)
+- Automatic refresh tokens
 - Session management
 
-### Autorización
-- Row-level security (RLS) en PostgreSQL
-- Los usuarios solo pueden ver/editar sus propios formularios
-- Los usuarios solo pueden ver respuestas de sus formularios
+### Authorization
+- Row-level security (RLS) in PostgreSQL
+- Users can only view/edit their own forms
+- Users can only view responses to their own forms
 
-### Validación
-- Client-side: validación inmediata (UX)
-- Server-side: validación obligatoria (seguridad)
-- Rate limiting: 100 requests/min por IP
+### Validation
+- Client-side: immediate validation (UX)
+- Server-side: mandatory validation (security)
+- Rate limiting: 100 requests/min per IP
 
 ### Data Privacy
-- HTTPS obligatorio
-- Passwords hasheados (bcrypt)
-- No logs de datos sensibles
-- GDPR compliance (derecho a eliminar datos)
+- HTTPS required
+- Passwords hashed (bcrypt)
+- No logging of sensitive data
+- GDPR compliance (right to erasure)
 
 ### Upload Security
-- Validar tipo de archivo (solo PDF)
-- Límite de tamaño (10MB por archivo)
-- Escaneo de virus (futuro - ClamAV)
-- Signed URLs para acceso temporal
+- Validate file type (PDF only)
+- Size limit (10MB per file)
+- Virus scanning (future - ClamAV)
+- Signed URLs for temporary access
 
 ---
 
-## ⚡ PERFORMANCE <a name="performance"></a>
+## Performance <a name="performance"></a>
 
 ### Frontend
-- Lazy loading de PDFs
-- Virtual scrolling para listas largas
-- Debounce en búsqueda/filtros
-- Caching de formularios frecuentes (localStorage)
-- Code splitting por ruta
+- Lazy loading of PDFs
+- Virtual scrolling for long lists
+- Debounce on search/filters
+- Caching of frequently accessed forms (localStorage)
+- Code splitting by route
 - Image optimization
 
 ### Backend
-- Database indexes en columnas frecuentes
+- Database indexes on frequently queried columns
 - Connection pooling
 - Query optimization
-- Caching con Redis (futuro)
-- CDN para PDFs (CloudFlare)
+- Caching with Redis (future)
+- CDN for PDFs (CloudFlare)
 
 ### Targets
 - First Contentful Paint (FCP): <1.5s
@@ -1137,5 +1137,4 @@ const fieldStyle = computed(() => ({
 
 ---
 
-**Última actualización:** 2024-12-27
-**Próxima revisión:** Después de cada sprint
+**Last updated:** 2024-12-27

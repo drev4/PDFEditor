@@ -1,6 +1,6 @@
 # Database Schema - VuePDF Forms
 
-## Diagrama de Relaciones
+## Relationship Diagram
 
 ```
 ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
@@ -14,89 +14,89 @@
                       └─────────────┘       └─────────────┘
 ```
 
-## Tablas
+## Tables
 
 ### 1. users
-Usuarios de la plataforma (creadores de formularios).
+Platform users (form creators).
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | PK |
-| email | VARCHAR(255) | Único, not null |
+| email | VARCHAR(255) | Unique, not null |
 | password_hash | VARCHAR(255) | Bcrypt hash |
-| name | VARCHAR(100) | Nombre del usuario |
+| name | VARCHAR(100) | User's name |
 | created_at | TIMESTAMP | Default now() |
 | updated_at | TIMESTAMP | Auto-update |
 
 ### 2. forms
-Formularios creados por usuarios.
+Forms created by users.
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | PK |
 | user_id | UUID | FK → users.id |
-| title | VARCHAR(255) | Título del formulario |
-| description | TEXT | Descripción opcional |
-| share_id | VARCHAR(12) | Único, URL pública (ej: "abc123xyz") |
+| title | VARCHAR(255) | Form title |
+| description | TEXT | Optional description |
+| share_id | VARCHAR(12) | Unique, public URL (e.g. "abc123xyz") |
 | status | ENUM | 'draft', 'published', 'closed' |
-| pdf_url | VARCHAR(500) | URL del PDF base en storage |
-| settings | JSONB | Configuración adicional |
+| pdf_url | VARCHAR(500) | URL of the base PDF in storage |
+| settings | JSONB | Additional configuration |
 | created_at | TIMESTAMP | Default now() |
 | updated_at | TIMESTAMP | Auto-update |
 
-**Índices:**
-- `share_id` (único) - Para URLs públicas
-- `user_id` - Para listar formularios del usuario
+**Indexes:**
+- `share_id` (unique) - For public URLs
+- `user_id` - For listing a user's forms
 
 ### 3. fields
-Campos del formulario (text, checkbox, radio, dropdown).
+Form fields (text, checkbox, radio, dropdown).
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | PK |
 | form_id | UUID | FK → forms.id |
 | type | ENUM | 'text', 'textarea', 'checkbox', 'radio', 'dropdown' |
-| name | VARCHAR(100) | Nombre interno (para pdf-lib) |
-| label | VARCHAR(255) | Label visible al usuario |
+| name | VARCHAR(100) | Internal name (for pdf-lib) |
+| label | VARCHAR(255) | Label shown to the user |
 | required | BOOLEAN | Default false |
 | position | JSONB | { x, y, width, height, page } |
-| options | JSONB | Para radio/dropdown: ["op1", "op2"] |
-| validation | JSONB | Reglas: { minLength, maxLength, pattern } |
-| order | INTEGER | Orden de tabulación |
+| options | JSONB | For radio/dropdown: ["op1", "op2"] |
+| validation | JSONB | Rules: { minLength, maxLength, pattern } |
+| order | INTEGER | Tab order |
 | created_at | TIMESTAMP | Default now() |
 
-**Índices:**
-- `form_id` - Para obtener campos de un formulario
-- `form_id, order` - Para ordenar campos
+**Indexes:**
+- `form_id` - To fetch a form's fields
+- `form_id, order` - To sort fields
 
 ### 4. responses
-Envíos de formularios por usuarios finales.
+Form submissions from end users.
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | PK |
 | form_id | UUID | FK → forms.id |
 | submitted_at | TIMESTAMP | Default now() |
 | ip_address | VARCHAR(45) | IPv4/IPv6 |
 | user_agent | VARCHAR(500) | Browser info |
-| pdf_url | VARCHAR(500) | PDF rellenado (opcional) |
+| pdf_url | VARCHAR(500) | Filled-in PDF (optional) |
 
-**Índices:**
-- `form_id` - Para listar respuestas de un formulario
-- `form_id, submitted_at` - Para ordenar por fecha
+**Indexes:**
+- `form_id` - To list a form's responses
+- `form_id, submitted_at` - To sort by date
 
 ### 5. answers
-Respuestas individuales a cada campo.
+Individual answers to each field.
 
-| Campo | Tipo | Descripción |
+| Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | PK |
 | response_id | UUID | FK → responses.id |
 | field_id | UUID | FK → fields.id |
-| value | TEXT | Valor de la respuesta |
+| value | TEXT | Answer value |
 
-**Índices:**
-- `response_id` - Para obtener todas las respuestas de un envío
+**Indexes:**
+- `response_id` - To fetch all answers of a submission
 
 ---
 
@@ -159,7 +159,7 @@ model Field {
   label      String
   required   Boolean   @default(false)
   position   Json      // { x, y, width, height, page }
-  options    Json?     // Para radio/dropdown
+  options    Json?     // For radio/dropdown
   validation Json?     // { minLength, maxLength, pattern }
   order      Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
@@ -211,20 +211,20 @@ model Answer {
 
 ---
 
-## Notas de Diseño
+## Design Notes
 
-### ¿Por qué JSONB para position/options/validation?
-- Flexibilidad para agregar propiedades sin migrations
-- PostgreSQL tiene buen soporte y puede indexar JSONB
-- Simplifica el código (no necesitas tablas extra)
+### Why JSONB for position/options/validation?
+- Flexibility to add properties without migrations
+- PostgreSQL has good support and can index JSONB
+- Simplifies the code (no need for extra tables)
 
-### ¿Por qué separar answers de responses?
-- Permite consultas eficientes por campo específico
-- Facilita exportar a CSV/Excel
-- Normalización estándar
+### Why separate answers from responses?
+- Enables efficient queries by specific field
+- Makes exporting to CSV/Excel easier
+- Standard normalization
 
-### Consideraciones futuras
-- **Soft delete:** Agregar `deleted_at` si necesitamos papelera
-- **Versioning:** Tabla `form_versions` para historial
-- **File uploads:** Tabla `attachments` para campos de archivo
-- **Teams:** Tabla `teams` + `team_members` para colaboración
+### Future considerations
+- **Soft delete:** Add `deleted_at` if a trash/recovery feature is needed
+- **Versioning:** `form_versions` table for history
+- **File uploads:** `attachments` table for file-type fields
+- **Teams:** `teams` + `team_members` tables for collaboration

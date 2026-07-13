@@ -1,80 +1,80 @@
-# Guía de Usuario: Cómo Subir y Guardar Formularios PDF
+# User Guide: How to Upload and Save PDF Forms
 
-## 📋 Flujo Completo de Trabajo
+## Complete Workflow
 
-### Paso 1: Cargar PDF Localmente
+### Step 1: Load a PDF Locally
 
-1. **Inicia sesión** en la aplicación
-2. En el Dashboard, haz clic en **"Upload PDF"** o arrastra un archivo PDF
-3. El PDF se cargará en el visor (esto solo carga el archivo en tu navegador, NO en el servidor aún)
-
-```
-Dashboard → Upload PDF → Visor PDF
-```
-
-### Paso 2: Agregar Campos de Formulario
-
-1. Con el PDF cargado, ve al panel derecho **"Form Fields"**
-2. Selecciona el tipo de campo que quieres agregar:
-   - Text (texto de una línea)
-   - Textarea (texto multilínea)
-   - Checkbox (casilla de verificación)
-   - Radio (botones de opción)
-   - Dropdown (lista desplegable)
-
-3. Haz clic en el PDF donde quieres colocar el campo
-4. Ajusta las propiedades del campo en el panel derecho:
-   - Nombre del campo
-   - Etiqueta
-   - Si es requerido
-   - Opciones (para radio y dropdown)
+1. **Sign in** to the application
+2. On the Dashboard, click **"Upload PDF"** or drag and drop a PDF file
+3. The PDF loads into the viewer (this only loads the file in your browser, NOT on the server yet)
 
 ```
-Form Fields Panel → Seleccionar tipo → Click en PDF → Configurar propiedades
+Dashboard → Upload PDF → PDF Viewer
 ```
 
-### Paso 3: Guardar el Formulario en la Nube
+### Step 2: Add Form Fields
 
-Una vez que hayas agregado al menos un campo, aparecerá el panel **"Save Form"** en el editor:
+1. With the PDF loaded, go to the right-hand **"Form Fields"** panel
+2. Select the field type you want to add:
+   - Text (single-line text)
+   - Textarea (multi-line text)
+   - Checkbox
+   - Radio (option buttons)
+   - Dropdown (select list)
 
-1. **Introduce un título** para tu formulario (obligatorio)
-2. Opcionalmente, agrega una **descripción**
-3. Haz clic en **"Save Form to Cloud"**
-
-El sistema automáticamente:
-- ✅ Sube el PDF al servidor
-- ✅ Crea el formulario en la base de datos
-- ✅ Guarda todos los campos que creaste
-- ✅ Genera un ID único para compartir
-
-```
-Save Form Panel → Título + Descripción → Save Form to Cloud
-```
-
-### Paso 4: Actualizar Campos (Formulario Ya Guardado)
-
-Si ya guardaste el formulario y agregas o modificas campos:
-
-1. El panel cambia a **"Form Saved"** mostrando el estado
-2. Haz clic en **"Update Fields"** para guardar los cambios
+3. Click on the PDF where you want to place the field
+4. Adjust the field's properties in the right-hand panel:
+   - Field name
+   - Label
+   - Whether it's required
+   - Options (for radio and dropdown)
 
 ```
-Form Saved Panel → Modificar campos → Update Fields
+Form Fields Panel → Select type → Click on PDF → Configure properties
 ```
 
-### Paso 5: Subir PDF al Servidor (Opcional)
+### Step 3: Save the Form to the Cloud
 
-Si NO subiste el PDF al crear el formulario, puedes hacerlo después:
+Once you've added at least one field, the **"Save Form"** panel appears in the editor:
 
-1. En el panel **"Form Saved"**, verás un botón **"Upload PDF"**
-2. Haz clic y selecciona el archivo PDF actual
-3. El sistema subirá el PDF y lo vinculará al formulario
+1. **Enter a title** for your form (required)
+2. Optionally, add a **description**
+3. Click **"Save Form to Cloud"**
+
+The system automatically:
+- Uploads the PDF to the server
+- Creates the form in the database
+- Saves all the fields you created
+- Generates a unique ID for sharing
 
 ```
-Form Saved Panel → Upload PDF → Seleccionar archivo → Upload
+Save Form Panel → Title + Description → Save Form to Cloud
 ```
 
-## 🎯 Componentes de la Interfaz
+### Step 4: Update Fields (Form Already Saved)
+
+If you've already saved the form and add or modify fields:
+
+1. The panel switches to **"Form Saved"**, showing the current state
+2. Click **"Update Fields"** to save the changes
+
+```
+Form Saved Panel → Modify fields → Update Fields
+```
+
+### Step 5: Upload PDF to the Server (Optional)
+
+If you did NOT upload the PDF when creating the form, you can do so afterward:
+
+1. In the **"Form Saved"** panel, you'll see an **"Upload PDF"** button
+2. Click it and select the current PDF file
+3. The system uploads the PDF and links it to the form
+
+```
+Form Saved Panel → Upload PDF → Select file → Upload
+```
+
+## Interface Components
 
 ### Dashboard View
 
@@ -84,28 +84,28 @@ Form Saved Panel → Upload PDF → Seleccionar archivo → Upload
 │ [Logo] PDF Editor Pro    [Upload PDF] [Logout]     │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
-│  Sin documentos:                                    │
+│  No documents:                                      │
 │  ┌─────────────────────────────────────────────┐  │
-│  │  📄 Upload Your PDF                          │  │
+│  │  Upload Your PDF                             │  │
 │  │  [Drag & Drop or Click to Upload]           │  │
 │  └─────────────────────────────────────────────┘  │
 │                                                     │
-│  Con documento cargado:                            │
+│  With a document loaded:                           │
 │  ├─ Sidebar: Documents/Pages                       │
-│  ├─ Visor PDF (centro)                             │
-│  └─ Editor Tools (derecha)                         │
-│     ├─ Form Save Panel ⭐ NUEVO                    │
+│  ├─ PDF Viewer (center)                            │
+│  └─ Editor Tools (right)                           │
+│     ├─ Form Save Panel                             │
 │     ├─ Search                                      │
 │     ├─ Add Text                                    │
 │     └─ Export PDF                                  │
 └─────────────────────────────────────────────────────┘
 ```
 
-### Form Save Panel (Antes de Guardar)
+### Form Save Panel (Before Saving)
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ ⚠️ Save Form                                    │
+│ Save Form                                        │
 ├─────────────────────────────────────────────────┤
 │ Save this PDF form to the cloud to access it   │
 │ later and share with others.                    │
@@ -119,17 +119,17 @@ Form Saved Panel → Upload PDF → Seleccionar archivo → Upload
 │ │                                             ││
 │ └─────────────────────────────────────────────┘│
 │                                                 │
-│ [☁️ Save Form to Cloud]                         │
+│ [Save Form to Cloud]                            │
 │                                                 │
-│ ⚠️ Add at least one field before saving        │
+│ Add at least one field before saving            │
 └─────────────────────────────────────────────────┘
 ```
 
-### Form Save Panel (Después de Guardar)
+### Form Save Panel (After Saving)
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ ✅ Form Saved                                   │
+│ Form Saved                                       │
 │ ID: abc123-def456-...                           │
 ├─────────────────────────────────────────────────┤
 │ ┌─────────────────────────────────────────────┐│
@@ -138,13 +138,13 @@ Form Saved Panel → Upload PDF → Seleccionar archivo → Upload
 │ │ 5 fields • draft                            ││
 │ └─────────────────────────────────────────────┘│
 │                                                 │
-│ [💾 Update Fields]                              │
+│ [Update Fields]                                 │
 │                                                 │
-│ [☁️ Upload PDF]  (si no se subió antes)         │
+│ [Upload PDF]  (if not uploaded yet)             │
 │                                                 │
-│ O si ya se subió:                               │
+│ Or if already uploaded:                         │
 │ ┌─────────────────────────────────────────────┐│
-│ │ 📄 PDF Uploaded                             ││
+│ │ PDF Uploaded                                ││
 │ │ eGKk4M-2Ov_f-1769629592137.pdf              ││
 │ └─────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────┘
@@ -152,11 +152,11 @@ Form Saved Panel → Upload PDF → Seleccionar archivo → Upload
 
 ### Upload Progress Toast
 
-Cuando subes un PDF, aparece una notificación flotante mostrando el progreso:
+While uploading a PDF, a floating notification shows the progress:
 
 ```
 ┌─────────────────────────────────────────┐
-│ 📄  sample.pdf                          │
+│ sample.pdf                              │
 │     Uploading...                        │
 │                                         │
 │ ████████████░░░░░░░░░░ 65%             │
@@ -165,56 +165,56 @@ Cuando subes un PDF, aparece una notificación flotante mostrando el progreso:
 └─────────────────────────────────────────┘
 ```
 
-## 🔄 Estados del Formulario
+## Form States
 
-### 1. Sin Formulario Guardado
-- Panel muestra "Save Form"
-- Botón: "Save Form to Cloud"
-- Acción: Crear formulario nuevo + subir PDF
+### 1. No Form Saved
+- Panel shows "Save Form"
+- Button: "Save Form to Cloud"
+- Action: Create a new form + upload PDF
 
-### 2. Formulario Guardado (Con PDF)
-- Panel muestra "Form Saved" ✅
-- Muestra información del formulario
-- Muestra "PDF Uploaded" con nombre del archivo
-- Botón: "Update Fields" (para actualizar campos)
+### 2. Form Saved (With PDF)
+- Panel shows "Form Saved"
+- Displays form information
+- Shows "PDF Uploaded" with the file name
+- Button: "Update Fields" (to update fields)
 
-### 3. Formulario Guardado (Sin PDF)
-- Panel muestra "Form Saved" ✅
-- Botón adicional: "Upload PDF"
-- Permite subir el PDF posteriormente
+### 3. Form Saved (Without PDF)
+- Panel shows "Form Saved"
+- Additional button: "Upload PDF"
+- Allows uploading the PDF later
 
-## 💡 Casos de Uso Comunes
+## Common Use Cases
 
-### Caso 1: Crear Formulario Nuevo con TODO
+### Case 1: Create a New Form from Scratch
 ```
-1. Upload PDF → Visor carga el archivo
-2. Agregar campos de formulario
+1. Upload PDF → Viewer loads the file
+2. Add form fields
 3. Click "Save Form to Cloud"
-   ✅ PDF se sube automáticamente
-   ✅ Formulario se crea en DB
-   ✅ Campos se guardan
+   PDF is uploaded automatically
+   Form is created in the DB
+   Fields are saved
 ```
 
-### Caso 2: Modificar Formulario Existente
+### Case 2: Modify an Existing Form
 ```
-1. Cargar formulario desde lista de formularios
-2. Modificar o agregar campos
+1. Load the form from the forms list
+2. Modify or add fields
 3. Click "Update Fields"
-   ✅ Cambios se guardan en DB
+   Changes are saved in the DB
 ```
 
-### Caso 3: Subir PDF Después
+### Case 3: Upload the PDF Later
 ```
-1. Crear formulario sin subir PDF
-2. Más tarde, click "Upload PDF"
-3. Seleccionar archivo PDF
-   ✅ PDF se sube al servidor
-   ✅ URL se vincula al formulario
+1. Create a form without uploading a PDF
+2. Later, click "Upload PDF"
+3. Select the PDF file
+   PDF is uploaded to the server
+   URL is linked to the form
 ```
 
-## ⚙️ Configuración Técnica
+## Technical Configuration
 
-### Variables de Entorno
+### Environment Variables
 
 Backend (.env):
 ```bash
@@ -226,38 +226,38 @@ Frontend (.env):
 VITE_API_URL=http://localhost:3000/api
 ```
 
-### Límites
+### Limits
 
-- Tamaño máximo de PDF: **10MB**
-- Tipos de archivo aceptados: **Solo PDF** (`application/pdf`)
-- Autenticación: **Requerida** (JWT token)
+- Maximum PDF size: **10MB**
+- Accepted file types: **PDF only** (`application/pdf`)
+- Authentication: **Required** (JWT token)
 
-## 🐛 Solución de Problemas
+## Troubleshooting
 
-### "No se puede guardar el formulario"
-- ✅ Verifica que hayas agregado al menos un campo
-- ✅ Verifica que el título no esté vacío
-- ✅ Verifica tu conexión a internet
+### "Cannot save the form"
+- Verify you've added at least one field
+- Verify the title is not empty
+- Check your internet connection
 
-### "Error al subir PDF"
-- ✅ Verifica que el archivo sea un PDF válido
-- ✅ Verifica que no exceda 10MB
-- ✅ Verifica que estés autenticado
+### "Error uploading PDF"
+- Verify the file is a valid PDF
+- Verify it does not exceed 10MB
+- Verify you are authenticated
 
-### "Los campos no se actualizan"
-- ✅ Verifica que el formulario esté guardado primero
-- ✅ Verifica tu conexión al servidor
-- ✅ Revisa la consola del navegador para errores
+### "Fields are not updating"
+- Verify the form was saved first
+- Check your connection to the server
+- Check the browser console for errors
 
-## 📊 Ejemplo Completo
+## Full Example
 
 ```javascript
-// Flujo programático (para desarrolladores)
+// Programmatic flow (for developers)
 
-// 1. Usuario carga PDF localmente
+// 1. User loads a PDF locally
 await documentStore.loadPDF(pdfFile)
 
-// 2. Usuario agrega campos
+// 2. User adds fields
 formFieldsStore.addField({
   type: 'text',
   name: 'email',
@@ -266,25 +266,25 @@ formFieldsStore.addField({
   position: { x: 100, y: 200, width: 200, height: 30, page: 1 }
 })
 
-// 3. Usuario guarda formulario (esto sube el PDF automáticamente)
+// 3. User saves the form (this uploads the PDF automatically)
 const form = await formManagement.createFormForCurrentDocument(
-  'Contact Form',  // título
-  pdfFile          // archivo PDF (opcional)
+  'Contact Form',  // title
+  pdfFile          // PDF file (optional)
 )
 
-// 4. Usuario modifica campos
+// 4. User modifies fields
 formFieldsStore.updateField(fieldId, { required: false })
 
-// 5. Usuario actualiza campos en servidor
+// 5. User updates fields on the server
 await formFieldsStore.saveAllFields()
 
-// 6. (Opcional) Subir PDF si no se hizo antes
+// 6. (Optional) Upload the PDF if not done before
 await formManagement.uploadPDFForCurrentForm(pdfFile)
 ```
 
-## 🎨 Personalización
+## Customization
 
-### Cambiar Límite de Tamaño
+### Changing the Size Limit
 
 Backend (`backend/src/middleware/upload.ts`):
 ```typescript
@@ -293,32 +293,32 @@ limits: {
 }
 ```
 
-### Cambiar Directorio de Upload
+### Changing the Upload Directory
 
 Backend (`backend/src/middleware/upload.ts`):
 ```typescript
 const uploadsDir = path.join(process.cwd(), 'uploads', 'pdfs')
 ```
 
-### Agregar Validaciones Adicionales
+### Adding Additional Validations
 
 Frontend (`frontend/src/services/upload.ts`):
 ```typescript
-// Agregar validación personalizada
+// Add custom validation
 if (file.name.includes('test')) {
   throw new UploadError(400, 'Test files not allowed')
 }
 ```
 
-## 🚀 Próximos Pasos
+## Next Steps
 
-Después de subir y guardar tu formulario:
+After uploading and saving your form:
 
-1. **Compartir**: Obtén el `shareId` para compartir el formulario
-2. **Ver respuestas**: Accede al dashboard de respuestas
-3. **Publicar**: Cambia el estado a "published"
-4. **Exportar**: Descarga el PDF con campos completados
+1. **Share**: Get the `shareId` to share the form
+2. **View responses**: Access the responses dashboard
+3. **Publish**: Change the status to "published"
+4. **Export**: Download the PDF with completed fields
 
 ---
 
-**¿Necesitas ayuda?** Consulta la [documentación técnica](./pdf-upload-guide.md) para más detalles.
+**Need help?** See the [technical documentation](./pdf-upload-guide.md) for more details.
