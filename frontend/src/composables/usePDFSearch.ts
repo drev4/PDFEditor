@@ -1,7 +1,25 @@
+import type { Ref } from 'vue'
 import { useDocumentStore } from '@/stores/document.store'
 import { useSearchStore } from '@/stores/search.store'
+import type { PDFDocumentProxy, PDFPageViewport, PDFPageTextItem } from '@/types/pdfjs'
 
-export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) {
+interface SearchMatch {
+  pageIndex: number
+  textIndex: number
+  text: string
+  bounds: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+}
+
+export function usePDFSearch(
+  pdfDoc: Ref<PDFDocumentProxy | null>,
+  canvasRef: Ref<HTMLCanvasElement | null>,
+  searchCanvasRef: Ref<HTMLCanvasElement | null>
+) {
   const documentStore = useDocumentStore()
   const searchStore = useSearchStore()
 
@@ -13,28 +31,22 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
     }
 
     try {
-      const matches: any[] = []
+      const matches: SearchMatch[] = []
       const query = searchStore.searchQuery.toLowerCase()
 
-      // Search in all pages - use scale 1.0 to get base coordinates
       for (let pageNum = 1; pageNum <= pdfDoc.value.numPages; pageNum++) {
         const page = await pdfDoc.value.getPage(pageNum)
         const textContent = await page.getTextContent()
-        const viewport = page.getViewport({ scale: 1.0 }) // Base scale
+        const viewport = page.getViewport({ scale: 1.0 })
 
-        textContent.items.forEach((item: any) => {
+        textContent.items.forEach((item: PDFPageTextItem) => {
           const text = item.str.toLowerCase()
           if (text.includes(query)) {
-            // Calculate font size from transform matrix
             const fontSize = Math.sqrt(
               (item.transform[2] * item.transform[2]) +
               (item.transform[3] * item.transform[3])
             )
 
-            // Get width - use the actual width
-            const textWidth = item.width
-
-            // Store coordinates at scale 1.0 (base coordinates)
             matches.push({
               pageIndex: pageNum - 1,
               textIndex: matches.length,
@@ -42,7 +54,7 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
               bounds: {
                 x: item.transform[4],
                 y: viewport.height - item.transform[5] - fontSize,
-                width: textWidth,
+                width: item.width,
                 height: fontSize
               }
             })
@@ -52,8 +64,6 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
 
       searchStore.setSearchMatches(matches)
       searchStore.setIsSearching(false)
-
-      // Draw highlights for current page
       await drawSearchHighlights()
     } catch (error) {
       console.error('Error searching text:', error)
@@ -67,7 +77,6 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
     const searchCanvas = searchCanvasRef.value
     const mainCanvas = canvasRef.value
 
-    // Match search canvas size to main canvas
     searchCanvas.width = mainCanvas.width
     searchCanvas.height = mainCanvas.height
 
@@ -76,23 +85,20 @@ export function usePDFSearch(pdfDoc: any, canvasRef: any, searchCanvasRef: any) 
 
     ctx.clearRect(0, 0, searchCanvas.width, searchCanvas.height)
 
-    // Draw highlights for matches on current page
+    const currentPage = documentStore.activeDocument.currentPage - 1
     const currentPageMatches = searchStore.searchMatches.filter(
-      (match: any) => match.pageIndex === documentStore.activeDocument!.currentPage - 1
+      (match: SearchMatch) => match.pageIndex === currentPage
     )
 
     if (!pdfDoc.value) return
 
-    // Get the current scale to apply to base coordinates
     const currentScale = documentStore.activeDocument.scale
 
-    currentPageMatches.forEach((match: any) => {
+    currentPageMatches.forEach((match: SearchMatch) => {
       const isCurrentMatch = searchStore.searchMatches.indexOf(match) === searchStore.currentMatchIndex
 
-      // Highlight color: yellow for all matches, orange for current match
       ctx.fillStyle = isCurrentMatch ? 'rgba(255, 165, 0, 0.4)' : 'rgba(255, 255, 0, 0.3)'
 
-      // Apply current scale to base coordinates
       ctx.fillRect(
         match.bounds.x * currentScale,
         match.bounds.y * currentScale,

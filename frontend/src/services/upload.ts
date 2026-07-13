@@ -1,4 +1,5 @@
 import { authService } from './auth'
+import { ApiError } from './api'
 import type { FieldType } from '@/stores/formFields.store'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
@@ -27,7 +28,7 @@ export interface UploadResponse {
   url: string
   filename: string
   size: number
-  fields: ExtractedField[] // Campos extraídos del PDF
+  fields: ExtractedField[]
 }
 
 export interface UploadProgress {
@@ -36,37 +37,18 @@ export interface UploadProgress {
   percentage: number
 }
 
-class UploadError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public details?: unknown
-  ) {
-    super(message)
-    this.name = 'UploadError'
-  }
-}
-
 export const uploadService = {
-  /**
-   * Upload a PDF file to the server
-   * @param file - The PDF file to upload
-   * @param onProgress - Optional callback for upload progress
-   * @returns Promise with upload response
-   */
   async uploadPDF(
     file: File,
     onProgress?: (progress: UploadProgress) => void
   ): Promise<UploadResponse> {
-    // Validate file type
     if (file.type !== 'application/pdf') {
-      throw new UploadError(400, 'Only PDF files are allowed')
+      throw new ApiError(400, 'Only PDF files are allowed')
     }
 
-    // Validate file size (10MB)
     const maxSize = 10 * 1024 * 1024
     if (file.size > maxSize) {
-      throw new UploadError(400, 'File size must be less than 10MB')
+      throw new ApiError(400, 'File size must be less than 10MB')
     }
 
     const formData = new FormData()
@@ -75,52 +57,46 @@ export const uploadService = {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
 
-      // Track upload progress
       if (onProgress) {
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
-            const progress: UploadProgress = {
+            onProgress({
               loaded: e.loaded,
               total: e.total,
               percentage: Math.round((e.loaded / e.total) * 100)
-            }
-            onProgress(progress)
+            })
           }
         })
       }
 
-      // Handle completion
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText)
             resolve(response)
-          } catch (e) {
-            reject(new UploadError(xhr.status, 'Invalid response from server'))
+          } catch {
+            reject(new ApiError(xhr.status, 'Invalid response from server'))
           }
         } else {
           try {
             const errorData = JSON.parse(xhr.responseText)
-            reject(new UploadError(xhr.status, errorData.error || 'Upload failed', errorData.details))
-          } catch (e) {
-            reject(new UploadError(xhr.status, 'Upload failed'))
+            reject(new ApiError(xhr.status, errorData.error || 'Upload failed', errorData.details))
+          } catch {
+            reject(new ApiError(xhr.status, 'Upload failed'))
           }
         }
       })
 
-      // Handle errors
       xhr.addEventListener('error', () => {
-        reject(new UploadError(0, 'Network error during upload'))
+        reject(new ApiError(0, 'Network error during upload'))
       })
 
       xhr.addEventListener('abort', () => {
-        reject(new UploadError(0, 'Upload aborted'))
+        reject(new ApiError(0, 'Upload aborted'))
       })
 
-      // Open and send request
       xhr.open('POST', `${API_URL}/upload`)
 
-      // Add auth token
       const token = authService.getToken()
       if (token) {
         xhr.setRequestHeader('Authorization', `Bearer ${token}`)
@@ -130,5 +106,3 @@ export const uploadService = {
     })
   }
 }
-
-export { UploadError }

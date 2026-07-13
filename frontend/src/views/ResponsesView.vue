@@ -218,7 +218,7 @@ async function loadData() {
   }
 }
 
-function onPage(event: any) {
+function onPage(event: { rows: number; first: number }) {
   rows.value = event.rows
   offset.value = event.first
   loadData()
@@ -236,7 +236,7 @@ const dynamicColumns = computed(() => {
 // Flatten responses for DataTable
 const formattedResponses = computed(() => {
   return responses.value.map(resp => {
-    const row: Record<string, any> = {
+    const row: Record<string, string | null | undefined> = {
       id: resp.id,
       submittedAt: resp.submittedAt,
       ipAddress: resp.ipAddress,
@@ -265,7 +265,7 @@ const formattedDate = computed(() => {
   return formatDate(selectedResponse.value.submittedAt)
 })
 
-function viewDetails(data: any) {
+function viewDetails(data: { id: string }) {
   selectedResponse.value = responses.value.find(r => r.id === data.id) || null
   showDetails.value = true
 }

@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { responsesService, type SubmitResponseData } from '../services/responses'
+import { ApiError } from '../services/api'
 
 export function useResponseSubmit() {
   const isSubmitting = ref(false)
@@ -19,25 +20,23 @@ export function useResponseSubmit() {
       success.value = true
       responseId.value = result.responseId
       return result
-    } catch (err: any) {
-      if (err.response?.status === 400) {
-        // Validation errors
-        const details = err.response?.data?.details
-        if (typeof details === 'object' && !Array.isArray(details)) {
-          if (details.message && details.fields) {
-            // Missing required fields
-            error.value = `${details.message}: ${details.fields.join(', ')}`
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 400) {
+        const details = err.details
+        if (typeof details === 'object' && details !== null && !Array.isArray(details)) {
+          const d = details as Record<string, unknown>
+          if (d.message && d.fields) {
+            error.value = `${d.message}: ${(d.fields as string[]).join(', ')}`
           } else {
-            // Field-specific validation errors
-            validationErrors.value = details
+            validationErrors.value = details as Record<string, string>
             error.value = 'Please fix the validation errors'
           }
         } else {
-          error.value = err.response?.data?.error || 'Validation failed'
+          error.value = err.message || 'Validation failed'
         }
-      } else if (err.response?.status === 403) {
+      } else if (err instanceof ApiError && err.status === 403) {
         error.value = 'This form is not accepting responses'
-      } else if (err.response?.status === 404) {
+      } else if (err instanceof ApiError && err.status === 404) {
         error.value = 'Form not found'
       } else {
         error.value = 'Failed to submit response. Please try again.'

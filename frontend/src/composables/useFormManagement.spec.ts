@@ -50,7 +50,7 @@ describe('useFormManagement', () => {
 
       expect(formsStore.createForm).toHaveBeenCalledWith({
         title: 'My Form',
-        description: 'PDF form based on test.pdf',
+        description: undefined,
         pdfUrl: undefined
       })
       expect(setCurrentFormSpy).toHaveBeenCalledWith('form-1')

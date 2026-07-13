@@ -1,13 +1,13 @@
 import { ref } from 'vue'
+import type { Ref } from 'vue'
 import { useDocumentStore } from '@/stores/document.store'
 import { useEditorStore } from '@/stores/editor.store'
 import { useDragAndDrop } from './useDragAndDrop'
-import { usePDFCoordinates } from '@/utils/pdfCoordinates'
+import { canvasToPDF, calculateTransform } from '@/utils/pdfCoordinates'
 
-export function useImagePlacement(canvasRef: any) {
+export function useImagePlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
   const documentStore = useDocumentStore()
   const editorStore = useEditorStore()
-  const { canvasToPDF } = usePDFCoordinates()
 
   // Image flip state
   const flipHorizontal = ref(false)
@@ -112,13 +112,12 @@ export function useImagePlacement(canvasRef: any) {
       }
 
       // Convert canvas coordinates to PDF coordinates
-      const transform = {
-        scaleFactor: page.getHeight() / (canvasRef.value?.height || page.getHeight()),
-        pageHeight: page.getHeight(),
-        canvasHeight: canvasRef.value?.height || page.getHeight(),
-        containerPaddingX: 12,
-        containerPaddingY: 8
-      }
+      const transform = calculateTransform(
+        page.getHeight(),
+        canvasRef.value?.height || page.getHeight(),
+        12,
+        8
+      )
 
       const pdfCoords = canvasToPDF(
         { 

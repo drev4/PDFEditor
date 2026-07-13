@@ -122,6 +122,7 @@ import { useResponseSubmit } from '../composables/useResponseSubmit'
 import { useFormValidation } from '../composables/useFormValidation'
 import { usePublicResponsesStore } from '../stores/publicResponses.store'
 import { useDocumentStore } from '@/stores/document.store'
+import { buildApiUrl } from '@/utils/apiUrl'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PublicFormFieldsOverlay from '@/components/form-fields/PublicFormFieldsOverlay.vue'
 import SubmitPreviewModal from '@/components/forms/SubmitPreviewModal.vue'
@@ -150,9 +151,7 @@ const loadPdfDocument = async (url: string) => {
   loadingPdf.value = true
   try {
     // Check if URL is relative (from our backend)
-    const fullUrl = url.startsWith('http') 
-      ? url 
-      : `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${url}`
+    const fullUrl = buildApiUrl(url)
       
     const response = await fetch(fullUrl)
     if (!response.ok) throw new Error('Failed to fetch PDF')

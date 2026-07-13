@@ -3,8 +3,15 @@ import { ref, computed } from 'vue'
 import { fieldsService, type CreateFieldData } from '../services/fields'
 import { ApiError } from '../services/api'
 import type { Field } from '../services/forms'
+import { useAsyncAction } from '../composables/useAsyncAction'
 
 export type FieldType = 'text' | 'textarea' | 'checkbox' | 'radio' | 'dropdown'
+
+const LOCAL_ID_PREFIX = 'field-'
+
+function isLocalFieldId(id: string): boolean {
+  return id.startsWith(LOCAL_ID_PREFIX)
+}
 
 export interface FormField {
   id: string
@@ -12,7 +19,7 @@ export interface FormField {
   name: string
   label: string
   required: boolean
-  border: boolean // Si el campo tiene borde visible
+  border: boolean
   position: {
     x: number
     y: number
@@ -20,7 +27,7 @@ export interface FormField {
     height: number
     page: number
   }
-  options?: string[] // Para radio/dropdown
+  options?: string[]
   validation?: {
     minLength?: number
     maxLength?: number
@@ -29,7 +36,6 @@ export interface FormField {
 }
 
 export const useFormFieldsStore = defineStore('formFields', () => {
-  // State
   const fields = ref<FormField[]>([])
   const selectedFieldId = ref<string | null>(null)
   const isAddingField = ref(false)
@@ -38,7 +44,6 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  // Computed
   const selectedField = computed(() => {
     return fields.value.find(f => f.id === selectedFieldId.value) || null
   })
@@ -55,7 +60,6 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     return byPage
   })
 
-  // Actions
   const startAddingField = (type: FieldType) => {
     isAddingField.value = true
     fieldTypeToAdd.value = type
@@ -68,7 +72,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   }
 
   const addField = (field: Omit<FormField, 'id'>) => {
-    const id = `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const id = `${LOCAL_ID_PREFIX}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     const newField: FormField = {
       ...field,
       id
@@ -85,18 +89,17 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     if (index !== -1) {
       const current = fields.value[index]
       if (current) {
-        // Si se está actualizando el nombre, verificar que no exista otro campo con ese nombre
         if (updates.name && updates.name !== current.name) {
           if (fieldExists(updates.name, id)) {
-            console.warn(`El campo con nombre "${updates.name}" ya existe`)
-            return // No actualizar si el nombre ya existe
+            console.warn(`Field with name "${updates.name}" already exists`)
+            return
           }
         }
 
         fields.value[index] = {
           ...current,
           ...updates,
-          id: current.id // Ensure id is never overwritten
+          id: current.id
         }
       }
     }
@@ -161,13 +164,11 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   }
 
   const loadFieldsFromPDF = (pdfFields: Omit<FormField, 'id'>[]) => {
-    // Limpia los campos existentes antes de cargar
     fields.value = []
     selectedFieldId.value = null
 
-    // Añade los campos del PDF
     pdfFields.forEach(field => {
-      const id = `field-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const id = `${LOCAL_ID_PREFIX}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       fields.value.push({
         ...field,
         id
@@ -175,23 +176,18 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     })
   }
 
-  // ============================================================================
-  // SERVER PERSISTENCE METHODS
-  // ============================================================================
-
   const setCurrentForm = (formId: string | null) => {
     currentFormId.value = formId
   }
 
   const loadFieldsFromForm = (formFields: Field[]) => {
-    // Convert backend Field format to FormField format
     fields.value = formFields.map(field => ({
       id: field.id,
       type: field.type,
       name: field.name,
       label: field.label,
       required: field.required,
-      border: false, // Default value for UI - transparent without border
+      border: false,
       position: field.position as FormField['position'],
       options: field.options,
       validation: field.validation
@@ -200,47 +196,33 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   }
 
   const saveAllFields = async () => {
-    if (!currentFormId.value) {
+    const formId = currentFormId.value
+    if (!formId) {
       error.value = 'No form selected'
       return
     }
 
-    loading.value = true
-    error.value = null
-
-    try {
-      // Convert FormField format to CreateFieldData format with validation
+    return useAsyncAction({ loading, error }, async () => {
       const fieldsData: CreateFieldData[] = fields.value.map((field, index) => ({
         type: field.type,
-        name: field.name || `field_${Date.now()}_${index}`, // Ensure name is not empty
-        label: field.label || field.name || 'Untitled Field', // Ensure label is not empty (min 1 char required)
+        name: field.name || `field_${Date.now()}_${index}`,
+        label: field.label || field.name || 'Untitled Field',
         required: field.required,
         position: field.position,
-        options: field.options && field.options.length > 0 ? field.options : undefined, // Only send if not empty
-        validation: field.validation && Object.keys(field.validation).length > 0 ? field.validation : undefined, // Only send if not empty
+        options: field.options && field.options.length > 0 ? field.options : undefined,
+        validation: field.validation && Object.keys(field.validation).length > 0 ? field.validation : undefined,
         order: index
       }))
 
-      const savedFields = await fieldsService.bulkSave(currentFormId.value, fieldsData)
-
-      // Update local fields with server IDs
+      const savedFields = await fieldsService.bulkSave(formId, fieldsData)
       loadFieldsFromForm(savedFields)
-
       return savedFields
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to save fields'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to save fields' })
   }
 
   const saveField = async (fieldId: string) => {
-    if (!currentFormId.value) {
+    const formId = currentFormId.value
+    if (!formId) {
       error.value = 'No form selected'
       return
     }
@@ -251,89 +233,50 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       return
     }
 
-    loading.value = true
-    error.value = null
+    const fieldData: CreateFieldData = {
+      type: field.type,
+      name: field.name || `field_${Date.now()}`,
+      label: field.label || field.name || 'Untitled Field',
+      required: field.required,
+      position: field.position,
+      options: field.options && field.options.length > 0 ? field.options : undefined,
+      validation: field.validation && Object.keys(field.validation).length > 0 ? field.validation : undefined,
+      order: fields.value.indexOf(field)
+    }
 
-    try {
-      // Prepare field data and ensure it meets backend validation requirements
-      const fieldData: CreateFieldData = {
-        type: field.type,
-        name: field.name || `field_${Date.now()}`, // Ensure name is not empty
-        label: field.label || field.name || 'Untitled Field', // Ensure label is not empty
-        required: field.required,
-        position: field.position,
-        options: field.options && field.options.length > 0 ? field.options : undefined, // Only send if not empty
-        validation: field.validation && Object.keys(field.validation).length > 0 ? field.validation : undefined, // Only send if not empty
-        order: fields.value.indexOf(field)
-      }
+    return useAsyncAction({ loading, error }, async () => {
+      const savedField = isLocalFieldId(fieldId)
+        ? await fieldsService.create(formId, fieldData)
+        : await fieldsService.update(formId, fieldId, fieldData)
 
-      // Check if field has a UUID (server-generated) or temp ID (local only)
-      const isServerField = field.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
-
-      let savedField: Field
-      if (isServerField) {
-        // Update existing field
-        savedField = await fieldsService.update(currentFormId.value, fieldId, fieldData)
-      } else {
-        // Create new field
-        savedField = await fieldsService.create(currentFormId.value, fieldData)
-      }
-
-      // Update local field with server data
       const index = fields.value.findIndex(f => f.id === fieldId)
       if (index !== -1) {
         fields.value[index] = {
           ...field,
-          id: savedField.id // Update with server ID
+          id: savedField.id
         }
       }
 
       return savedField
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to save field'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to save field' })
   }
 
   const deleteFieldFromServer = async (fieldId: string) => {
-    if (!currentFormId.value) {
+    const formId = currentFormId.value
+    if (!formId) {
       error.value = 'No form selected'
       return
     }
 
-    // Check if field exists on server (has UUID)
-    const isServerField = fieldId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
-
-    if (!isServerField) {
-      // Field only exists locally, just remove from local state
+    if (isLocalFieldId(fieldId)) {
       deleteField(fieldId)
       return
     }
 
-    loading.value = true
-    error.value = null
-
-    try {
-      await fieldsService.delete(currentFormId.value, fieldId)
-
-      // Remove from local state
+    return useAsyncAction({ loading, error }, async () => {
+      await fieldsService.delete(formId, fieldId)
       deleteField(fieldId)
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to delete field'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to delete field' })
   }
 
   const clearError = () => {
@@ -341,7 +284,6 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   }
 
   return {
-    // State
     fields,
     selectedFieldId,
     isAddingField,
@@ -349,10 +291,8 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     currentFormId,
     loading,
     error,
-    // Computed
     selectedField,
     fieldsByPage,
-    // Actions - Local (immediate UI updates)
     startAddingField,
     cancelAddingField,
     addField,
@@ -366,7 +306,6 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     generateUniqueFieldName,
     fieldExists,
     loadFieldsFromPDF,
-    // Actions - Server persistence
     setCurrentForm,
     loadFieldsFromForm,
     saveAllFields,

@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { formsService, type Form } from '../services/forms'
+import { ApiError } from '../services/api'
 
 export function usePublicForm() {
   const form = ref<Form | null>(null)
@@ -17,10 +18,10 @@ export function usePublicForm() {
 
     try {
       form.value = await formsService.getPublic(shareId)
-    } catch (err: any) {
-      if (err.response?.status === 404) {
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 404) {
         error.value = 'Form not found or not published'
-      } else if (err.response?.status === 403) {
+      } else if (err instanceof ApiError && err.status === 403) {
         error.value = 'This form is not available for submissions'
       } else {
         error.value = 'Failed to load form. Please try again later.'

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authService, type User } from '../services/auth'
-import { ApiError } from '../services/api'
+import { useAsyncAction } from '../composables/useAsyncAction'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -11,41 +11,19 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!user.value)
 
   async function register(email: string, password: string, name?: string) {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       const response = await authService.register(email, password, name)
       user.value = response.user
       return response
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Registration failed'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Registration failed' })
   }
 
   async function login(email: string, password: string) {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       const response = await authService.login(email, password)
       user.value = response.user
       return response
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Login failed'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Login failed' })
   }
 
   async function fetchUser() {
@@ -53,13 +31,12 @@ export const useAuthStore = defineStore('auth', () => {
       return null
     }
 
-    loading.value = true
-    error.value = null
     try {
+      loading.value = true
+      error.value = null
       user.value = await authService.me()
       return user.value
-    } catch (e) {
-      // Token inválido, limpiar
+    } catch {
       authService.logout()
       user.value = null
       return null
@@ -87,6 +64,6 @@ export const useAuthStore = defineStore('auth', () => {
   persist: {
     key: 'vuepdf-auth',
     storage: localStorage,
-    paths: ['user']
+    pick: ['user']
   }
 })

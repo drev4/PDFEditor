@@ -1,5 +1,7 @@
 import { ref } from 'vue'
-import { uploadService, UploadError, type UploadProgress } from '@/services/upload'
+import type { Ref } from 'vue'
+import { uploadService, type UploadProgress } from '@/services/upload'
+import { ApiError } from '@/services/api'
 
 /**
  * Composable for handling PDF uploads with progress tracking
@@ -27,7 +29,7 @@ export function usePDFUpload() {
       uploadedUrl.value = response.url
       return response.url
     } catch (e) {
-      if (e instanceof UploadError) {
+      if (e instanceof ApiError) {
         error.value = e.message
       } else {
         error.value = 'Failed to upload PDF'

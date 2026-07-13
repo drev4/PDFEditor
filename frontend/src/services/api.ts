@@ -1,4 +1,5 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
+const getToken = (): string | null => localStorage.getItem('token')
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
@@ -20,7 +21,7 @@ class ApiError extends Error {
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {} } = options
 
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
@@ -38,7 +39,6 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const data = await response.json()
 
   if (!response.ok) {
-    // Si es 401, limpiar token
     if (response.status === 401) {
       localStorage.removeItem('token')
     }
@@ -56,15 +56,13 @@ export const api = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
 
   async download(endpoint: string): Promise<Blob> {
-    const token = localStorage.getItem('token')
+    const token = getToken()
     const headers: Record<string, string> = {}
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
 
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      headers
-    })
+    const response = await fetch(`${API_URL}${endpoint}`, { headers })
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({ error: 'Download failed' }))

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { formsService, type Form, type CreateFormData, type UpdateFormData } from '../services/forms'
-import { ApiError } from '../services/api'
+import { formsService, type Form, type CreateFormData, type UpdateFormData, type FormStatus } from '../services/forms'
+import { useAsyncAction } from '../composables/useAsyncAction'
 
 export const useFormsStore = defineStore('forms', () => {
   const forms = ref<Form[]>([])
@@ -14,64 +14,29 @@ export const useFormsStore = defineStore('forms', () => {
   const draftForms = computed(() => forms.value.filter(f => f.status === 'draft'))
 
   async function fetchForms() {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       forms.value = await formsService.list()
       return forms.value
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to fetch forms'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to fetch forms' })
   }
 
   async function fetchForm(id: string) {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       currentForm.value = await formsService.get(id)
       return currentForm.value
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to fetch form'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to fetch form' })
   }
 
   async function createForm(data: CreateFormData) {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       const form = await formsService.create(data)
       forms.value.unshift(form)
       return form
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to create form'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to create form' })
   }
 
   async function updateForm(id: string, data: UpdateFormData) {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       const updatedForm = await formsService.update(id, data)
       const index = forms.value.findIndex(f => f.id === id)
       if (index !== -1) {
@@ -81,43 +46,21 @@ export const useFormsStore = defineStore('forms', () => {
         currentForm.value = updatedForm
       }
       return updatedForm
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to update form'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to update form' })
   }
 
   async function deleteForm(id: string) {
-    loading.value = true
-    error.value = null
-    try {
+    return useAsyncAction({ loading, error }, async () => {
       await formsService.delete(id)
       forms.value = forms.value.filter(f => f.id !== id)
       if (currentForm.value?.id === id) {
         currentForm.value = null
       }
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to delete form'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to delete form' })
   }
 
-  async function updateFormStatus(id: string, status: any) {
-    loading.value = true
-    error.value = null
-    try {
+  async function updateFormStatus(id: string, status: FormStatus) {
+    return useAsyncAction({ loading, error }, async () => {
       const updatedForm = await formsService.updateStatus(id, status)
       const index = forms.value.findIndex(f => f.id === id)
       if (index !== -1) {
@@ -127,16 +70,7 @@ export const useFormsStore = defineStore('forms', () => {
         currentForm.value = updatedForm
       }
       return updatedForm
-    } catch (e) {
-      if (e instanceof ApiError) {
-        error.value = e.message
-      } else {
-        error.value = 'Failed to update form status'
-      }
-      throw e
-    } finally {
-      loading.value = false
-    }
+    }, { fallbackMessage: 'Failed to update form status' })
   }
 
   function clearCurrentForm() {

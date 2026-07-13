@@ -1,12 +1,13 @@
 import { ref, shallowRef } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { useDocumentStore } from '@/stores/document.store'
+import type { PDFDocumentProxy, PDFRenderTask, PDFPage, PDFPageViewport, PDFPageTextItem } from '@/types/pdfjs'
 
 export function usePDFRendering() {
   const documentStore = useDocumentStore()
 
-  const pdfDoc = shallowRef<any>(null)
-  const renderTask = shallowRef<any>(null)
+  const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
+  const renderTask = shallowRef<PDFRenderTask | null>(null)
   const canvasRef = ref<HTMLCanvasElement | null>(null)
   const gridCanvasRef = ref<HTMLCanvasElement | null>(null)
   const textLayerRef = ref<HTMLDivElement | null>(null)
@@ -44,7 +45,10 @@ export function usePDFRendering() {
       })
 
       const pdf = await loadingTask.promise
-      pdfDoc.value = pdf
+      // pdfjs-dist's official types are broader than what this app uses (e.g. text items
+      // can include marked-content markers); we only ever call getTextContent() with
+      // default options, so items are always TextItem. Assert against our minimal surface.
+      pdfDoc.value = pdf as unknown as PDFDocumentProxy
       documentStore.updateDocumentPages(documentStore.activeDocument.id, pdf.numPages)
 
       await renderPage()
@@ -110,9 +114,10 @@ export function usePDFRendering() {
       }
 
       renderTask.value = null
-      return { page, viewport }
-    } catch (error: any) {
-      if (error?.name === 'RenderingCancelledException') {
+      return { page, viewport } as { page: PDFPage; viewport: PDFPageViewport }
+    } catch (error: unknown) {
+      const err = error as { name?: string }
+      if (err?.name === 'RenderingCancelledException') {
         return null
       }
       console.error('Error rendering page:', error)
@@ -146,7 +151,7 @@ export function usePDFRendering() {
       textLayerDiv.style.left = '0'
 
       // Render each text item
-      textContent.items.forEach((item: any) => {
+      textContent.items.forEach((item: PDFPageTextItem) => {
         const span = document.createElement('span')
         span.textContent = item.str
 
