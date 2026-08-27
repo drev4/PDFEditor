@@ -1,5 +1,7 @@
 # API Documentation - VuePDF Forms Platform
 
+> **Nota (2026-08-28):** la sección de Fields de este documento estaba desactualizada respecto al backend real; se ha corregido. A partir de ahora, [`docs/sot/05-api-reference.md`](./docs/sot/05-api-reference.md) es la referencia canónica de la API (se verifica contra `backend/src/routes/` en cada actualización) — este fichero se mantiene por compatibilidad con enlaces existentes, pero ante cualquier duda o discrepancia futura, el SOT manda.
+
 Base URL: `http://localhost:3000/api`
 
 ## Authentication
@@ -352,41 +354,10 @@ Get a public form by its shareId (no authentication required).
 
 ## Fields Endpoints
 
-### GET /api/forms/:id/fields
-Get all fields belonging to a form.
+> Corregido el 2026-08-28: esta sección describía endpoints que nunca existieron (`GET .../fields`, `PUT .../fields/bulk` con semántica de upsert, `DELETE .../fields/bulk`). Lo de abajo está verificado contra `backend/src/routes/form-fields.ts`. No hay endpoint de listado separado: los fields de un form se obtienen embebidos en `GET /api/forms/:id`. Referencia completa y siempre verificada contra el código: [`docs/sot/05-api-reference.md`](./docs/sot/05-api-reference.md).
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Response:** `200 OK`
-```json
-{
-  "fields": [
-    {
-      "id": 1,
-      "formId": 1,
-      "type": "text",
-      "name": "fullName",
-      "label": "Full Name",
-      "placeholder": "Enter your full name",
-      "required": true,
-      "x": 100,
-      "y": 200,
-      "width": 300,
-      "height": 40,
-      "page": 0,
-      "properties": {}
-    }
-  ]
-}
-```
-
----
-
-### PUT /api/forms/:id/fields/bulk
-Update or create multiple fields at once (bulk operation).
+### POST /api/forms/:formId/fields
+Create a single field on a form.
 
 **Headers:**
 ```
@@ -397,85 +368,60 @@ Content-Type: application/json
 **Request:**
 ```json
 {
-  "fields": [
-    {
-      "id": 1,
-      "type": "text",
-      "name": "fullName",
-      "label": "Full Name",
-      "required": true,
-      "x": 100,
-      "y": 200,
-      "width": 300,
-      "height": 40,
-      "page": 0
-    },
-    {
-      "type": "email",
-      "name": "email",
-      "label": "Email Address",
-      "required": true,
-      "x": 100,
-      "y": 260,
-      "width": 300,
-      "height": 40,
-      "page": 0
-    }
-  ]
+  "type": "text",
+  "name": "fullName",
+  "label": "Full Name",
+  "required": true,
+  "position": { "x": 100, "y": 200, "width": 300, "height": 40, "page": 0 },
+  "options": null,
+  "validation": { "minLength": 2, "maxLength": 100 },
+  "order": 0
 }
 ```
+`type` must be one of `text | textarea | checkbox | radio | dropdown`. `options` (array of strings) is used by `radio`/`dropdown`.
 
-**Response:** `200 OK`
+**Response:** `201 Created`
 ```json
-{
-  "fields": [
-    {
-      "id": 1,
-      "formId": 1,
-      "type": "text",
-      "name": "fullName",
-      ...
-    },
-    {
-      "id": 2,
-      "formId": 1,
-      "type": "email",
-      "name": "email",
-      ...
-    }
-  ]
-}
+{ "field": { "id": "uuid", "formId": "uuid", "type": "text", "name": "fullName", "...": "..." } }
 ```
-
-**Notes:**
-- If a field has an `id`, it is updated
-- If it has no `id`, a new one is created
-- Existing fields not present in the array are NOT deleted
 
 ---
 
-### DELETE /api/forms/:id/fields/bulk
-Delete multiple fields at once.
+### PUT /api/forms/:formId/fields/:fieldId
+Update a single field. Body is a partial version of the create payload (any subset of the same fields).
 
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: application/json
-```
+**Response:** `200 OK` — `{ "field": { ... } }`
+
+---
+
+### DELETE /api/forms/:formId/fields/:fieldId
+Delete a single field.
+
+⚠️ Because of the `onDelete: Cascade` relation from `Answer` to `Field`, deleting a field also deletes every `Answer` already submitted for it. There is no confirmation or undo.
+
+**Response:** `200 OK` — `{ "message": "Field deleted" }`
+
+---
+
+### POST /api/forms/:formId/fields/bulk
+Replace **all** fields of a form in one call — this is what the editor calls on every "save".
 
 **Request:**
 ```json
 {
-  "fieldIds": [1, 2, 3]
+  "fields": [
+    { "type": "text", "name": "fullName", "label": "Full Name", "required": true,
+      "position": { "x": 100, "y": 200, "width": 300, "height": 40, "page": 0 }, "order": 0 }
+  ]
 }
 ```
 
-**Response:** `200 OK`
-```json
-{
-  "message": "3 fields deleted successfully"
-}
-```
+**Response:** `200 OK` — `{ "fields": [ ... ] }` (newly created, with new `id`s)
+
+**Notes (important, differs from what this doc used to say):**
+- This is **not** an upsert. The backend deletes every existing field of the form (`deleteMany`) and recreates the ones sent in the request (`createMany`). Fields not included in the array **are deleted**, not preserved.
+- ⚠️ Same cascade risk as the single `DELETE` above, but easier to trigger by accident: saving the editor on a form that already has responses deletes the `Answer` rows tied to the old field `id`s. See `docs/sot/03-backend-patterns.md` for the known-issue writeup and planned fix.
+- Also re-embeds the fields as AcroForm into the physical PDF file on disk.
 
 ---
 

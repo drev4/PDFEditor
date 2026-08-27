@@ -26,8 +26,9 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# Local AI tooling configs
-.claude/
+# Local AI tooling configs (skills are versioned on purpose, see .claude/skills/)
+.claude/*
+!.claude/skills/
 .agents/
 
 # Test coverage
