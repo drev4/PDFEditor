@@ -1,34 +1,50 @@
-# Source of Truth (SOT) — VuePDF Forms Platform
+# Source of Truth (SoT)
 
-Este directorio es la **fuente única de verdad** del proyecto: conocimiento, contexto de negocio, arquitectura, patrones de código y visión de producto. Sustituye a `TECHNICAL_SPECS.md` (obsoleto, dejado como referencia histórica) como documento de arquitectura, y a la sección de endpoints de `API_DOCUMENTATION.md` como referencia de API.
+This directory is the single source of truth for the project: product intent, architecture, domain model, code patterns, security posture, operations, quality bar and roadmap.
 
-Está pensado para dos lectores: una persona nueva en el proyecto, y Claude Code trabajando en sesiones futuras (junto con las skills en `.claude/skills/`, que referencian estos documentos).
+It has two readers, and both matter equally:
 
-## Índice
+- **A person joining the project**, who needs to understand not just what the code does but why it is shaped that way.
+- **A Claude Code session**, which has no memory of previous sessions and must be able to reconstruct the necessary context from these documents plus the skills in [`.claude/skills/`](../../.claude/skills/) and the agents in [`.claude/agents/`](../../.claude/agents/).
 
-| Documento | Contenido |
-|---|---|
-| [01-product-and-business.md](./01-product-and-business.md) | Qué es el producto, a quién se vende (B2B/B2C), modelo de negocio, estado actual vs. visión |
-| [02-architecture-and-domain.md](./02-architecture-and-domain.md) | Arquitectura del sistema, monorepo, modelo de datos (Prisma), flujos de datos |
-| [03-backend-patterns.md](./03-backend-patterns.md) | Patrones reales de Express/Prisma/Zod con ejemplos del código, + tecnologías avanzadas a incorporar |
-| [04-frontend-patterns.md](./04-frontend-patterns.md) | Patrones reales de Vue 3/Pinia/composables con ejemplos del código, + tecnologías avanzadas a incorporar |
-| [05-api-reference.md](./05-api-reference.md) | Referencia canónica y verificada de todos los endpoints de la API |
-| [06-saas-target-architecture.md](./06-saas-target-architecture.md) | Visión objetivo: multi-tenancy, planes, facturación, roles — **aún no implementado** |
-| [07-conventions.md](./07-conventions.md) | Convenciones de código, tests, commits y flujo de trabajo observadas en el repo |
+Everything here is written to be **verifiable against the code**. Where a document states a fact about the system, that fact was read out of the source, not remembered.
 
-## Cómo mantener esto vivo
+## Index
 
-Esta documentación se degrada si no se actualiza junto con el código. Reglas:
+| # | Document | What it answers |
+|---|---|---|
+| 01 | [Product and market](./01-product-and-market.md) | What we sell, to whom, why they would pay, what we deliberately do not build |
+| 02 | [Architecture](./02-architecture.md) | How the system is put together, the real stack, where the load-bearing walls are |
+| 03 | [Domain model](./03-domain-model.md) | Entities, invariants, lifecycles, delete/cascade semantics |
+| 04 | [Backend patterns](./04-backend-patterns.md) | How an Express route is written here, and why that way |
+| 05 | [Frontend patterns](./05-frontend-patterns.md) | Composables vs stores, async state, HTTP services, coordinate math |
+| 06 | [API reference](./06-api-reference.md) | Canonical, code-verified contract of every endpoint |
+| 07 | [Security and privacy](./07-security-and-privacy.md) | Auth model, threat surface, PII inventory, GDPR obligations |
+| 08 | [Operations](./08-operations.md) | Environments, configuration, CI, deployment, observability, backups |
+| 09 | [Quality and testing](./09-quality-and-testing.md) | Test strategy, what belongs at which level, definition of done |
+| 10 | [SaaS roadmap](./10-saas-roadmap.md) | Target multi-tenant/billing architecture — **not implemented yet** |
+| 11 | [Conventions](./11-conventions.md) | Commits, branches, naming, file layout, language policy |
 
-1. **Toda feature que cambie el modelo de datos, la API o un patrón arquitectónico** debe actualizar el documento del SOT correspondiente en el mismo cambio (ver skill `sot-sync`).
-2. **Ningún endpoint se documenta en `05-api-reference.md` sin verificarlo contra el código de `backend/src/routes/`** (ver skill `api-contract-guard`) — así es como se detectó y corrigió el desfase con `API_DOCUMENTATION.md` en 2026-08.
-3. Las secciones marcadas como **`[TARGET — no implementado]`** describen intención, no realidad. Antes de asumir que algo existe, comprobarlo en el código.
-4. El backlog vivo está en [`docs/NEXT_TASKS.md`](../NEXT_TASKS.md). Las features que pasan de "backlog" a "en curso" obtienen un fichero en [`features/`](../../features/README.md) con su prompt de ejecución.
+Live backlog: [`docs/BACKLOG.md`](../BACKLOG.md). Specs for work in progress: [`features/`](../../features/README.md).
 
-## Estado del código a fecha 2026-08-28
+## Rules that keep this alive
 
-Verificado leyendo el código fuente, no asumido:
+Documentation that is not maintained by rule decays into fiction. These are the rules:
 
-- **Implementado y funcionando:** auth (JWT+bcrypt), CRUD de forms, editor de campos con 5 tipos, extracción automática de campos AcroForm existentes al subir un PDF (`pdf-processor.ts`), embebido de campos como AcroForm al guardar (para exportar el PDF rellenable), formulario público sin login, validación de respuestas por tipo de campo, export CSV, dashboard de respuestas.
-- **No implementado (mencionado como "future" en specs antiguas):** escaneo de virus en uploads, caché Redis, CDN para PDFs.
-- **No implementado (no existe en absoluto, ni mencionado):** multi-tenancy, planes/suscripciones, facturación, roles más allá de "dueño del form", API pública con API keys, cualquier mecanismo de monetización. Esto es relevante porque el objetivo del proyecto es venderlo como SaaS — ver [06-saas-target-architecture.md](./06-saas-target-architecture.md).
+1. **Code wins over documents, always.** If a document and the code disagree, the code is right and the document is a bug. Fix the document in the same change that revealed the drift.
+2. **No endpoint is documented without opening its route file.** This is enforced by the `api-contract-guard` skill. It exists because an earlier iteration of the API docs described three field endpoints that never existed in the backend.
+3. **Any change to the schema, the API, or an architectural pattern updates its SoT document in the same commit.** The `sot-sync` skill is the checklist; the `ship-checklist` skill is the gate before opening a PR.
+4. **Aspirational content is fenced.** Anything not yet built lives in [10-saas-roadmap.md](./10-saas-roadmap.md) or is explicitly tagged `[NOT IMPLEMENTED]`. Never describe a planned feature in the present tense anywhere else.
+5. **Findings get filed, not just noted.** A risk discovered while writing docs goes into [`docs/BACKLOG.md`](../BACKLOG.md) with a priority and a one-line rationale. A note that only lives in a document nobody triages is not a plan.
+
+## Verification status — 2026-08-28
+
+Read out of the source on this date, not assumed:
+
+**Working today:** JWT auth (bcrypt, 7-day tokens); form CRUD with ownership checks; a canvas field editor with five field types; automatic extraction of existing AcroForm fields when a PDF is uploaded (`pdf-processor.ts`); embedding fields back into the physical PDF as an AcroForm on save; a public no-login form flow behind a `shareId`; per-type answer validation; a responses dashboard; CSV export with a UTF-8 BOM.
+
+**Known correctness defect, unfixed:** saving fields from the editor (`POST /api/forms/:formId/fields/bulk`) deletes and recreates every field, which cascade-deletes the answers of responses already collected. See [03-domain-model.md](./03-domain-model.md#cascade-map) and [`features/0001-stable-field-ids-and-safe-bulk-save.md`](../../features/0001-stable-field-ids-and-safe-bulk-save.md). A fix was attempted and reverted twice; it is being redesigned rather than patched.
+
+**Not implemented at all:** organizations, roles beyond "owner of a form", plans, entitlements, billing, public API, API keys, webhooks, rate limiting, structured logging, object storage, background jobs, virus scanning, and any linting. Several of these are prerequisites for selling this, not nice-to-haves — see [07](./07-security-and-privacy.md), [08](./08-operations.md) and [10](./10-saas-roadmap.md).
+
+**No database migration history exists.** `backend/prisma/migrations/` is absent; the schema is applied with `prisma db push` in development and in CI. This is a release blocker documented in [08-operations.md](./08-operations.md#database-migrations).

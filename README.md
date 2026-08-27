@@ -155,10 +155,11 @@ VuePDF/
 
 ## Additional documentation
 
-- [API Documentation](API_DOCUMENTATION.md)
-- [Technical Specs](TECHNICAL_SPECS.md)
-- [Database Schema](docs/database-schema.md)
-- [PDF Upload Guide](docs/pdf-upload-guide.md)
+- [Source of Truth](docs/sot/README.md) — architecture, domain model, API reference, security, operations
+- [API reference](docs/sot/06-api-reference.md)
+- [Domain model](docs/sot/03-domain-model.md)
+- [Backlog](docs/BACKLOG.md)
+- [User guide: uploading and publishing a form](docs/guides/uploading-and-publishing-a-form.md)
 - [Backend Migration Guide](backend/MIGRATION_GUIDE.md)
 
 ## License

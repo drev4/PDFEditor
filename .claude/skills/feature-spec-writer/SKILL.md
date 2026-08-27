@@ -1,47 +1,54 @@
 ---
 name: feature-spec-writer
-description: Crear un fichero nuevo en features/ para una tarea del backlog (docs/NEXT_TASKS.md), y crear la rama de git correspondiente al empezar a implementarla. Usar cuando el usuario pida "preparar", "especificar" o "definir el prompt de" una feature o fix concreto, o pida "empezar"/"implementar" una feature que ya tiene fichero en features/.
+description: Create a spec file in features/ for a backlog item from docs/BACKLOG.md, and create its git branch when implementation starts. Use when asked to prepare, specify or write the prompt for a feature or fix, or to start implementing something that already has a file in features/.
 ---
 
-# Escribir un fichero de feature en features/ y arrancar su rama
+# Write a feature spec, and start its branch
 
-Ver `features/README.md` para la convención completa (naming, plantilla, flujo backlog→merge). Esta skill cubre dos momentos distintos del mismo ciclo de vida: crear el spec, y arrancar la implementación.
+Conventions, template and the full backlog-to-merge flow: `features/README.md`. This skill covers two moments in that lifecycle — writing the spec, and starting the work.
 
-## Cuándo usarla
+## Part 1 — writing the spec
 
-Cuando una tarea de `docs/NEXT_TASKS.md` va a abordarse a continuación — no antes (no generar specs para todo el backlog de golpe, se desactualizan antes de ejecutarse) y no después (si ya se implementó, esto no aplica, actualiza el SOT en su lugar vía la skill `sot-sync`).
+Write one when a backlog item is **about to be picked up**. Not earlier: specs written ahead of time go stale before they are executed, and a stale spec is worse than none because it gets trusted. Not later: if the work is already done, the thing to update is the SoT (`sot-sync`).
 
-## Pasos
+Not everything needs a spec. A typo or a dependency bump does not. Anything containing a design decision does.
 
-1. Localiza la tarea en `docs/NEXT_TASKS.md` y confirma su prioridad (P0/P1/P2) y el "por qué" ya anotado ahí.
-2. Investiga el código real relevante **antes** de escribir el fichero — lee los ficheros concretos que el cambio va a tocar. Un prompt de ejecución que dice "arregla el bug de X" sin nombrar la función y el fichero exactos no es autocontenido; obliga a quien lo ejecute a redescubrir lo que ya se sabe ahora.
-3. Determina el siguiente número secuencial mirando los ficheros existentes en `features/` (`ls features/ | sort`).
-4. Escribe el fichero con la plantilla de `features/README.md`: Contexto (2-4 frases, no un ensayo — el detalle largo vive en `docs/sot/`), Objetivo (criterios de aceptación verificables, no vagos), Prompt de ejecución. El campo `Rama` se deja vacío en este paso — se rellena en el siguiente, al arrancar.
+### Steps
 
-## Cómo escribir un buen prompt de ejecución
+1. Find the item in `docs/BACKLOG.md`. Take its priority and its stated "why" from there — do not re-invent the rationale.
+2. **Read the real code the change will touch, before writing a word of the spec.** Open the actual files. A spec describing how the code probably works produces confident wrong work; it is worse than an empty spec, which at least prompts someone to look.
+3. Check for prior attempts: `git log --oneline` and any reverts. If something was tried and reverted, **find out why it failed** and put that in the spec. Otherwise it gets redone the same wrong way — which has already happened once in this repo.
+4. Next sequential number: `ls features/ | sort`. Never reuse a number.
+5. Write the file using the template in `features/README.md`. Leave `Branch:` empty; it is filled in when work starts.
 
-- **Autocontenido de verdad**: nombra rutas de fichero y funciones concretas (`backend/src/routes/form-fields.ts`, función `formFieldsRouter.post('/:formId/fields/bulk', ...)`), no descripciones aproximadas. Quien lo ejecute puede ser una sesión de Claude Code sin memoria de esta conversación.
-- **Incluye verificación**: qué test correr y cómo (`npm run test:backend`, o un fichero de test concreto), no solo qué construir. Si la tarea requiere tests nuevos, dilo explícitamente y sigue el patrón de test ya existente en el área tocada (ver ejemplos reales en `backend/tests/*.spec.ts` o `frontend/src/**/*.spec.ts`).
-- **Acota el alcance**: si el cambio podría tentar a un refactor más amplio del pedido, dilo explícitamente ("no toques X", "Y queda fuera de este cambio, es tarea aparte").
-- **Cierra el loop de documentación**: el prompt debe terminar pidiendo actualizar `docs/sot/` (vía skill `sot-sync`) si el cambio es estructural, y marcar el propio fichero de feature como `**Estado:** hecho` al terminar.
-- Ver `features/0001-fix-bulk-save-data-loss.md` como ejemplo de referencia del nivel de detalle esperado.
+### What makes the spec worth having
 
-## Qué NO hacer al escribir el spec
+- **Concrete names.** `backend/src/routes/form-fields.ts`, the `formFieldsRouter.post('/:formId/fields/bulk', …)` handler. Not "the bulk endpoint issue". The executor may have no context at all.
+- **A "why the obvious approach is wrong" section**, whenever there is one. This is usually the highest-value part of the document. It is what a ticket cannot carry.
+- **Checkable acceptance criteria.** Statements that are true or false when the work is done, not "handle deletions better".
+- **Explicit scope boundaries.** What must not be touched, and which backlog item covers it instead.
+- **How to verify.** The exact commands. For a bug fix, require the failing test first — written before the fix, run against the unfixed code, and seen to fail. A test written after the fix proves nothing about whether it catches the bug.
+- **The documentation exit.** End the prompt by requiring the relevant `docs/sot/` updates (`sot-sync`), the backlog rows removed, and this file set to `**Status:** done`.
 
-- No escribir el prompt en abstracto sin haber leído el código real que va a tocar — un prompt inventado sobre cómo "probablemente" funciona el código es peor que no tener prompt, porque da falsa confianza de que la tarea está bien especificada.
-- No crear specs para varias tareas del backlog a la vez salvo que el usuario lo pida explícitamente — una por una, cuando se van a abordar.
+### Do not
 
-## Al empezar a implementar una feature (`Estado: backlog` → `en curso`)
+- Do not write specs for several backlog items at once unless asked. One at a time, as they are picked up.
+- Do not restate the SoT in the spec. Link to it. Two copies of the same explanation drift.
 
-Este es el segundo momento en el que aplica esta skill: cuando toca ponerse a construir lo que describe un fichero de `features/NNNN-slug.md` ya existente.
+## Part 2 — starting the implementation
 
-1. `git status` primero — si hay cambios sin commitear que no son de esta feature, no arrancar encima; avisar y resolver antes (stash o commit) siguiendo la protocolo general de seguridad con git.
-2. `git fetch origin` y crear la rama desde `develop`, no desde `main` ni desde la rama en la que se esté parado:
+When the work described by an existing `features/NNNN-slug.md` begins:
+
+1. **`git status` first.** Uncommitted changes that are not part of this work must be committed or stashed before starting. Do not build on top of someone else's unfinished state.
+2. Create the branch from `develop`:
+   ```bash
+   git fetch origin
+   git checkout --no-track -b feature/NNNN-slug origin/develop
    ```
-   git checkout -b feature/NNNN-slug origin/develop
-   ```
-   El nombre de la rama es exactamente `feature/` + el nombre del fichero sin `.md` (mismo número y slug).
-3. Esto se hace **sin pedir confirmación explícita** — crear una rama local es reversible y no toca nada compartido. Push del branch y apertura de PR sí requieren confirmación, como cualquier acción que publica algo fuera del entorno local (ver protocolo de acciones arriesgadas).
-4. Actualizar el fichero de la feature: `Estado: en curso`, `Rama: feature/NNNN-slug`.
-5. A partir de aquí, seguir el "Prompt de ejecución" del propio fichero como guía de implementación.
-6. Al terminar y mergear (fuera del alcance de esta skill, pero para cerrar el ciclo): `Estado: hecho`, aplicar `sot-sync` si el cambio fue estructural, tachar la entrada en `docs/NEXT_TASKS.md`.
+   The branch name is exactly `feature/` plus the spec filename without `.md`.
+
+   **`--no-track` is mandatory.** Without it, git sets the new branch's upstream to `origin/develop` itself — not to a new remote branch of the same name. A later `git push`, including an IDE "Sync" button, then lands the commit directly on `develop`, bypassing the PR entirely. Confirm with `git branch -vv` that the new branch does **not** show `[origin/develop]`.
+3. Creating a local branch needs no confirmation — it is reversible and touches nothing shared. **Pushing and opening a PR do.** On the first push, set the upstream explicitly: `git push -u origin feature/NNNN-slug`.
+4. Update the spec: `**Status:** in progress`, `**Branch:** feature/NNNN-slug`.
+5. Follow the spec's own execution prompt, applying whichever skills it calls for.
+6. Before opening the PR, run the `ship-checklist` skill.

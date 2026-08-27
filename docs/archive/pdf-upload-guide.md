@@ -1,3 +1,7 @@
+> **ARCHIVED — NOT CURRENT.** This document is kept for history only and is known to contain statements that were never true or are no longer true. The current source of truth is [`docs/sot/`](../sot/README.md). See [the archive index](./README.md) for why this was retired.
+
+---
+
 # PDF Upload System - Guide
 
 ## Overview

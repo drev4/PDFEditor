@@ -321,4 +321,4 @@ After uploading and saving your form:
 
 ---
 
-**Need help?** See the [technical documentation](./pdf-upload-guide.md) for more details.
+**Need help?** See the [Source of Truth](../sot/README.md) for more details.

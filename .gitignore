@@ -26,9 +26,12 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# Local AI tooling configs (skills are versioned on purpose, see .claude/skills/)
+# Local AI tooling configs.
+# Skills and agents are versioned on purpose - they encode how work is done here.
+# See .claude/skills/ and .claude/agents/, and docs/sot/11-conventions.md
 .claude/*
 !.claude/skills/
+!.claude/agents/
 .agents/
 
 # Test coverage
