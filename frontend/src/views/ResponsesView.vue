@@ -138,7 +138,7 @@
           </h3>
           <div class="grid grid-cols-1 gap-y-4">
             <div 
-              v-for="field in form?.fields" 
+              v-for="field in responseFields" 
               :key="field.id"
               class="border-b border-gray-100 pb-4"
             >
@@ -166,7 +166,7 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Toast from 'primevue/toast'
 import Tooltip from 'primevue/tooltip'
-import { formsService, type Form } from '@/services/forms'
+import { formsService, type Form, type Field } from '@/services/forms'
 import { responsesService, type FormResponse } from '@/services/responses'
 
 // Directive registration for local use
@@ -184,6 +184,8 @@ const exporting = ref(false)
 const totalResponses = ref(0)
 const rows = ref(20)
 const offset = ref(0)
+
+const responseFields = ref<Field[]>([])
 
 const showDetails = ref(false)
 const selectedResponse = ref<FormResponse | null>(null)
@@ -205,6 +207,9 @@ async function loadData() {
     const result = await responsesService.listByForm(formId, rows.value, offset.value)
     responses.value = result.responses
     totalResponses.value = result.pagination.total
+    // Columns come from the responses endpoint, not from the form: it also
+    // returns fields archived by a later edit, whose answers are still here.
+    responseFields.value = result.fields ?? form.value?.fields ?? []
   } catch (error) {
     console.error('Failed to load data:', error)
     toast.add({
@@ -224,10 +229,10 @@ function onPage(event: { rows: number; first: number }) {
   loadData()
 }
 
-// Dynamic columns based on form fields
+// Dynamic columns based on every field these responses have answers for,
+// archived ones included.
 const dynamicColumns = computed(() => {
-  if (!form.value?.fields) return []
-  return form.value.fields.map(field => ({
+  return responseFields.value.map(field => ({
     fieldId: (field.id as string),
     header: (field.label || field.name)
   }))

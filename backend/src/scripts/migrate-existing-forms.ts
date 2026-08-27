@@ -49,13 +49,16 @@ async function migrateExistingForms(options: { dryRun?: boolean; formId?: string
       ? { id: formId }
       : {
           pdfUrl: { not: null },
-          fields: { some: {} } // Tiene al menos un campo
+          fields: { some: { deletedAt: null } } // Tiene al menos un campo activo
         }
 
     const forms = await prisma.form.findMany({
       where: whereClause,
       include: {
+        // Solo campos activos: un campo archivado no debe volver a incrustarse
+        // en el PDF.
         fields: {
+          where: { deletedAt: null },
           orderBy: { order: 'asc' }
         }
       }

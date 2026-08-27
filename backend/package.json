@@ -10,9 +10,11 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "migrate:dry-run": "npm run build && node dist/scripts/migrate-existing-forms.js --dry-run",
     "migrate:run": "npm run build && node dist/scripts/migrate-existing-forms.js"
   },

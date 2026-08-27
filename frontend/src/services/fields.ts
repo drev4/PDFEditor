@@ -24,12 +24,30 @@ export interface CreateFieldData {
 
 export interface UpdateFieldData extends Partial<CreateFieldData> {}
 
+/**
+ * The bulk save is the only endpoint that accepts an `id`. Sending back the id
+ * the server gave us is what makes a save a diff instead of a delete-and-
+ * recreate; without it the server cannot tell an edited field from a new one,
+ * and the answers attached to the old row are lost.
+ * Omit `id` for fields that only exist locally and have never been saved.
+ */
+export interface BulkFieldData extends CreateFieldData {
+  id?: string
+}
+
 interface FieldResponse {
   field: Field
 }
 
 interface BulkFieldsResponse {
   fields: Field[]
+  /** Ids of fields that were removed in the editor but kept because they hold responses. */
+  archived: string[]
+}
+
+export interface BulkSaveResult {
+  fields: Field[]
+  archived: string[]
 }
 
 export const fieldsService = {
@@ -47,8 +65,8 @@ export const fieldsService = {
     await api.delete(`/forms/${formId}/fields/${fieldId}`)
   },
 
-  async bulkSave(formId: string, fields: CreateFieldData[]): Promise<Field[]> {
+  async bulkSave(formId: string, fields: BulkFieldData[]): Promise<BulkSaveResult> {
     const response = await api.post<BulkFieldsResponse>(`/forms/${formId}/fields/bulk`, { fields })
-    return response.fields
+    return { fields: response.fields, archived: response.archived ?? [] }
   }
 }

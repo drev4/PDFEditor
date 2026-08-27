@@ -34,7 +34,12 @@ formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
       orderBy: { createdAt: 'desc' },
       include: {
         _count: {
-          select: { fields: true, responses: true }
+          select: {
+            // Archived fields are gone from the editor; they must not inflate
+            // the field count shown on the dashboard.
+            fields: { where: { deletedAt: null } },
+            responses: true
+          }
         }
       }
     })
@@ -117,19 +122,25 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
 
     const form = await prisma.form.findFirst({
       where: { id, userId: req.userId },
-      include: { fields: { orderBy: { order: 'asc' } } }
+      include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
     })
 
     if (!form) {
       throw new AppError(404, 'Form not found')
     }
 
-    if (form.pdfUrl && form.fields.length === 0) {
+    // A form whose only fields are archived has been edited down to nothing on
+    // purpose. Re-extracting from the PDF would resurrect them as new rows next
+    // to the archived ones, so the guard counts archived fields too.
+    const everHadFields = form.fields.length > 0
+      || (await prisma.field.count({ where: { formId: id } })) > 0
+
+    if (form.pdfUrl && !everHadFields) {
       try {
         await syncFieldsFromPDF(id, form.pdfUrl)
         const updatedForm = await prisma.form.findFirst({
           where: { id },
-          include: { fields: { orderBy: { order: 'asc' } } }
+          include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
         })
         return res.json({ form: updatedForm })
       } catch (error) {
@@ -207,7 +218,7 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
   try {
     const form = await prisma.form.findUnique({
       where: { shareId: req.params.shareId },
-      include: { fields: { orderBy: { order: 'asc' } } }
+      include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
     })
 
     if (!form || form.status !== 'published') {
@@ -246,8 +257,16 @@ formsRouter.get('/:id/responses', authenticate, async (req: AuthRequest, res, ne
       skip: offset
     })
 
+    // Archived fields are included deliberately: their answers are still in
+    // these responses and would otherwise render as an unlabelled column.
+    const fields = await prisma.field.findMany({
+      where: { formId: id },
+      orderBy: { order: 'asc' }
+    })
+
     res.json({
       responses,
+      fields,
       pagination: { total: totalCount, limit, offset }
     })
   } catch (error) {
@@ -260,6 +279,8 @@ formsRouter.get('/:id/responses/export', authenticate, async (req: AuthRequest, 
   try {
     const id = req.params.id as string
 
+    // No `deletedAt` filter, on purpose: an archived field keeps its column and
+    // its original label in the export, so historical rows stay readable.
     const form = await prisma.form.findFirst({
       where: { id, userId: req.userId },
       include: { fields: { orderBy: { order: 'asc' } } }

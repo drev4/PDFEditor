@@ -10,12 +10,9 @@ Last reviewed: **2026-08-28**.
 
 | Item | Why | Reference |
 |---|---|---|
-| **Stable field ids and safe bulk save** | Saving a form that has responses silently destroys every answer already collected. Also the prerequisite for any external integration | [03-domain-model](./sot/03-domain-model.md) · [`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md) |
-| **Baseline Prisma migrations** | `backend/prisma/migrations/` does not exist; everything runs on `db push`. No safe way to change a schema holding customer data, and it blocks every SaaS schema change | [08-operations](./sot/08-operations.md#database-migrations) · done as step 0 of [`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md) |
 | **Rate limiting** on `POST /api/auth/login` and `POST /api/responses` | The only two unauthenticated write paths, both completely unthrottled | [07-security](./sot/07-security-and-privacy.md) (S2) |
 | **Guard author-supplied regex** on the public response endpoint | A backtracking `pattern` blocks the single event loop for the whole service | [07-security](./sot/07-security-and-privacy.md) (S3) |
 | **Frontend test suite cannot run below Node 20.19** | Vite 7 and jsdom 27 require `^20.19.0 \|\| >=22.12.0`. All 29 specs fail to start on Node 20.9 with `ERR_REQUIRE_ESM`, and 7 more fail on the missing `crypto.hash`. `engines` said `>=18.0.0`, so npm never warned — corrected, plus a `.nvmrc`, but anyone already on an old Node needs to upgrade | [09-quality](./sot/09-quality-and-testing.md) |
-| **Database-backed integration tests** | Mocked Prisma cannot show cascades. This is precisely why the answer-loss defect shipped | [09-quality](./sot/09-quality-and-testing.md) · harness built in [`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md) |
 
 ## P1 — Security, privacy and operational readiness
 
@@ -62,7 +59,10 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 | Server-state library (TanStack Query) for reads | Every store hand-manages loading, error and caching |
 | Evaluate VueUse for `useDragAndDrop`, `useGridOverlay`, `useToolbarDrag` | Case by case; some encode editor-specific behaviour |
 | Soft delete or export prompt before `DELETE /api/forms/:id` | Cascades to every response with no undo |
-| Index on `Answer.fieldId` | Needed once bulk save counts answers per field |
+| `DELETE /api/forms/:formId/fields/:fieldId` still hard-deletes answers | The bulk save now archives a field that holds responses; the individual delete still cascades them away. Deliberately left as an explicit user act in [`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md), but the two paths should agree — probably by archiving here too, with a confirmation that says how many answers are affected |
+| No UI for archived fields | A field archived by a save is invisible to its owner except as a toast at save time and a column in the responses table. No list, no un-archive, no way to tell an archived column from a live one in the dashboard |
+| The bulk save's concurrency guard is untested | The `SELECT … FOR UPDATE` in the bulk handler is what stops a response submitted mid-save from having its answer cascaded away. Nothing exercises it — a real test needs two connections and deliberate interleaving |
+| Nothing exercises a migration against a database that already holds data | CI applies migrations to a fresh database only, so a migration that is fine on empty tables and wrong on populated ones passes |
 | Virus scanning on uploads | Files are stored and served back from our own origin |
 | Real readiness probe | `/health` returns `ok` with the database down |
 
@@ -71,5 +71,6 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 | Item | Status |
 |---|---|
 | `origin/feature/sprint-3-public-forms` | Merged to `main` via PR #3, still alive on the remote. Delete or keep as history — needs a decision |
-| Verify the full suite passes | `npm run test:all` has not been confirmed green in a clean checkout since the docs overhaul |
+| Verify the full suite passes | `npm run test:all` has not been confirmed green in a clean checkout since the docs overhaul. Frontend (237), backend (63) and integration (14) are green on `feature/0001`; E2E has not been run |
+| `tests/forms.spec.ts > DELETE /api/forms/:id > should delete form` is flaky | Failed once in a full-suite run on `feature/0001`, then passed in five consecutive runs of the same command and in isolation. The test mocks only `form.findFirst` and `form.delete` and touches nothing that changed. Cause unknown — likely cross-file mock bleed in the shared `prismaMock` |
 | Two abandoned bulk-fix commits on `develop` (`fb8acd8`, `771b77c`) | The apply-then-revert pair is already on the remote; net effect is zero, left alone rather than rewriting shared history |

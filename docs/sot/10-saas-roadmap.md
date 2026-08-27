@@ -41,7 +41,7 @@ Sequenced so that each step is independently deployable and reversible:
 4. Move every read and write to `organizationId`; keep `userId` populated as the creator.
 5. Make `organizationId` required. Re-point the index. Keep `Form.userId` renamed to `createdByUserId` — it is genuinely useful and no longer means ownership.
 
-This needs a real migration history, which **does not exist today** — see [08-operations.md](./08-operations.md#database-migrations). Baselining migrations is a hard prerequisite for step 1.
+This needs a real migration history, which now exists — see [08-operations.md](./08-operations.md#database-migrations).
 
 ## Entitlements: where plan limits get checked
 
@@ -68,7 +68,7 @@ Response-per-month limits need a usage counter that does not require counting ro
 
 The B2B buyer eventually wants responses in their own system rather than in our dashboard. Blocking prerequisites, all already tracked elsewhere:
 
-- **Stable field ids** ([03-domain-model.md](./03-domain-model.md)). An integration that stores a `fieldId` cannot survive the owner editing the form. This is the single hardest blocker and it is also a live data-loss bug, which is why it is first in the build order.
+- ~~**Stable field ids**~~ — **done** ([03-domain-model.md](./03-domain-model.md)). A `fieldId` handed out by the server now survives every save, so an integration can hold a durable reference to a field. Removing a field that has answers archives it rather than deleting it, so an id an integration stored never dangles.
 - **Rate limiting** ([07-security-and-privacy.md](./07-security-and-privacy.md)).
 - **Server-to-server auth**: `ApiKey { organizationId, hashedKey, scopes, lastUsedAt, expiresAt }`. Not user JWTs — those expire and are scoped to a person, which is wrong for an unattended process.
 - **Webhooks** with signed payloads, retries with backoff, and a delivery log the customer can inspect. A webhook with no visible delivery history generates support tickets no one can answer.
@@ -85,8 +85,8 @@ A dependency chain, not a schedule. Each step unblocks the next.
 
 | # | Step | Why it is here |
 |---|---|---|
-| 0 | **Baseline Prisma migrations** | Nothing below can safely change a schema holding customer data |
-| 1 | **Stable field ids and safe bulk save** | An active data-loss bug, and a prerequisite for every integration. [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) |
+| 0 | ~~**Baseline Prisma migrations**~~ — done | Nothing below could safely change a schema holding customer data |
+| 1 | ~~**Stable field ids and safe bulk save**~~ — done | Was an active data-loss bug, and is the prerequisite for every integration. [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) |
 | 2 | **Rate limiting, security headers, regex guard** | The cheapest risk removal available, and the first questions on any security review |
 | 3 | **`Organization` + `Membership`** with data migration, no visible behaviour change | The longest-lead schema change; do it while the data is small |
 | 4 | **Member invitations** | The first feature that makes B2B real rather than a table with one row |

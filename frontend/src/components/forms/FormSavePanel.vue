@@ -280,6 +280,21 @@ async function handleUpdateFields() {
       detail: `${fieldCount} field${fieldCount !== 1 ? 's' : ''} saved and embedded in PDF`,
       life: 3000
     })
+
+    // A deleted field that already held responses is archived rather than
+    // destroyed. Say so, instead of leaving the user to wonder where the data
+    // went or why the field vanished from the editor but not the export.
+    const archivedCount = formFieldsStore.archivedFieldIds.length
+    if (archivedCount > 0) {
+      toast.add({
+        severity: 'info',
+        summary: 'Responses kept',
+        detail: `${archivedCount} deleted field${archivedCount !== 1 ? 's' : ''} had responses. `
+          + 'They were removed from the form but their answers are still in your responses and CSV export.',
+        life: 8000
+      })
+      formFieldsStore.clearArchivedFieldIds()
+    }
   } catch (error) {
     console.error('Error updating fields:', error)
     toast.add({

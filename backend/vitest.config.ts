@@ -35,7 +35,9 @@ export default defineConfig({
             'dist',
             '.idea',
             '.git',
-            '.cache'
+            '.cache',
+            // Database-backed specs; run with `npm run test:integration`.
+            'tests/integration/**'
         ],
         include: [
             'tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'

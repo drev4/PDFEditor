@@ -117,14 +117,61 @@ describe('FormFields Store', () => {
       store.setCurrentForm('form-1')
       store.addField(mockField)
 
-      vi.mocked(fieldsService.bulkSave).mockResolvedValue([
-        { id: 'field-id', formId: 'form-1', ...mockField, order: 0, createdAt: '2024-01-01' }
-      ] as any)
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({
+        fields: [
+          { id: 'field-id', formId: 'form-1', ...mockField, order: 0, createdAt: '2024-01-01' }
+        ],
+        archived: []
+      } as any)
 
       await store.saveAllFields()
 
       expect(fieldsService.bulkSave).toHaveBeenCalledWith('form-1', expect.any(Array))
       expect(store.loading).toBe(false)
+    })
+
+    // Sending the server id back is what makes the save a diff instead of a
+    // delete-and-recreate. Dropping it is what destroyed collected answers.
+    it('should send server ids and omit locally-created ones', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+
+      const serverFieldId = '550e8400-e29b-41d4-a716-446655440000'
+      store.fields.push({ ...mockField, id: serverFieldId, name: 'saved' })
+      const localField = store.addField({ ...mockField, name: 'brand_new' })
+
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({ fields: [], archived: [] } as any)
+
+      await store.saveAllFields()
+
+      const payload = vi.mocked(fieldsService.bulkSave).mock.calls[0]![1]
+      expect(payload).toHaveLength(2)
+
+      const saved = payload.find(f => f.name === 'saved')
+      expect(saved?.id).toBe(serverFieldId)
+
+      const created = payload.find(f => f.name === 'brand_new')
+      expect(created).toBeDefined()
+      expect('id' in created!).toBe(false)
+      expect(localField.id.startsWith('field-')).toBe(true)
+    })
+
+    it('should expose fields the server archived because they hold responses', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      store.addField(mockField)
+
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({
+        fields: [],
+        archived: ['550e8400-e29b-41d4-a716-446655440000']
+      } as any)
+
+      await store.saveAllFields()
+
+      expect(store.archivedFieldIds).toEqual(['550e8400-e29b-41d4-a716-446655440000'])
+
+      store.clearArchivedFieldIds()
+      expect(store.archivedFieldIds).toEqual([])
     })
 
     it('should handle save error', async () => {

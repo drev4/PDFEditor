@@ -47,4 +47,4 @@ Read out of the source on this date, not assumed:
 
 **Not implemented at all:** organizations, roles beyond "owner of a form", plans, entitlements, billing, public API, API keys, webhooks, rate limiting, structured logging, object storage, background jobs, virus scanning, and any linting. Several of these are prerequisites for selling this, not nice-to-haves — see [07](./07-security-and-privacy.md), [08](./08-operations.md) and [10](./10-saas-roadmap.md).
 
-**No database migration history exists.** `backend/prisma/migrations/` is absent; the schema is applied with `prisma db push` in development and in CI. This is a release blocker documented in [08-operations.md](./08-operations.md#database-migrations).
+**Migrations are baselined.** `backend/prisma/migrations/` holds `0_baseline` plus the soft-delete migration; every environment uses `prisma migrate deploy`, and a database that predates the baseline needs `migrate resolve --applied 0_baseline` once. See [08-operations.md](./08-operations.md#database-migrations).
