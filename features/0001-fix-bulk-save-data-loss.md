@@ -1,7 +1,6 @@
 # 0001 — Fix pérdida de datos en el guardado de campos (`bulkSave`)
 
-**Estado:** hecho
-**Rama:** feature/0001-fix-bulk-save-data-loss
+**Estado:** backlog
 **Prioridad:** P0 (ver `docs/NEXT_TASKS.md`)
 **Relacionado:** [`docs/sot/03-backend-patterns.md`](../docs/sot/03-backend-patterns.md) (sección "Riesgo de pérdida de datos"), [`docs/sot/05-api-reference.md`](../docs/sot/05-api-reference.md)
 

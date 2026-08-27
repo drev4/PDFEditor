@@ -32,10 +32,6 @@ const createFieldSchema = z.object({
 
 const updateFieldSchema = createFieldSchema.partial()
 
-const bulkFieldSchema = createFieldSchema.extend({
-  id: z.string().uuid().optional()
-})
-
 async function embedFieldsInPDF(form: { pdfUrl: string | null }, fieldsData: z.infer<typeof createFieldSchema>[]) {
   if (!form.pdfUrl) return
 
@@ -149,7 +145,7 @@ formFieldsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequ
 
     const form = await verifyFormOwnership(req, formId)
 
-    const validation = z.array(bulkFieldSchema).safeParse(req.body.fields)
+    const validation = z.array(createFieldSchema).safeParse(req.body.fields)
     if (!validation.success) {
       return res.status(400).json({
         error: 'Validation error',
@@ -158,48 +154,12 @@ formFieldsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequ
     }
 
     const fieldsData = validation.data
-    const responseCount = await prisma.response.count({ where: { formId } })
-    const preserved: string[] = []
 
-    if (responseCount === 0) {
-      // No responses yet, nothing to lose: replace all fields as before.
-      await prisma.field.deleteMany({ where: { formId } })
+    await prisma.field.deleteMany({ where: { formId } })
 
-      await prisma.field.createMany({
-        data: fieldsData.map(({ id, ...field }) => ({ formId, ...field }))
-      })
-    } else {
-      const existingFields = await prisma.field.findMany({ where: { formId } })
-      const existingIds = new Set(existingFields.map(f => f.id))
-      const payloadIds = new Set(fieldsData.filter(f => f.id).map(f => f.id as string))
-
-      const toUpdate = fieldsData.filter(f => f.id && existingIds.has(f.id))
-      const toCreate = fieldsData.filter(f => !f.id || !existingIds.has(f.id))
-      const toDeleteCandidates = existingFields.filter(f => !payloadIds.has(f.id))
-
-      await prisma.$transaction(async (tx) => {
-        for (const field of toUpdate) {
-          const { id, ...data } = field
-          await tx.field.update({ where: { id: id as string }, data })
-        }
-
-        for (const field of toCreate) {
-          const { id, ...data } = field
-          await tx.field.create({ data: { formId, ...data } })
-        }
-
-        for (const field of toDeleteCandidates) {
-          const answerCount = await tx.answer.count({ where: { fieldId: field.id } })
-          if (answerCount > 0) {
-            // Field has answers from real responses: keep it instead of
-            // cascading a delete that would wipe those answers.
-            preserved.push(field.id)
-          } else {
-            await tx.field.delete({ where: { id: field.id } })
-          }
-        }
-      })
-    }
+    await prisma.field.createMany({
+      data: fieldsData.map(field => ({ formId, ...field }))
+    })
 
     await embedFieldsInPDF(form, fieldsData)
 
@@ -208,7 +168,7 @@ formFieldsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequ
       orderBy: { order: 'asc' }
     })
 
-    res.json({ fields: savedFields, preserved })
+    res.json({ fields: savedFields })
   } catch (error) {
     next(error)
   }

@@ -127,9 +127,8 @@ describe('Fields Routes', () => {
   })
 
   describe('POST /api/forms/:formId/fields/bulk', () => {
-    it('should replace all fields when the form has no responses', async () => {
+    it('should bulk save fields', async () => {
       prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
-      prismaMock.response.count.mockResolvedValue(0)
       prismaMock.field.deleteMany.mockResolvedValue({ count: 0 } as any)
       prismaMock.field.createMany.mockResolvedValue({ count: 2 } as any)
       prismaMock.field.findMany.mockResolvedValue([
@@ -145,87 +144,6 @@ describe('Fields Routes', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.fields).toHaveLength(2)
-      expect(prismaMock.field.deleteMany).toHaveBeenCalledWith({ where: { formId: 'form-1' } })
-      expect(prismaMock.field.createMany).toHaveBeenCalled()
-      expect(prismaMock.$transaction).not.toHaveBeenCalled()
-    })
-
-    it('should update existing fields in place when the form has responses', async () => {
-      const fieldId = '11111111-1111-1111-1111-111111111111'
-      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
-      prismaMock.response.count.mockResolvedValue(1)
-      prismaMock.field.findMany
-        .mockResolvedValueOnce([
-          { id: fieldId, formId: 'form-1', ...mockFieldData }
-        ] as any)
-        .mockResolvedValueOnce([
-          { id: fieldId, formId: 'form-1', ...mockFieldData, label: 'Updated Field' }
-        ] as any)
-      prismaMock.field.update.mockResolvedValue({} as any)
-      prismaMock.$transaction.mockImplementation((callback: any) => callback(prismaMock))
-
-      const res = await request(app)
-        .post('/api/forms/form-1/fields/bulk')
-        .send({
-          fields: [{ id: fieldId, ...mockFieldData, label: 'Updated Field' }]
-        })
-
-      expect(res.status).toBe(200)
-      expect(prismaMock.field.update).toHaveBeenCalledWith({
-        where: { id: fieldId },
-        data: expect.objectContaining({ label: 'Updated Field' })
-      })
-      expect(prismaMock.field.deleteMany).not.toHaveBeenCalled()
-      expect(prismaMock.field.createMany).not.toHaveBeenCalled()
-    })
-
-    it('should preserve an existing field with answers that is missing from the payload', async () => {
-      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
-      prismaMock.response.count.mockResolvedValue(1)
-      prismaMock.field.findMany
-        .mockResolvedValueOnce([
-          { id: 'field-1', formId: 'form-1', ...mockFieldData }
-        ] as any)
-        .mockResolvedValueOnce([
-          { id: 'field-1', formId: 'form-1', ...mockFieldData }
-        ] as any)
-      prismaMock.answer.count.mockResolvedValue(2)
-      prismaMock.$transaction.mockImplementation((callback: any) => callback(prismaMock))
-
-      const res = await request(app)
-        .post('/api/forms/form-1/fields/bulk')
-        .send({ fields: [] })
-
-      expect(res.status).toBe(200)
-      expect(prismaMock.field.delete).not.toHaveBeenCalled()
-      expect(res.body.preserved).toContain('field-1')
-    })
-
-    it('should create a new field without an id when the form has responses', async () => {
-      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
-      prismaMock.response.count.mockResolvedValue(1)
-      prismaMock.field.findMany
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([
-          { id: 'field-new', formId: 'form-1', ...mockFieldData, name: 'field2' }
-        ] as any)
-      prismaMock.field.create.mockResolvedValue({
-        id: 'field-new',
-        formId: 'form-1',
-        ...mockFieldData,
-        name: 'field2'
-      } as any)
-      prismaMock.$transaction.mockImplementation((callback: any) => callback(prismaMock))
-
-      const res = await request(app)
-        .post('/api/forms/form-1/fields/bulk')
-        .send({ fields: [{ ...mockFieldData, name: 'field2' }] })
-
-      expect(res.status).toBe(200)
-      expect(prismaMock.field.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ formId: 'form-1', name: 'field2' })
-      })
-      expect(res.body.fields).toHaveLength(1)
     })
   })
 })
