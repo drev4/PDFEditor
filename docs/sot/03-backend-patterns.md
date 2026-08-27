@@ -71,9 +71,14 @@ Dos operaciones tocan el archivo PDF en disco directamente (no solo la base de d
 
 Esto es correcto para UX (el usuario no debería ver un 500 porque el post-proceso del PDF falló) pero es una brecha de observabilidad: hoy esos fallos solo van a `console.error`/`console.warn`, sin métricas ni alertas. Al introducir logging estructurado (ver sección 6), estos son los primeros puntos a instrumentar.
 
-## ⚠️ Riesgo de pérdida de datos conocido: `bulkSave` de campos
+## ✅ Riesgo de pérdida de datos en `bulkSave` de campos — resuelto
 
-`POST /:formId/fields/bulk` (`form-fields.ts`) hace `prisma.field.deleteMany({ where: { formId } })` seguido de `createMany` con IDs nuevos. `Answer.field` tiene `onDelete: Cascade` en el schema — **borrar un `Field` borra en cascada todas las `Answer` que apuntaban a él**. Si un formulario ya tiene respuestas y el dueño edita sus campos desde el editor (guardado normal, no un caso raro), las respuestas ya recibidas pierden sus answers silenciosamente: el `Response` sobrevive pero queda vacío. No hay ningún aviso al usuario ni backup. Esto es un bug de correctness, no una mejora futura — está en `docs/NEXT_TASKS.md` como prioridad alta. El fix pasa por diferenciar entre "form sin publicar/sin respuestas" (el `deleteMany`+`createMany` actual es aceptable ahí) y "form con respuestas existentes" (requiere upsert por `id` de campo, preservando los que no cambiaron).
+`POST /:formId/fields/bulk` (`form-fields.ts`) diferencia ahora dos casos según `prisma.response.count({ where: { formId } })`:
+
+- **Form sin respuestas**: se mantiene el comportamiento original, `prisma.field.deleteMany` + `prisma.field.createMany` — no hay nada que perder.
+- **Form con al menos una respuesta**: en vez de borrar y recrear, el endpoint hace upsert por `id` dentro de `prisma.$transaction(...)`: los campos del payload con `id` existente se `update`an in-place, los que no tienen `id` (o su `id` ya no existe en BD) se `create`an, y los campos que existían en BD pero ya no vienen en el payload solo se `delete`an si no tienen ninguna `Answer` asociada (`prisma.answer.count`). Si un campo "eliminado" por el usuario en el editor sí tiene respuestas ya recibidas, **no se borra** — se conserva y su `id` se devuelve en un array `preserved: string[]` en la respuesta JSON, para que el frontend pueda avisar de que ese campo no se pudo eliminar por tener datos asociados.
+
+El schema Zod del body de `bulk` (`bulkFieldSchema`) añade `id: z.string().uuid().optional()` solo para este endpoint; `createFieldSchema` (usado por el `POST` individual) sigue sin aceptar `id` del cliente. Tests en `backend/tests/fields.spec.ts` (`describe('POST /api/forms/:formId/fields/bulk', ...)`) cubren los cuatro escenarios: sin respuestas, update in-place, preservación de campo con respuestas, y creación de campo nuevo. El `DELETE /:formId/fields/:fieldId` individual sigue teniendo cascada directa — es un borrado explícito de un campo concreto, decisión consciente del usuario, y queda fuera de este fix (ver `features/0001-fix-bulk-save-data-loss.md`).
 
 ## 6. Tecnologías avanzadas a incorporar (backend)
 
