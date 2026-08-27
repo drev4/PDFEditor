@@ -1,30 +1,41 @@
 ---
 name: sot-sync
-description: Mantener docs/sot/ (Source of Truth del proyecto) actualizado tras cambios que afecten al modelo de datos, la API, la arquitectura o el stack. Usar al terminar cualquier feature que toque backend/prisma/schema.prisma, backend/src/routes/, o introduzca un patrón nuevo de frontend/backend digno de documentarse.
+description: Update docs/sot/ (the project Source of Truth) after a change that touches the data model, the API, an architectural pattern, security posture, or operations. Use before calling any structural change done, and whenever code and documentation may have drifted apart.
 ---
 
-# Sincronizar el SOT tras un cambio de código
+# Sync the Source of Truth after a change
 
-`docs/sot/` es la fuente única de verdad del proyecto (ver `docs/sot/README.md`). Se degrada si el código avanza y la documentación no. Esta skill es el checklist a correr antes de dar una tarea por terminada cuando el cambio toca algo estructural.
+`docs/sot/` is the project's single source of truth (index: `docs/sot/README.md`). It only stays true if it is updated in the same change as the code. This skill is the checklist for that.
 
-## Cuándo aplica
+## Which document owns what
 
-- Se añadió, quitó o modificó un modelo en `backend/prisma/schema.prisma` → revisar `docs/sot/02-architecture-and-domain.md`.
-- Se añadió, quitó o cambió la forma de un endpoint en `backend/src/routes/*.ts` → revisar `docs/sot/05-api-reference.md`. **No se documenta un endpoint sin abrir el fichero de la ruta y leer el código real** — así se detectó y arregló el desfase de `API_DOCUMENTATION.md` con la implementación real en 2026-08 (ver skill `api-contract-guard`, que cubre esto en detalle).
-- Se introdujo un patrón nuevo de backend (nuevo tipo de servicio, nueva forma de manejar errores, nueva estrategia de validación) → revisar `docs/sot/03-backend-patterns.md`.
-- Se introdujo un patrón nuevo de frontend (nuevo tipo de composable/store, nueva librería de estado de servidor, etc.) → revisar `docs/sot/04-frontend-patterns.md`.
-- Se resolvió o se dejó constancia de un riesgo/bug conocido documentado en el SOT (ej. el de `bulkSave` en `03-backend-patterns.md`) → actualizar esa sección para que refleje el estado real, no dejarla como "pendiente" si ya se arregló.
-- Se avanzó una pieza de la arquitectura SaaS objetivo (`docs/sot/06-saas-target-architecture.md`, ej. se añadió `Organization`) → mover esa pieza de "target, no implementado" a documentado como real en `02-architecture-and-domain.md`, y actualizar `06` para que dependa de lo siguiente en el orden de construcción.
+| The change touched | Update |
+|---|---|
+| `backend/prisma/schema.prisma` | `03-domain-model.md` — entities, invariants, and the **cascade map** |
+| Any file in `backend/src/routes/` | `06-api-reference.md`, after re-reading the route (see the `api-contract-guard` skill) |
+| A new backend pattern — service shape, error handling, transactions | `04-backend-patterns.md` |
+| A new frontend pattern — a store/composable convention, a state library | `05-frontend-patterns.md` |
+| Auth, permissions, anything newly public, any new personal data | `07-security-and-privacy.md`, including the **data inventory table** |
+| Configuration, CI, deployment, logging, backups | `08-operations.md` |
+| Test tooling, a new test level, the definition of done | `09-quality-and-testing.md` |
+| A piece of the SaaS target that is now real | Move it from `10-saas-roadmap.md` into the document that describes reality |
+| Commits, branches, naming, file layout | `11-conventions.md` |
+| A known risk that was fixed, or made worse | The section that describes it — never leave it saying "pending" once it is done |
 
-## Cómo hacerlo
+Two or three of these usually apply at once. A schema change almost always touches `03`, `06` and `09`.
 
-1. Identifica qué fichero(s) de `docs/sot/` hablan de la zona de código que cambió (usa el índice en `docs/sot/README.md`).
-2. Relee la sección afectada del SOT y compárala línea a línea con el código nuevo — no confíes en tu memoria de lo que decía antes.
-3. Edita solo lo que cambió. No reescribas el documento entero ni le añadas relleno — el resto del SOT sigue siendo válido.
-4. Si el cambio resuelve una tarea listada en `docs/NEXT_TASKS.md`, quítala de ahí (o márcala hecha) y, si tenía fichero en `features/`, actualiza su `**Estado:**` a `hecho`.
-5. Si el cambio introduce deuda técnica nueva o un riesgo nuevo (no lo arregla, lo crea), añádelo a `docs/NEXT_TASKS.md` en la prioridad que corresponda, con una frase de "por qué" — no lo dejes solo en la cabeza de quien hizo el cambio.
+## How
 
-## Qué NO hacer
+1. Use the index in `docs/sot/README.md` to find every affected document. More than one usually is.
+2. **Re-read the affected section against the new code.** Do not edit from memory of what it said; the drift you are fixing may be older than this change.
+3. Edit only what changed. The SoT is not a document to rewrite wholesale — the rest of it is still accurate and someone verified it.
+4. If the change closed a backlog item, remove the row from `docs/BACKLOG.md` and set the `features/` spec to `**Status:** done`.
+5. If the change **created** debt or a risk, add it to `docs/BACKLOG.md` at the right priority with a one-line why. Debt that only lives in the head of whoever wrote it is not tracked.
+6. Update the verification date and status block at the bottom of `docs/sot/README.md` when the change was structural.
 
-- No documentar features que "van a construirse pronto" como si ya existieran — eso es exactamente el tipo de desfase que esta skill existe para evitar. Lo aspiracional va en `06-saas-target-architecture.md` marcado explícitamente `[TARGET — no implementado]`.
-- No crear ficheros nuevos en `docs/sot/` sin necesidad — si el contenido encaja en un documento existente, va ahí. Un fichero nuevo solo si es un dominio temático que ninguno de los 7 documentos actuales cubre.
+## Do not
+
+- **Do not describe anything that is not built** as though it exists. Aspirational content belongs in `10-saas-roadmap.md`, or fenced with `[NOT IMPLEMENTED]`. This is the single failure mode this skill exists to prevent.
+- **Do not add a new file to `docs/sot/`** unless the subject fits none of the twelve existing documents. It almost always fits one.
+- **Do not fix a document by weakening it.** If code and docs disagree, find out which is wrong. Deleting the sentence that contradicts the code hides a bug rather than reporting it.
+- **Do not edit anything in `docs/archive/`.** Those are historical records that are known to be wrong.

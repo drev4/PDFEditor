@@ -1,32 +1,35 @@
 ---
 name: api-contract-guard
-description: Verificar que un endpoint documentado (en docs/sot/05-api-reference.md o API_DOCUMENTATION.md) coincide exactamente con la implementación real en backend/src/routes/ y con el uso real en frontend/src/services/. Usar antes de documentar cualquier endpoint, al revisar un PR que toque rutas, o cuando algo en la API "no cuadra" entre frontend y backend.
+description: Verify that an endpoint documented in docs/sot/06-api-reference.md exactly matches the real implementation in backend/src/routes/ and the real usage in frontend/src/services/. Use before documenting any endpoint, when reviewing a change that touches routes, and whenever frontend and backend appear to disagree.
 ---
 
-# Guardia de contrato API
+# API contract guard
 
-En 2026-08 se detectó que `API_DOCUMENTATION.md` describía endpoints de fields (`GET .../fields`, `PUT .../fields/bulk` con semántica de upsert, `DELETE .../fields/bulk`) que **nunca existieron** en el backend real. Nadie lo notó porque la documentación se escribió una vez y nunca se verificó contra el código según fue cambiando. Esta skill existe para que no vuelva a pasar.
+The archived `API_DOCUMENTATION.md` described three field endpoints — `GET .../fields`, `PUT .../fields/bulk` with upsert semantics, `DELETE .../fields/bulk` — that **never existed** in any version of the backend. It was written once from intent and never checked again. This skill exists so that cannot recur.
 
-## Regla central
+## The rule
 
-**Un endpoint solo se documenta después de leer el fichero de ruta real, no antes.** La fuente de verdad, en este orden:
+**An endpoint is documented only after reading its route file. Never before, never from memory, never from the frontend's expectations.**
 
-1. `backend/src/app.ts` — para saber el prefijo real bajo el que está montado cada router (ej. `formFieldsRouter` está montado en `/api/forms`, no en `/api/fields` aunque el nombre del router sugiera lo contrario).
-2. `backend/src/routes/*.ts` — el handler real, su método HTTP, su path, el schema Zod que valida el body (eso define el shape exacto del request, no lo que "parece lógico").
-3. `frontend/src/services/*.ts` — cómo lo consume el cliente real. Si el frontend llama a una URL o shape distinta de lo que el backend implementa, hay un bug activo, no solo un problema de documentación — repórtalo como tal.
+Sources of truth, in this order:
 
-## Checklist al documentar o revisar un endpoint
+1. `backend/src/app.ts` — the real mount prefix. `formFieldsRouter` is mounted on `/api/forms`, not `/api/fields`, whatever its name suggests.
+2. `backend/src/routes/*.ts` — the handler: its HTTP method, its path, the Zod schema that validates the body. The schema defines the request shape; what looks reasonable does not.
+3. `frontend/src/services/*.ts` — how the real client calls it. If the frontend calls a different URL or a different shape than the backend implements, that is a **live bug**, not a documentation problem. Report it as one.
 
-- [ ] ¿El método HTTP y el path coinciden exactamente con el `router.<method>('<path>', ...)` del código?
-- [ ] ¿El middleware de auth/ownership real está reflejado (`authenticate`, `verifyFormOwnership`, `verifyFieldOwnership` de `backend/src/middleware/`)? No asumir que todo lleva auth ni que ninguno la lleva.
-- [ ] ¿El shape del body documentado coincide con el schema Zod (`z.object({...})`) del fichero de ruta, campo por campo, incluyendo cuáles son opcionales?
-- [ ] ¿Los códigos de estado documentados (200/201/400/401/403/404) son los que el handler realmente devuelve, incluyendo los que vienen del `errorHandler` genérico vía `AppError`?
-- [ ] ¿Hay efectos secundarios no obvios que un consumidor de la API necesita saber? (ej. `bulk` de fields borra y recrea todos los campos, no hace upsert — ver `docs/sot/03-backend-patterns.md`)
-- [ ] ¿El frontend (`frontend/src/services/`) usa realmente esta forma, o hay un desfase también ahí?
+## Checklist per endpoint
 
-## Al encontrar un desfase
+- [ ] Method and path match the `router.<method>('<path>', …)` exactly, including the mount prefix from `app.ts`.
+- [ ] The auth and ownership middleware is reflected accurately — `authenticate`, `verifyFormOwnership`, `verifyFieldOwnership`. Do not assume every route has auth, and do not assume none does. A public route must be documented as public, loudly.
+- [ ] The body shape matches the Zod schema field by field, including which fields are optional and which have defaults.
+- [ ] Documented status codes are the ones the handler actually returns, including those raised through `AppError` and the generic `errorHandler`.
+- [ ] **Non-obvious side effects are documented.** A consumer needs to know that `GET /forms/:id` can write fields to the database, that `bulk` rewrites the PDF on disk, and that `GET /forms/public/:shareId` increments a counter.
+- [ ] **Destructive semantics are called out with a warning**, not buried in a notes column. `bulk` currently destroys collected answers; that belongs in a blockquote, not a footnote.
+- [ ] The frontend service really uses this shape.
 
-1. El código (backend real) manda sobre cualquier documento — nunca "corrijas" el backend para que cuadre con lo que decía un doc, a menos que el doc describiera un requisito de producto explícito que aún no se implementó (en ese caso, es una tarea de `docs/NEXT_TASKS.md`, no un bug de docs).
-2. Corrige `docs/sot/05-api-reference.md` primero (es la fuente canónica).
-3. Si `API_DOCUMENTATION.md` también tiene el error, corrígelo ahí también — se mantiene como documento público/histórico pero no debe mentir activamente.
-4. Si el desfase es entre frontend y backend (no solo documentación), trátalo como bug: decide cuál de los dos lados es el comportamiento correcto y arregla el otro, no los documentes ambos como si coexistieran.
+## When you find a mismatch
+
+1. **The code wins.** Never change the backend to match a document. The one exception is when the document recorded an explicit product requirement that was never implemented — then it is a backlog item, not a docs fix, and it goes in `docs/BACKLOG.md`.
+2. Fix `docs/sot/06-api-reference.md` first; it is canonical.
+3. If the mismatch is between frontend and backend rather than between code and docs, treat it as a bug: decide which side is correct, fix the other, and do **not** document both as if they coexist.
+4. If the endpoint's real behaviour is dangerous, say so in the reference where a consumer will see it, and file it in `docs/BACKLOG.md` with a priority.

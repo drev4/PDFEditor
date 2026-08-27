@@ -1,6 +1,10 @@
+> **ARCHIVED — NOT CURRENT.** This document is kept for history only and is known to contain statements that were never true or are no longer true. The current source of truth is [`docs/sot/`](../sot/README.md). See [the archive index](./README.md) for why this was retired.
+
+---
+
 # Technical Specifications - VuePDF Forms Platform
 
-> **⚠️ DEPRECATED (2026-08-28):** este documento es un spec de planeación anterior a la implementación real (fechado 2024-12-27) y describe una arquitectura que se descartó — en particular, recomienda **Supabase** como backend, cuando el proyecto real usa **Express + Prisma + JWT propio**. Se conserva como referencia histórica. La fuente de verdad vigente es [`docs/sot/`](./docs/sot/README.md), en particular [`02-architecture-and-domain.md`](./docs/sot/02-architecture-and-domain.md).
+> **⚠️ DEPRECATED (2026-08-28):** este documento es un spec de planeación anterior a la implementación real (fechado 2024-12-27) y describe una arquitectura que se descartó — en particular, recomienda **Supabase** como backend, cuando el proyecto real usa **Express + Prisma + JWT propio**. Se conserva como referencia histórica. La fuente de verdad vigente es `docs/sot/`, en particular `docs/sot/02-architecture.md`.
 
 ## Table of Contents
 1. [System Architecture](#architecture)

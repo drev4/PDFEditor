@@ -1,29 +1,45 @@
 ---
 name: prisma-schema-migration
-description: Cambiar backend/prisma/schema.prisma de forma segura (nuevo modelo, nuevo campo, cambio de relación) y mantener sincronizado el resto del stack (rutas, schemas Zod, tipos del frontend, docs/sot). Usar para cualquier tarea del bloque SaaS objetivo (Organization, Plan, Subscription) o cualquier cambio de modelo de datos.
+description: Change backend/prisma/schema.prisma safely and keep the rest of the stack in sync - migrations, routes, Zod schemas, frontend types, tests and docs/sot. Use for any data-model change, including the Organization/Membership/Plan/Subscription work in the SaaS roadmap.
 ---
 
-# Cambiar el schema de Prisma sin romper nada alrededor
+# Change the Prisma schema without leaving loose ends
 
-El dominio actual es `User → Form → Field → Response → Answer` (ver `docs/sot/02-architecture-and-domain.md`). Varios cambios de schema ya están planeados y descritos en `docs/sot/06-saas-target-architecture.md` (añadir `Organization`, `Membership`, `Plan`, `Subscription`). Esta skill cubre cómo ejecutarlos sin dejar cabos sueltos.
+Current model: `User → Form → Field → Response → Answer` (`docs/sot/03-domain-model.md`). Planned changes are in `docs/sot/10-saas-roadmap.md`.
 
-## Antes de tocar el schema
+## Stop: there is no migration history
 
-1. Lee `docs/sot/02-architecture-and-domain.md` para entender qué asume el código actual sobre el modelo que vas a tocar (ej.: hoy todo el código de ownership asume `Form.userId`; si migras a `Form.organizationId`, cada sitio que hace `where: { userId: req.userId }` sobre `Form` tiene que revisarse, no solo el modelo).
-2. Comprueba las relaciones `onDelete` existentes antes de añadir una nueva — ya hay un caso conocido de `onDelete: Cascade` mal pensado (`Answer.field`, ver `docs/sot/03-backend-patterns.md`, riesgo de pérdida de datos en `bulkSave`). No repitas ese patrón: para cualquier relación nueva pregúntate explícitamente qué debe pasar con los datos hijos cuando se borra el padre, no dejes `Cascade` por defecto sin pensarlo.
-3. Si el cambio afecta a un modelo que ya tiene datos reales en la base (no solo en desarrollo), planea la migración de datos (no solo el `migrate dev`) — ej. la migración de `Form.userId` a `Form.organizationId` necesita crear una `Organization` personal por cada `User` existente, descrito en `docs/sot/06-saas-target-architecture.md`.
+`backend/prisma/migrations/` does not exist. Everything so far has used `prisma db push`, which mutates a database to match the schema with no record of intent, no ordering and no down path.
 
-## Al ejecutar el cambio
+**Before the first schema change that touches a database with real data, baseline the migrations:** generate an initial migration from the current schema, check the generated SQL against what is already deployed, and commit it. Then switch CI and every environment to `prisma migrate deploy`. `db push` is for throwaway local databases only, from that point on.
 
-1. Edita `backend/prisma/schema.prisma`.
-2. Genera la migración: `cd backend && npx prisma migrate dev --name <nombre_descriptivo>`.
-3. Actualiza todos los sitios que Prisma tipará distinto ahora — `npx tsc --noEmit` en `backend/` para encontrarlos todos de una vez en vez de uno a uno en runtime.
-4. Actualiza los schemas Zod en `backend/src/routes/*.ts` que validan el modelo cambiado.
-5. Si el modelo se expone en algún endpoint, actualiza el tipo correspondiente en `frontend/src/services/*.ts`.
-6. Actualiza los tests en `backend/tests/` que mockean ese modelo (`mockDeep<PrismaClient>()` con `vitest-mock-extended` — buscar el modelo en los mocks existentes de `backend/tests/*.spec.ts`).
-7. Aplica la skill `sot-sync`: actualiza `docs/sot/02-architecture-and-domain.md` con el modelo real, y si el cambio completa una pieza descrita en `docs/sot/06-saas-target-architecture.md`, muévela de "target" a "implementado".
+Do not begin roadmap schema work on `db push`. See `docs/sot/08-operations.md`.
 
-## Qué NO hacer
+## Before editing the schema
 
-- No usar `prisma db push` en nada que no sea un entorno local desechable — pierde el historial de migraciones que sí necesita `migrate dev`.
-- No añadir campos "por si acaso" a un modelo nuevo (ej. no añadir `metadata: Json?` especulativo a `Organization` si nada lo va a usar todavía) — el propio `Form.settings: Json?` ya es un hueco sin usar en el schema actual; no lo dupliques en cada modelo nuevo.
+1. **Read what the current code assumes about the model you are touching.** Every ownership check today reads `where: { userId: req.userId }` on `Form`. Moving ownership to an organization means every one of those sites, and their tests, not just the schema line.
+2. **State the `onDelete` behaviour of every relation you add or touch, in words, in the PR description.** Not "I left the default". The one cascade nobody discussed — `Answer.field onDelete: Cascade` — is currently how the product loses customer data. For each relation ask: when the parent goes, should the child die with it, block the delete, or be orphaned deliberately?
+3. **Never let customer-produced data be destroyed as a side effect of an edit.** Deleting it must be an action the user aimed at that data. If a change makes an edit path capable of deleting answers or responses, the design is wrong, not the implementation.
+4. **If the model already holds real data, plan the data migration, not just the structure migration.** The `Form.userId` → `Form.organizationId` move needs a personal `Organization` created for every existing `User`; that is a sequence of deployable steps, described in `docs/sot/10-saas-roadmap.md`, not one migration.
+
+## Executing the change
+
+1. Edit `backend/prisma/schema.prisma`.
+2. `cd backend && npx prisma migrate dev --name <descriptive_name>`. Read the generated SQL before committing it — Prisma will silently plan a destructive step if the diff implies one.
+3. `npx tsc --noEmit` in `backend/` to find every site the new types break, all at once rather than one at a time in runtime.
+4. Update the Zod schemas in `backend/src/routes/*.ts` that validate the changed model. Types and validators are separate; the compiler will not remind you.
+5. Update the matching types in `frontend/src/services/*.ts` if the model is exposed over the API.
+6. Update the tests in `backend/tests/` that mock the model (`mockDeep<PrismaClient>()`).
+7. **Add an index for any column your new code filters or counts on.** A new soft-delete flag that every read filters on, or a foreign key you now count per row, needs one.
+8. If correctness depends on database behaviour — a cascade, a constraint, a transaction — add a test against a real PostgreSQL instance. A mocked Prisma client will pass against broken code (`docs/sot/09-quality-and-testing.md`).
+
+## On the way out
+
+Apply the `sot-sync` skill: update `docs/sot/03-domain-model.md` (entities, invariants, the cascade map) and, if the change completes something described in `docs/sot/10-saas-roadmap.md`, move it out of the roadmap into the document that describes reality.
+
+## Do not
+
+- **Do not use `prisma db push`** on anything but a disposable local database.
+- **Do not add speculative fields.** `Form.settings: Json?` has sat unused since it was added; do not repeat that on every new model. Add the column when something reads it.
+- **Do not add a `Cascade`** because it is the shortest thing to type.
+- **Do not rename or drop a column in the same migration that deploys code reading it.** Expand, migrate, contract — in separate deploys.

@@ -1,6 +1,10 @@
+> **ARCHIVED — NOT CURRENT.** This document is kept for history only and is known to contain statements that were never true or are no longer true. The current source of truth is [`docs/sot/`](../sot/README.md). See [the archive index](./README.md) for why this was retired.
+
+---
+
 # API Documentation - VuePDF Forms Platform
 
-> **Nota (2026-08-28):** la sección de Fields de este documento estaba desactualizada respecto al backend real; se ha corregido. A partir de ahora, [`docs/sot/05-api-reference.md`](./docs/sot/05-api-reference.md) es la referencia canónica de la API (se verifica contra `backend/src/routes/` en cada actualización) — este fichero se mantiene por compatibilidad con enlaces existentes, pero ante cualquier duda o discrepancia futura, el SOT manda.
+> **Nota (2026-08-28):** la sección de Fields de este documento estaba desactualizada respecto al backend real; se ha corregido. A partir de ahora, `docs/sot/06-api-reference.md` es la referencia canónica de la API (se verifica contra `backend/src/routes/` en cada actualización) — este fichero se mantiene por compatibilidad con enlaces existentes, pero ante cualquier duda o discrepancia futura, el SOT manda.
 
 Base URL: `http://localhost:3000/api`
 
@@ -354,7 +358,7 @@ Get a public form by its shareId (no authentication required).
 
 ## Fields Endpoints
 
-> Corregido el 2026-08-28: esta sección describía endpoints que nunca existieron (`GET .../fields`, `PUT .../fields/bulk` con semántica de upsert, `DELETE .../fields/bulk`). Lo de abajo está verificado contra `backend/src/routes/form-fields.ts`. No hay endpoint de listado separado: los fields de un form se obtienen embebidos en `GET /api/forms/:id`. Referencia completa y siempre verificada contra el código: [`docs/sot/05-api-reference.md`](./docs/sot/05-api-reference.md).
+> Corregido el 2026-08-28: esta sección describía endpoints que nunca existieron (`GET .../fields`, `PUT .../fields/bulk` con semántica de upsert, `DELETE .../fields/bulk`). Lo de abajo está verificado contra `backend/src/routes/form-fields.ts`. No hay endpoint de listado separado: los fields de un form se obtienen embebidos en `GET /api/forms/:id`. Referencia completa y siempre verificada contra el código: `docs/sot/06-api-reference.md`.
 
 ### POST /api/forms/:formId/fields
 Create a single field on a form.
@@ -420,7 +424,7 @@ Replace **all** fields of a form in one call — this is what the editor calls o
 
 **Notes (important, differs from what this doc used to say):**
 - This is **not** an upsert. The backend deletes every existing field of the form (`deleteMany`) and recreates the ones sent in the request (`createMany`). Fields not included in the array **are deleted**, not preserved.
-- ⚠️ Same cascade risk as the single `DELETE` above, but easier to trigger by accident: saving the editor on a form that already has responses deletes the `Answer` rows tied to the old field `id`s. See `docs/sot/03-backend-patterns.md` for the known-issue writeup and planned fix.
+- ⚠️ Same cascade risk as the single `DELETE` above, but easier to trigger by accident: saving the editor on a form that already has responses deletes the `Answer` rows tied to the old field `id`s. See `docs/sot/03-domain-model.md` for the known-issue writeup and planned fix.
 - Also re-embeds the fields as AcroForm into the physical PDF file on disk.
 
 ---
@@ -716,7 +720,7 @@ const { fileUrl } = response.data;
 
 ## Database Schema
 
-See the full schema in [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma).
+See the full schema in [`backend/prisma/schema.prisma`](../../backend/prisma/schema.prisma).
 
 ### Main Models:
 
