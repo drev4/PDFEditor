@@ -31,7 +31,9 @@ responsesRouter.post('/', async (req: Request, res, next) => {
         shareId
       },
       include: {
-        fields: true
+        // Live fields only: an archived field must never be rendered on the
+        // public form, and must never be required for a submission.
+        fields: { where: { deletedAt: null } }
       }
     })
 

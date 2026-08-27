@@ -53,7 +53,8 @@ In `.claude/agents/`. All read-only except `test-author`.
 ```bash
 npm run dev                      # both workspaces (docker-compose up -d first, for PostgreSQL)
 npm run test:frontend            # Vitest, 29 specs beside the source
-npm run test:backend             # Vitest + supertest, 7 specs in backend/tests/
+npm run test:backend             # Vitest + supertest over a mocked Prisma, 7 specs in backend/tests/
+npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, backend/tests/integration/
 npm run test:e2e                 # Playwright, needs both apps running
 npm run build --workspace=frontend   # includes vue-tsc type checking
 cd backend && npx tsc --noEmit       # backend type check
@@ -74,10 +75,10 @@ The frontend suite requires Node `^20.19.0 || >=22.12.0` (see `.nvmrc`); on an o
    Without `--no-track` the new branch's upstream is `origin/develop` itself, and a later push lands directly on `develop`, skipping the PR. Never commit on `develop` or `main`.
 4. **Creating a local branch needs no confirmation. Pushing, opening a PR, and deleting a remote branch do** — every time.
 5. **Before writing any `delete`, `deleteMany` or new cascade,** check the cascade map in [03-domain-model](docs/sot/03-domain-model.md) and answer: what customer data does this destroy, and did the user ask for that? Editing something is not consent to delete data collected through it.
-6. **A mocked Prisma client cannot test database behaviour.** Cascades, constraints and rollbacks need a real PostgreSQL. A green mocked test against broken code is how this project's live data-loss defect shipped.
+6. **A mocked Prisma client cannot test database behaviour.** Cascades, constraints and rollbacks need a real PostgreSQL — that is what `backend/tests/integration/` is for (`npm run test:integration`). A green mocked test against broken code is how this project's data-loss defect shipped.
 7. **File what you find.** A risk noticed while doing something else goes into `docs/BACKLOG.md` with a priority and a why — not into a sentence in the chat that disappears.
 8. **Report outcomes as they are.** If tests fail, show the output. If part of the task was skipped, say which part and why. Do not describe partial work as finished.
 
 ## Current state, in one paragraph
 
-Auth, form CRUD, the field editor, AcroForm extraction and embedding, the public form flow, the responses dashboard and CSV export all work. There is one known live data-loss defect: saving fields on a form that has responses destroys the collected answers ([`features/0001`](features/0001-stable-field-ids-and-safe-bulk-save.md)). There are no organizations, plans, billing, public API, rate limiting, structured logging, object storage or lint. There is **no Prisma migration history at all** — everything runs on `db push`, which must be baselined before any schema change touching real data.
+Auth, form CRUD, the field editor, AcroForm extraction and embedding, the public form flow, the responses dashboard and CSV export all work. The bulk-save data-loss defect is fixed ([`features/0001`](features/0001-stable-field-ids-and-safe-bulk-save.md)): field ids are stable across saves, the editor's save is a diff, and deleting a field that holds answers archives it (`Field.deletedAt`) instead of destroying them. Prisma migrations are baselined; every schema change goes through `migrate dev` / `migrate deploy`. There are no organizations, plans, billing, public API, rate limiting, structured logging, object storage or lint.

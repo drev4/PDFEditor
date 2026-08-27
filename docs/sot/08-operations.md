@@ -39,22 +39,34 @@ Two gaps to close: `BASE_URL` belongs in `backend/.env.example`, and there is no
 
 ## Database migrations
 
-**There is no migration history.** `backend/prisma/migrations/` does not exist. The schema is applied with `prisma db push` in development (`npm run db:push`) and in CI.
+**A migration history exists**, baselined as step 0 of [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md). `backend/prisma/migrations/` holds:
 
-This is a release blocker, and it is worth stating plainly why:
+| Migration | What it is |
+|---|---|
+| `0_baseline` | The whole schema as `db push` had built it, generated with `prisma migrate diff --from-empty` and marked applied with `prisma migrate resolve --applied 0_baseline`. It creates nothing new |
+| `20260827232747_field_soft_delete_and_answer_field_index` | `fields.deleted_at` (nullable) and an index on `answers.field_id`. Purely additive |
 
-- `db push` diffs the schema against the live database and mutates it to match. It has no record of intent, no ordering, no down path, and it will happily drop a column that a deploy is halfway through reading.
-- Without a migration history there is no `prisma migrate deploy`, which means there is no safe way to change the schema of a database containing customer data.
-- Every schema change in [10-saas-roadmap.md](./10-saas-roadmap.md) — `Organization`, `Membership`, `Subscription`, and the `Form.userId` → `Form.organizationId` move — needs data migration, not just structure migration. That is not expressible in `db push` at all.
+**Every schema change from here uses `prisma migrate dev` locally and `prisma migrate deploy` everywhere else** (`npm run db:migrate` / `npm run db:migrate:deploy`). `db push` is for throwaway local databases only, and never against data anyone cares about — it diffs the schema against the live database and mutates it to match, with no record of intent, no ordering, no down path, and a willingness to drop a column that a deploy is halfway through reading.
 
-**The fix is to baseline before the first real deployment:** generate an initial migration from the current schema, commit it, and switch CI and every environment to `migrate deploy`. Keep `db push` for throwaway local databases only. This must happen *before* any schema work for the SaaS layer, not alongside it.
+**Baselining an existing database.** A database already built by `db push` has the tables but no `_prisma_migrations` row for them, so `migrate deploy` would try to create them and fail. Mark the baseline as already applied on that database once, and only then deploy:
+
+```bash
+cd backend
+npx prisma migrate resolve --applied 0_baseline    # once, per pre-existing database
+npx prisma migrate deploy
+```
+
+A fresh database needs none of that — `migrate deploy` applies both migrations in order.
+
+The SaaS schema changes in [10-saas-roadmap.md](./10-saas-roadmap.md) — `Organization`, `Membership`, `Subscription`, and the `Form.userId` → `Form.organizationId` move — need *data* migration, not just structure. That is now expressible; it was not under `db push`.
 
 ## Continuous integration
 
 `.github/workflows/test.yml`, on push and PR to `main` and `develop`, Node 20:
 
 - **`unit-tests`** — `npm ci`, frontend tests with coverage, backend tests with coverage, upload to Codecov (`fail_ci_if_error: false`), archive coverage artifacts.
-- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `npm run db:push`, `npm run test:e2e`, archive the Playwright report.
+- **`integration-tests`** — a `postgres:16` service, `npm ci`, `prisma migrate deploy`, `npm run test:integration --workspace=backend`. The database-backed backend suite; see [09-quality-and-testing.md](./09-quality-and-testing.md#backend-database-backed-tests).
+- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `prisma migrate deploy`, `npm run test:e2e`, archive the Playwright report.
 
 What CI does not do, and should:
 
@@ -64,7 +76,7 @@ What CI does not do, and should:
 | No lint | There is no ESLint configuration at all — see [09-quality-and-testing.md](./09-quality-and-testing.md) |
 | No build | Neither workspace is built in CI, so a broken production build is only discovered at deploy time |
 | Coverage is measured but not enforced | No threshold, and Codecov failures are ignored |
-| Migrations are never exercised | Because there are none; CI uses `db push` |
+| Migrations are applied but never *tested* | The `integration-tests` and `e2e-tests` jobs run `migrate deploy` against a fresh database, so a broken migration fails CI. Nothing exercises a migration against a database that already holds data |
 | No dependency or secret scanning | No Dependabot, no `npm audit` gate, no secret scan |
 
 Adding type check, lint and build to the `unit-tests` job is a small change with a large return, and it should land before the CI pipeline grows any further.
@@ -93,7 +105,7 @@ Note also that `DELETE /api/forms/:id` cascades to every response with no soft d
 Requirements that follow from what is already in the code:
 
 1. **Object storage first.** As long as PDFs live on the API process's disk ([02-architecture.md](./02-architecture.md)), the service cannot scale out and cannot survive a redeploy on ephemeral storage. This is the first blocker in the path.
-2. **`migrate deploy` in the release pipeline**, once a baseline migration exists.
+2. **`migrate deploy` in the release pipeline**, with `migrate resolve --applied 0_baseline` run once against any database that predates the baseline.
 3. **Per-environment frontend builds**, because `VITE_API_URL` is compile-time.
 4. **Secrets from a secret manager**, never from a committed file. `JWT_SECRET` rotation invalidates every session, so rotation needs the refresh-token work from [07](./07-security-and-privacy.md) first.
 5. **At least two API replicas behind a load balancer** — only possible after step 1.

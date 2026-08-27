@@ -126,15 +126,27 @@ describe('Fields Routes', () => {
     })
   })
 
+  // Mocked level: validation and status codes only. Whether a save destroys
+  // answers is a database question - a mock cannot express a cascade, and a
+  // green mocked test against the old destructive handler is how this project's
+  // data-loss defect shipped. That behaviour is covered in
+  // tests/integration/fields-bulk-save.spec.ts, against a real PostgreSQL.
   describe('POST /api/forms/:formId/fields/bulk', () => {
+    const serverId = '11111111-1111-4111-8111-111111111111'
+
+    beforeEach(() => {
+      prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock))
+    })
+
     it('should bulk save fields', async () => {
       prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
-      prismaMock.field.deleteMany.mockResolvedValue({ count: 0 } as any)
-      prismaMock.field.createMany.mockResolvedValue({ count: 2 } as any)
-      prismaMock.field.findMany.mockResolvedValue([
-        { id: 'field-1', formId: 'form-1', ...mockFieldData },
-        { id: 'field-2', formId: 'form-1', ...mockFieldData, name: 'field2' }
-      ] as any)
+      prismaMock.field.findMany
+        .mockResolvedValueOnce([] as any) // live fields before the save
+        .mockResolvedValueOnce([
+          { id: 'field-1', formId: 'form-1', ...mockFieldData },
+          { id: 'field-2', formId: 'form-1', ...mockFieldData, name: 'field2' }
+        ] as any)
+      prismaMock.field.create.mockResolvedValue({ id: 'field-1' } as any)
 
       const res = await request(app)
         .post('/api/forms/form-1/fields/bulk')
@@ -144,6 +156,74 @@ describe('Fields Routes', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.fields).toHaveLength(2)
+      expect(res.body.archived).toEqual([])
+      expect(prismaMock.field.deleteMany).not.toHaveBeenCalled()
+    })
+
+    it('should return 404 if the form is not the caller\'s', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(null)
+
+      const res = await request(app)
+        .post('/api/forms/form-1/fields/bulk')
+        .send({ fields: [mockFieldData] })
+
+      expect(res.status).toBe(404)
+    })
+
+    it('should return 400 for an invalid field payload', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+
+      const res = await request(app)
+        .post('/api/forms/form-1/fields/bulk')
+        .send({ fields: [{ ...mockFieldData, type: 'signature' }] })
+
+      expect(res.status).toBe(400)
+      expect(prismaMock.$transaction).not.toHaveBeenCalled()
+    })
+
+    it('should return 400 for an id that is not a live field of this form', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+      prismaMock.field.findMany.mockResolvedValueOnce([] as any)
+
+      const res = await request(app)
+        .post('/api/forms/form-1/fields/bulk')
+        .send({ fields: [{ ...mockFieldData, id: serverId }] })
+
+      expect(res.status).toBe(400)
+      expect(res.body.details.fieldIds).toEqual([serverId])
+      expect(prismaMock.$transaction).not.toHaveBeenCalled()
+    })
+
+    it('should return 400 when the same id appears twice', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+      prismaMock.field.findMany.mockResolvedValueOnce([{ id: serverId }] as any)
+
+      const res = await request(app)
+        .post('/api/forms/form-1/fields/bulk')
+        .send({
+          fields: [
+            { ...mockFieldData, id: serverId },
+            { ...mockFieldData, name: 'field2', id: serverId }
+          ]
+        })
+
+      expect(res.status).toBe(400)
+      expect(prismaMock.$transaction).not.toHaveBeenCalled()
+    })
+
+    it('should reject a client-supplied id on the individual create', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+      prismaMock.field.create.mockResolvedValue({ id: 'generated', ...mockFieldData } as any)
+
+      const res = await request(app)
+        .post('/api/forms/form-1/fields')
+        .send({ ...mockFieldData, id: serverId })
+
+      expect(res.status).toBe(201)
+      // `createFieldSchema` strips it: the server, not the client, decides ids.
+      expect(prismaMock.field.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.not.objectContaining({ id: serverId }) })
+      )
     })
   })
 })

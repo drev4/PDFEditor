@@ -34,15 +34,15 @@ Nothing gets added to this file without opening the route file first — see the
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/forms` | Bearer | The caller's forms, with `_count.fields` and `_count.responses` |
+| GET | `/forms` | Bearer | The caller's forms, with `_count.fields` (live fields only) and `_count.responses` |
 | POST | `/forms` | Bearer | `{title, description?, pdfUrl?}`. Generates `shareId` with `nanoid(12)` |
-| GET | `/forms/:id` | Bearer + ownership | Includes ordered `fields`. **Side effect:** if `pdfUrl` is set and there are no fields in the database, it extracts them from the PDF on disk and persists them before responding (`syncFieldsFromPDF`, best-effort) |
+| GET | `/forms/:id` | Bearer + ownership | Includes ordered **live** `fields` (`deletedAt: null`). **Side effect:** if `pdfUrl` is set and the form has never had a field — archived ones count — it extracts them from the PDF on disk and persists them before responding (`syncFieldsFromPDF`, best-effort) |
 | PUT | `/forms/:id` | Bearer + ownership | Partial `{title?, description?, status?, pdfUrl?, settings?}` |
 | PATCH | `/forms/:id/status` | Bearer + ownership | `{status: 'draft' \| 'published' \| 'closed'}` |
 | DELETE | `/forms/:id` | Bearer + ownership | **Cascades to fields and every response.** Irreversible, no soft delete, no export prompt |
-| GET | `/forms/public/:shareId` | — | Published forms only. Increments `viewCount`. **Never returns `userId`** |
-| GET | `/forms/:id/responses` | Bearer + ownership | Query `limit`, `offset`. Returns `{responses, pagination: {total, limit, offset}}` |
-| GET | `/forms/:id/responses/export` | Bearer + ownership | CSV download, `Content-Disposition: attachment`, UTF-8 BOM, built by `csv-exporter.ts` |
+| GET | `/forms/public/:shareId` | — | Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`** |
+| GET | `/forms/:id/responses` | Bearer + ownership | Query `limit`, `offset`. Returns `{responses, fields, pagination: {total, limit, offset}}`. `fields` includes **archived** fields, so an answer to a removed question keeps a labelled column |
+| GET | `/forms/:id/responses/export` | Bearer + ownership | CSV download, `Content-Disposition: attachment`, UTF-8 BOM, built by `csv-exporter.ts`. Columns include **archived** fields, under their original label |
 
 Ownership is `verifyFormOwnership` (`middleware/formOwnership.ts`): **404, not 403**, when the form exists but belongs to another user, so the API does not confirm the existence of other people's resources.
 
@@ -54,12 +54,39 @@ Mounted under `/api/forms`, so every path here is nested under a form. **There i
 |---|---|---|---|
 | POST | `/forms/:formId/fields` | Bearer + form ownership | Creates one field. Body validated by `createFieldSchema`. The client cannot supply an `id` |
 | PUT | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | Partial body (`createFieldSchema.partial()`) |
-| DELETE | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | ⚠️ Cascades: deletes every `Answer` given to this field in past responses |
-| POST | `/forms/:formId/fields/bulk` | Bearer + form ownership | Body `{fields: CreateFieldData[]}`. ⚠️ **Replaces all fields** (`deleteMany` + `createMany`) and re-embeds the AcroForm in the PDF on disk |
+| DELETE | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | ⚠️ Cascades: deletes every `Answer` given to this field in past responses. The bulk save does **not** do this |
+| POST | `/forms/:formId/fields/bulk` | Bearer + form ownership | Body `{fields: BulkFieldData[]}`. A **diff**, not a replacement — see below. Re-embeds the AcroForm in the PDF on disk from the resulting live set |
 
-> ⚠️ **Known data-loss defect.** `bulk` is the editor's ordinary save action. Because it deletes every field and `Answer.field` cascades, saving a form that already has responses destroys all previously collected answers. Do not build anything on top of this endpoint's current semantics — it is being redesigned around stable field ids. See [03-domain-model.md](./03-domain-model.md#the-active-defect-bulk-field-save-destroys-collected-answers) and [`features/0001-stable-field-ids-and-safe-bulk-save.md`](../../features/0001-stable-field-ids-and-safe-bulk-save.md).
+`PUT` and `DELETE` resolve the field through `verifyFieldOwnership`, which only matches live fields: an archived field is `404` to both.
 
-`CreateFieldData` — identical in `backend` `createFieldSchema` and `frontend/src/services/fields.ts`:
+### `POST /forms/:formId/fields/bulk`
+
+The editor's ordinary save. One algorithm for every form — there is deliberately no branch on whether responses exist, because a destructive branch would be the one exercised in development.
+
+Each entry is validated by `bulkFieldSchema` = `createFieldSchema` plus an optional `id: string().uuid()`. This is the **only** endpoint that accepts a client-supplied `id`.
+
+| Entry | Meaning |
+|---|---|
+| Carries an `id` that is a live field of this form | Update that row; the id is kept |
+| Carries no `id` | Create a new field |
+| Carries an `id` that is not a live field of this form | **`400`** — the client is confused, and creating instead would duplicate the form |
+| Carries an `id` that appears twice in the payload | **`400`** |
+
+Live fields whose id is absent from the payload are removals. A removal with no answers is deleted; a removal that has answers is **archived** (`deletedAt` set) so its answers survive — see [03-domain-model](./03-domain-model.md#the-deletedat-lifecycle).
+
+Updates, creates, deletes and archives all run inside one `prisma.$transaction`, which locks the fields it is about to remove (`SELECT … FOR UPDATE`) before counting their answers — a response submitted mid-save cannot slip between the count and the delete. A failure part-way leaves the previous field set intact. The PDF is re-embedded after the transaction commits.
+
+```ts
+// 200
+{
+  fields: Field[],      // live fields only, ordered by `order`
+  archived: string[]    // ids removed in the editor but kept because they hold responses
+}
+```
+
+The frontend must send back the ids the server gave it. `saveAllFields` in `frontend/src/stores/formFields.store.ts` includes `id` for server ids and omits it for locally-created fields, which it distinguishes by the `field-` prefix it mints them with. Dropping the ids is what made an ordinary save destroy every collected answer.
+
+`CreateFieldData` — identical in `backend` `createFieldSchema` and `frontend/src/services/fields.ts`; `BulkFieldData` is this plus an optional `id`:
 
 ```ts
 {

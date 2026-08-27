@@ -83,8 +83,8 @@ Pick by that rule, not by habit. A future `BillingService` or `EntitlementsServi
 
 Two operations mutate the PDF file on disk rather than only the database, and both are wrapped so they cannot fail the request:
 
-- `GET /api/forms/:id` re-syncs fields from the PDF when the form has a `pdfUrl` but zero fields in the database (`syncFieldsFromPDF`).
-- `POST /api/forms/:formId/fields/bulk` rewrites the PDF, embedding the fields as an AcroForm (`embedFieldsInPDF`).
+- `GET /api/forms/:id` re-syncs fields from the PDF when the form has a `pdfUrl` and has never had a field, archived ones included (`syncFieldsFromPDF`).
+- `POST /api/forms/:formId/fields/bulk` rewrites the PDF from the resulting live field set, embedding them as an AcroForm (`embedFieldsInPDF`). It runs **after** the transaction commits, so a failed embed cannot roll back a saved field set.
 
 Both are `try/catch` around a `console.error` that then continues. The UX reasoning is sound: a user should not get a 500 because a post-processing step failed.
 
@@ -92,11 +92,17 @@ The consequence is an observability hole. When embedding fails, the database and
 
 ## 6. Transactions
 
-Multi-write operations use `prisma.$transaction`. The rule to apply going forward: **any handler that performs more than one write, or a read whose result decides a write, runs inside a transaction.** The bulk field save is the canonical example — it reads existing fields, decides what to update, create and delete, and without a transaction a concurrent save interleaves into a corrupt field set.
+Multi-write operations use `prisma.$transaction`. The rule: **any handler that performs more than one write, or a read whose result decides a write, runs inside a transaction.**
+
+The bulk field save is the canonical example. It reads the live fields, decides what to update, create, delete and archive, then does all four inside one `prisma.$transaction(async tx => …)`; without it a failure part-way leaves a half-written field set, and a concurrent save interleaves into a corrupt one.
+
+It also shows the one place raw SQL earns its keep. Before deciding whether a removed field can be hard-deleted, the handler locks those rows with `SELECT … FOR UPDATE`. Inserting an `Answer` takes a `FOR KEY SHARE` lock on the field it references, which conflicts: a response submitted while the save is deciding either lands first and gets the field archived, or blocks until the save commits. Without the lock, a submission arriving between the answer count and the delete has its answer cascaded away — the same data loss, through a narrower window. **A read whose result decides a destructive write must lock what it read.**
+
+It is also the canonical example of the pattern that belongs with it: **a routine edit must never issue a delete against data a customer produced.** The handler diffs on a client-supplied `id` rather than replacing the set, and a removal that has answers is archived (`deletedAt`) instead of deleted. Note what is *not* there — there is no branch on whether the form has responses. A conditional safe path is the wrong shape, because the destructive branch is then the one exercised in development and by tests. One algorithm, safe on every form. See [03-domain-model](./03-domain-model.md#the-deletedat-lifecycle).
 
 ## 7. Adding a new endpoint
 
-The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.
+The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.
 
 ## 8. What the backend is missing
 
@@ -107,4 +113,4 @@ Ordered by impact on being able to sell this, not by effort. Each has an entry i
 3. **Object storage** (S3/R2) instead of local disk, behind signed URLs. Prerequisite for more than one replica and for revocable PDF access.
 4. **A job queue** (BullMQ + Redis) for PDF extraction and embedding, so a large document cannot block the event loop or time out a request.
 5. **Shared request/response types between backend and frontend**, generated from the Zod schemas. The frontend currently redeclares the shapes by hand in `frontend/src/services/`, and the two can diverge silently — which is exactly how the API documentation drifted before.
-6. **Stable field ids.** See [03-domain-model.md](./03-domain-model.md). Correctness fix and API prerequisite in one.
+6. ~~**Stable field ids.**~~ Done — see [03-domain-model.md](./03-domain-model.md).

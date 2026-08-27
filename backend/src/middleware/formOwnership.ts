@@ -17,8 +17,10 @@ export async function verifyFormOwnership(req: AuthRequest, formId: string) {
 export async function verifyFieldOwnership(req: AuthRequest, formId: string, fieldId: string) {
   await verifyFormOwnership(req, formId)
 
+  // An archived field is not visible in the editor, so it cannot be the target
+  // of an individual update or delete.
   const field = await prisma.field.findFirst({
-    where: { id: fieldId, formId }
+    where: { id: fieldId, formId, deletedAt: null }
   })
 
   if (!field) {

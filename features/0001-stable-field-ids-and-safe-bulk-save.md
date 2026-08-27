@@ -1,8 +1,8 @@
 # 0001 — Stable field ids and a non-destructive bulk save
 
-**Status:** backlog
-**Priority:** P0 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md))
-**Branch:** _(set when this moves to "in progress")_
+**Status:** done
+**Priority:** P0 (was in [`docs/BACKLOG.md`](../docs/BACKLOG.md); rows removed on completion)
+**Branch:** `feature/0001-stable-field-ids-and-safe-bulk-save`
 **Related:** [`03-domain-model`](../docs/sot/03-domain-model.md) · [`06-api-reference`](../docs/sot/06-api-reference.md) · [`09-quality-and-testing`](../docs/sot/09-quality-and-testing.md) · [`10-saas-roadmap`](../docs/sot/10-saas-roadmap.md)
 
 ## Context
@@ -79,3 +79,20 @@ There is also a real question the previous attempts answered badly: what should 
 > **Step 7 — verify.** `npm run test:backend`, `npm run test:integration --workspace=backend`, `npm run test:frontend`, `npx tsc --noEmit` in `backend/`, and `npm run build --workspace=frontend`. Then run the real flow by hand: publish a form, submit a response, edit a field, save, and confirm in the responses dashboard and the CSV that the answer is still there.
 >
 > **Step 8 — document.** Update `docs/sot/03-domain-model.md` (the cascade map, the `deletedAt` lifecycle, and remove the "active defect" section), `docs/sot/06-api-reference.md` (the bulk endpoint's real semantics and the `archived` field — read the route file again before writing it, per the `api-contract-guard` skill), and `docs/sot/09-quality-and-testing.md` (the database-backed test level now exists). Remove the corresponding rows from `docs/BACKLOG.md`, including the migration baseline and the integration-test gap. Set this file to `**Status:** done`.
+
+## Outcome
+
+Delivered as specified. What landed:
+
+- **Migrations baselined.** `backend/prisma/migrations/0_baseline` (generated with `migrate diff --from-empty`, marked applied with `migrate resolve`) plus `20260827232747_field_soft_delete_and_answer_field_index`. CI and E2E now run `prisma migrate deploy` instead of `db push`.
+- **`Field.deletedAt`** and an index on `Answer.fieldId`. Both additive; no relation's `onDelete` changed. `Answer.field` stays `Cascade` — the fix is that the save no longer issues a delete.
+- **One bulk algorithm, no branch on response count.** `bulkFieldSchema` = `createFieldSchema` + optional `id`; unknown or duplicate ids are `400`; removals with answers are archived, removals without are deleted; everything in one `$transaction`; response is `{ fields, archived }`.
+- **Every field reader audited.** `GET /forms/:id`, `GET /forms/public/:shareId`, the `_count.fields` on `GET /forms`, `verifyFieldOwnership` and `POST /responses` see live fields only. The CSV export and the responses listing include archived fields by design.
+- **Frontend sends its ids back**, distinguishing them with the existing `isLocalFieldId`. `archived` surfaces as a toast in `FormSavePanel.vue`.
+- **A database-backed test level now exists**: `backend/tests/integration/`, `npm run test:integration`, with its own Vitest config and a CI job on a `postgres:16` service.
+
+Verification: the first integration test was written against the unmodified handler and failed with `expected [] to have a length of 2` — every answer destroyed — then passed after the fix. Final state: 14 database-backed, 63 mocked backend, 237 frontend, both type checks and the frontend build clean. The end-to-end flow was also run by hand against a real server: publish, submit, edit a field and delete another, then confirm the surviving field kept its id, the archived field left the editor and the public form, and both answers were still in the dashboard and the CSV.
+
+One addition beyond the spec text: the transaction locks the fields it is about to remove with `SELECT … FOR UPDATE` before counting their answers. Without it a response submitted between the count and the delete has its answer cascaded away — the same defect through a narrower window, and goal 1 says "in any state". The guard itself has no test (it needs two connections and deliberate interleaving) and is filed as such.
+
+Two deliberate carve-outs and one observation were also filed in [`docs/BACKLOG.md`](../docs/BACKLOG.md): `DELETE /forms/:formId/fields/:fieldId` still hard-deletes answers, there is no UI for archived fields, and `tests/forms.spec.ts > DELETE /api/forms/:id > should delete form` failed once in a full-suite run and has not reproduced since.

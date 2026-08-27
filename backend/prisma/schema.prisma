@@ -51,6 +51,7 @@ model Field {
   validation Json?
   order      Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
+  deletedAt  DateTime? @map("deleted_at")
   answers    Answer[]
   form       Form      @relation(fields: [formId], references: [id], onDelete: Cascade)
 
@@ -82,6 +83,7 @@ model Answer {
   response   Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
 
   @@index([responseId])
+  @@index([fieldId])
   @@map("answers")
 }
 

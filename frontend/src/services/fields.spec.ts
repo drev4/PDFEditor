@@ -65,14 +65,43 @@ describe('Fields Service', () => {
 
   describe('bulkSave', () => {
     it('should bulk save fields', async () => {
-      vi.mocked(api.post).mockResolvedValue({ fields: [mockField, { ...mockField, id: 'field-2' }] })
+      vi.mocked(api.post).mockResolvedValue({
+        fields: [mockField, { ...mockField, id: 'field-2' }],
+        archived: []
+      })
 
-      const fields = await fieldsService.bulkSave('form-1', [mockFieldData, mockFieldData])
+      const result = await fieldsService.bulkSave('form-1', [mockFieldData, mockFieldData])
 
       expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields/bulk', {
         fields: [mockFieldData, mockFieldData]
       })
-      expect(fields).toHaveLength(2)
+      expect(result.fields).toHaveLength(2)
+      expect(result.archived).toEqual([])
+    })
+
+    it('should pass through field ids so the save is a diff, not a replacement', async () => {
+      vi.mocked(api.post).mockResolvedValue({ fields: [mockField], archived: [] })
+
+      const withId = { ...mockFieldData, id: 'server-field-1' }
+      await fieldsService.bulkSave('form-1', [withId])
+
+      expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields/bulk', { fields: [withId] })
+    })
+
+    it('should surface the ids the server archived', async () => {
+      vi.mocked(api.post).mockResolvedValue({ fields: [], archived: ['field-9'] })
+
+      const result = await fieldsService.bulkSave('form-1', [])
+
+      expect(result.archived).toEqual(['field-9'])
+    })
+
+    it('should default archived to an empty array if the server omits it', async () => {
+      vi.mocked(api.post).mockResolvedValue({ fields: [] })
+
+      const result = await fieldsService.bulkSave('form-1', [])
+
+      expect(result.archived).toEqual([])
     })
   })
 })

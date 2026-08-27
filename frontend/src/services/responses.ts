@@ -1,4 +1,5 @@
 import { api } from './api'
+import type { Field } from './forms'
 
 export interface SubmitResponseData {
   formId: string
@@ -35,6 +36,12 @@ export interface FormResponse {
 
 export interface ListResponsesResult {
   responses: FormResponse[]
+  /**
+   * Every field of the form, including ones archived by a later edit. An
+   * archived field still owns answers in these responses, so it must keep its
+   * column and its original label.
+   */
+  fields: Field[]
   pagination: {
     total: number
     limit: number

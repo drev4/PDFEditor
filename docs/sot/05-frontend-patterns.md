@@ -88,7 +88,17 @@ Fields are positioned and persisted in **canvas** coordinates. The backend's `pd
 
 There is no shared constant and no test spanning both. **Changing the editor's render scale silently misaligns every field in the exported PDF.** If you touch rendering scale or zoom, you are also touching the backend, whether or not the diff says so. Fixing this properly means the scale travels with the data — storing the scale the positions were captured at on the form — rather than being agreed on by coincidence.
 
-## 5. Persistence is decided per store, explicitly
+## 5. Server ids are the field's identity, local ids are a placeholder
+
+`formFields.store.ts` mints an id for every field the user draws: `` `${LOCAL_ID_PREFIX}${Date.now()}-${random}` ``, where `LOCAL_ID_PREFIX = 'field-'`. It is a client-side key so the canvas, the side panel and the selection can all refer to a field that the server has never seen. `isLocalFieldId(id)` distinguishes the two.
+
+**The distinction is load-bearing on save.** `saveAllFields` sends `id` for a field whose id came from the server, and omits it for a local one — that is what makes `POST /forms/:formId/fields/bulk` a diff rather than a replacement, and it is why a save no longer destroys the answers collected against those fields ([06-api-reference](./06-api-reference.md)). Dropping the ids on the way out is exactly the bug that shipped: the store received server ids from `loadFieldsFromForm` and then built its payload as a plain `CreateFieldData[]`, discarding them.
+
+The rule that follows: **anything that builds a payload from `fields` must decide, explicitly, what it does with the id.** Local ids must never be sent, server ids must never be dropped.
+
+The endpoint answers with `archived: string[]` — fields the user deleted that the server kept because they hold responses. The store parks them in `archivedFieldIds` and `FormSavePanel.vue` shows them as a non-blocking toast, then clears them. A response the frontend receives and silently ignores is how the previous attempt at this fix confused everyone: fields reappeared in the editor with no explanation.
+
+## 6. Persistence is decided per store, explicitly
 
 `pinia-plugin-persistedstate` is applied per store, never globally, and with an explicit `pick`:
 
@@ -102,7 +112,7 @@ There is no shared constant and no test spanning both. **Changing the editor's r
 
 Note what persistence implies for security: the auth token itself is in `localStorage`, readable by any script on the origin. That is a known finding, not a pattern to copy — see [07-security-and-privacy.md](./07-security-and-privacy.md).
 
-## 6. Tests target behaviour, not implementation
+## 7. Tests target behaviour, not implementation
 
 29 specs live beside the code they test, using Vitest, `@testing-library/vue` and `@pinia/testing`. The convention is to assert the observable contract — which request went out, what state resulted — rather than internals:
 
@@ -112,10 +122,10 @@ expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields', mockFieldData)
 
 Do not assert on the internal shape of a composable's refs when the same thing can be asserted on what it caused.
 
-## 7. What the frontend is missing
+## 8. What the frontend is missing
 
 1. **A server-state library** (TanStack Query for Vue) for reads. Today every store hand-manages `loading` / `error` / caching, and there is no request deduplication or background refetch. `useAsyncAction` stays for writes; reads are where the manual approach is costing the most.
-2. **A field-scale contract with the backend.** See point 4 — the highest-risk implicit coupling in the repo.
+2. **A field-scale contract with the backend.** See section 4 — the highest-risk implicit coupling in the repo.
 3. **Shared types generated from the backend Zod schemas**, so `CreateFieldData` cannot drift from the server's validator.
 4. **i18n.** The UI is English except for a handful of Spanish placeholders (`"Escribe aquí..."`, `"Buscar en el documento..."`). That is drift, not a decision. Fix it with an i18n layer rather than string-by-string, because it will need one anyway.
 5. **VueUse** for the hand-rolled `useDragAndDrop`, `useGridOverlay` and `useToolbarDrag`. Evaluate individually — some of these encode editor-specific behaviour that a generic helper will not cover.
