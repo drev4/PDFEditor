@@ -22,7 +22,7 @@ It is being built to be sold, B2B and B2C. That changes what "done" means: data 
 | Write tests, or decide a change is done | [09-quality-and-testing](docs/sot/09-quality-and-testing.md) |
 | Build anything toward multi-tenancy or billing | [10-saas-roadmap](docs/sot/10-saas-roadmap.md) |
 
-Live backlog: [`docs/BACKLOG.md`](docs/BACKLOG.md). Specs for work in flight: [`features/`](features/README.md).
+Live backlog: [`docs/BACKLOG.md`](docs/BACKLOG.md) — *what is missing*. Build order: [`10-saas-roadmap`](docs/sot/10-saas-roadmap.md#build-order) — *what is next*. **Pick the next task from the build order, not from the backlog's priority column**, and when the two disagree the chain wins: a priority is a judgement, a dependency is not. Specs for work in flight: [`features/`](features/README.md).
 
 `docs/archive/` is retired and known to contain false statements. Never cite it.
 
@@ -52,9 +52,9 @@ In `.claude/agents/`. All read-only except `test-author`.
 
 ```bash
 npm run dev                      # both workspaces (docker-compose up -d first, for PostgreSQL)
-npm run test:frontend            # Vitest, 29 specs beside the source
-npm run test:backend             # Vitest + supertest over a mocked Prisma, 7 specs in backend/tests/
-npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, backend/tests/integration/
+npm run test:frontend            # Vitest, 29 specs / 237 tests beside the source
+npm run test:backend             # Vitest + supertest over a mocked Prisma, 10 specs / 98 tests in backend/tests/
+npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, 2 specs / 14 tests in backend/tests/integration/
 npm run test:e2e                 # Playwright, 34 tests; starts both apps itself
 npm run build --workspace=frontend   # includes vue-tsc type checking
 cd backend && npx tsc --noEmit       # backend type check

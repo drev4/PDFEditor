@@ -12,6 +12,25 @@ Not everything needs one. A typo, a dependency bump, a one-line fix does not. An
 
 Finished specs are **not deleted**. They are marked done and stay as the record of what was asked and why.
 
+## How much goes in one feature
+
+One spec does **not** mean one functionality. Two of the six that exist cover several at once, and both were right to:
+
+- [`0001`](0001-stable-field-ids-and-safe-bulk-save.md) carried four things — baselining the migrations, stable field ids, the non-destructive bulk save, and the whole `backend/tests/integration/` harness. The harness was not extra scope: a mocked Prisma had already passed the broken code, so without a real database there was **no way to show the fix worked**.
+- [`0005`](0005-working-ci-and-enforced-node-version.md) carried a broken CI and an unenforced Node version, and says so in its first line: *"Two problems that look unrelated and are not."* Fixing CI without pinning Node leaves CI green **on the wrong Node**; pinning Node without fixing CI leaves a pipeline that still never generated the Prisma client. Either half alone produces a repository that still lies about itself.
+
+The criterion is not size or subject area:
+
+> **Combine when they share one reason to change, or when one cannot be verified without the other. Split when they share only a theme.**
+
+The practical test is the revert: **a feature is the unit of undo.** If this turned out to be wrong in production, what would have to come out? Things that would never be reverted separately belong in one spec. Anything that could survive on its own belongs in its own.
+
+Being in the same area of the code is not a reason. [`0002`](0002-rate-limiting-on-public-write-paths.md) (rate limiting) and [`0004`](0004-safe-author-supplied-regex.md) (regex guard) are both security, both High, both P0 — and separating them was correct. They share no files and no verification.
+
+The history makes the point better than the argument does: `0002` merged with the E2E suite still red, and filed that as a new P0 in its own Outcome; [`0003`](0003-e2e-suite-green-and-independent.md) then closed it, and `0004` went in after. Bundled together, the rate limiter would have sat unmerged behind a test-repair job it had nothing to do with.
+
+One real pressure to name, so it can be resisted: a spec here runs 14–20 KB, and that cost tempts you to bundle work to avoid writing another one. Grouping by "it's all security anyway" is exactly the wrong grouping, and it produces a PR nobody can review or revert.
+
 ## Naming
 
 `NNNN-slug.md` — four digits, sequential, never reused; slug in kebab-case describing the outcome, not a ticket id.

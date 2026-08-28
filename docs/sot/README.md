@@ -22,10 +22,10 @@ Everything here is written to be **verifiable against the code**. Where a docume
 | 07 | [Security and privacy](./07-security-and-privacy.md) | Auth model, threat surface, PII inventory, GDPR obligations |
 | 08 | [Operations](./08-operations.md) | Environments, configuration, CI, deployment, observability, backups |
 | 09 | [Quality and testing](./09-quality-and-testing.md) | Test strategy, what belongs at which level, definition of done |
-| 10 | [SaaS roadmap](./10-saas-roadmap.md) | Target multi-tenant/billing architecture — **not implemented yet** |
+| 10 | [SaaS roadmap](./10-saas-roadmap.md) | Target multi-tenant/billing architecture — **not implemented yet** — plus the [build order](./10-saas-roadmap.md#build-order), which does track real state and is where the next task is chosen |
 | 11 | [Conventions](./11-conventions.md) | Commits, branches, naming, file layout, language policy |
 
-Live backlog: [`docs/BACKLOG.md`](../BACKLOG.md). Specs for work in progress: [`features/`](../../features/README.md).
+Live backlog: [`docs/BACKLOG.md`](../BACKLOG.md) — *what is missing and how much it matters*. Build order: [10-saas-roadmap](./10-saas-roadmap.md#build-order) — *what is next*, because it carries the dependencies a priority column cannot. **When the two disagree, the chain wins.** Specs for work in progress: [`features/`](../../features/README.md).
 
 ## Rules that keep this alive
 

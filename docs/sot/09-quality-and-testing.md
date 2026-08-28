@@ -4,14 +4,14 @@
 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
-| Frontend unit / component | 29 specs | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 9 specs | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 2 specs | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| Frontend unit / component | 29 specs, 237 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
+| Backend route (mocked Prisma) | 10 specs, 98 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| **Backend database-backed** | 2 specs, 14 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 6 specs, 34 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 The two placement conventions are different on purpose and must not be mixed: **frontend tests sit next to their subject, backend tests sit in `backend/tests/`.**
 
-> **Node version: `>=22.12.0`, and it now applies to everything.** The frontend suite needs it because of Vite 7 and jsdom 27 (below it, every spec fails to start with `ERR_REQUIRE_ESM` and the build dies on a missing `crypto.hash`), and **the backend needs it too** — `re2` declares `engines: node >=22`, and on a mismatched ABI it fails to load, at which point the backend passes 81 of 83 while silently not enforcing field patterns. That is enforced rather than documented: `engine-strict` at install, `scripts/check-node.mjs` on every test and build script, and `node-version-file: .nvmrc` in CI. See [08-operations](./08-operations.md#the-supported-node-version).
+> **Node version: `>=22.12.0`, and it now applies to everything.** The frontend suite needs it because of Vite 7 and jsdom 27 (below it, every spec fails to start with `ERR_REQUIRE_ESM` and the build dies on a missing `crypto.hash`), and **the backend needs it too** — `re2` declares `engines: node >=22`, and on a mismatched ABI it fails to load, at which point the backend goes green on all but two tests while silently not enforcing field patterns (measured during [`features/0005`](../../features/0005-working-ci-and-enforced-node-version.md), when the suite was 83 tests). That is enforced rather than documented: `engine-strict` at install, `scripts/check-node.mjs` on every test and build script, and `node-version-file: .nvmrc` in CI. See [08-operations](./08-operations.md#the-supported-node-version).
 
 ## Backend: integration tests over the real router
 

@@ -1,6 +1,10 @@
 # SaaS roadmap — `[NOT IMPLEMENTED]`
 
-Everything in this document is target design. None of it exists in the code. Its job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
+The entity designs, the entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
+
+The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 2 are closed and step 3 is most of the way there, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
+
+The division of labour with the backlog: [`docs/BACKLOG.md`](../BACKLOG.md) answers **what is missing and how much it matters**; the build order answers **what is next**. When priority and the chain disagree, the chain wins — see [the inversion](#a-known-inversion-between-this-chain-and-the-backlog) at the end for the case that already exists.
 
 Business rationale is in [01-product-and-market.md](./01-product-and-market.md).
 
@@ -83,16 +87,25 @@ Custom domains for public form links (`forms.customer.com`) are a much larger pr
 
 A dependency chain, not a schedule. Each step unblocks the next.
 
+This is the whole build order, not only the SaaS part of it — the security and operations work belongs in the same chain, because it is what everything below assumes. A step is only useful while it is ahead of you; the closed ones are kept as the record of what was cleared. The order they were actually executed in is in `git log`, not here.
+
 | # | Step | Why it is here |
 |---|---|---|
 | 0 | ~~**Baseline Prisma migrations**~~ — done | Nothing below could safely change a schema holding customer data |
 | 1 | ~~**Stable field ids and safe bulk save**~~ — done | Was an active data-loss bug, and is the prerequisite for every integration. [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) |
-| 2 | **Rate limiting, security headers, regex guard** | The cheapest risk removal available, and the first questions on any security review |
-| 3 | **`Organization` + `Membership`** with data migration, no visible behaviour change | The longest-lead schema change; do it while the data is small |
-| 4 | **Member invitations** | The first feature that makes B2B real rather than a table with one row |
-| 5 | **`Plan` + entitlements**, limits enforced, no charging yet | Validates the "limit reached" UX before money is involved |
-| 6 | **Stripe + `Subscription`** | Actual revenue |
-| 7 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear |
-| 8 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
+| 2 | ~~**A gate that can be trusted**~~ — done | A red E2E suite gates nothing and a CI that never generated the Prisma client verifies nothing: without this, no step below could be *shown* to work. [`features/0003`](../../features/0003-e2e-suite-green-and-independent.md), [`features/0005`](../../features/0005-working-ci-and-enforced-node-version.md) |
+| 3 | **Risk removal on the public surface** — mostly done | The cheapest risk removal available, and the first questions on any security review. Closed: rate limiting ([`0002`](../../features/0002-rate-limiting-on-public-write-paths.md)), regex guard ([`0004`](../../features/0004-safe-author-supplied-regex.md)), signed PDF URLs ([`0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)). **Still open: `helmet` + CSP (S5), specced as [`features/0007`](../../features/0007-security-headers-and-csp.md), then session hardening (S4)** — the two things standing between here and step 4, in the order [07-security-and-privacy](./07-security-and-privacy.md#recommended-order-of-work) sets |
+| 4 | **`Organization` + `Membership`** with data migration, no visible behaviour change | The longest-lead schema change; do it while the data is small |
+| 5 | **Member invitations** | The first feature that makes B2B real rather than a table with one row |
+| 6 | **`Plan` + entitlements**, limits enforced, no charging yet | Validates the "limit reached" UX before money is involved |
+| 7 | **Stripe + `Subscription`** | Actual revenue |
+| 8 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear. Also brings the Redis that the shared rate-limit store needs — see the inversion below |
+| 9 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
 
-Steps 0 through 2 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data and does not fall over when pointed at.
+Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified.
+
+### A known inversion between this chain and the backlog
+
+[`docs/BACKLOG.md`](../BACKLOG.md) files **shared rate-limit store (Redis)** under P1 and **job queue (BullMQ + Redis)** under P2 — but the first needs the Redis the second brings. Priority says do the P1 item first; the chain says it cannot be done first.
+
+**The chain wins.** A priority is a judgement and can be revised; a dependency cannot. That is the whole reason this document exists next to a flat priority list, and it is the rule to apply whenever the two disagree. Concretely, the options here are to live with the per-process limiter until step 8, or to pull Redis forward as its own step and pay for the infrastructure earlier — not to attempt the P1 item on its stated priority.
