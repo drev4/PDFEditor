@@ -8,9 +8,7 @@ Last reviewed: **2026-08-28**.
 
 ## P0 — Blocks any real customer
 
-| Item | Why | Reference |
-|---|---|---|
-| **Frontend test suite cannot run below Node 20.19** | Vite 7 and jsdom 27 require `^20.19.0 \|\| >=22.12.0`. All 29 specs fail to start on Node 20.9 with `ERR_REQUIRE_ESM`, and 7 more fail on the missing `crypto.hash`. `engines` said `>=18.0.0`, so npm never warned — corrected, plus a `.nvmrc`, but anyone already on an old Node needs to upgrade. Now sharper: `.nvmrc` says 22.12.0 while CI runs `node-version: 20.x`, and `re2` is a native module whose binary is ABI-bound — switching Node without `npm rebuild re2` disables pattern validation | [09-quality](./sot/09-quality-and-testing.md) · [08-operations](./sot/08-operations.md) |
+**Empty.** The data-loss defect, the unthrottled public write paths, the ReDoS surface, the red E2E suite and the unenforced Node version are all closed ([`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md)–[`0005`](../features/0005-working-ci-and-enforced-node-version.md)). The next things that stand between this and a paying customer are in P1 — signed URLs for uploaded PDFs (S1) and session hardening (S4) first.
 
 ## P1 — Security, privacy and operational readiness
 
@@ -28,9 +26,9 @@ Last reviewed: **2026-08-28**.
 | Account deletion and per-account data export | GDPR erasure and portability; neither exists | (S8) |
 | Response retention policy and a respondent privacy notice | IP and user agent are collected from respondents with no notice, no limit and no actual anti-abuse use | (S7) |
 | Password policy, lockout, breach check | 6-character minimum, unlimited attempts | (S10) |
-| Type check, lint and build in CI | CI runs only tests, so type errors and broken builds reach `develop` | [08-operations](./sot/08-operations.md) |
-| ESLint flat config in both workspaces | `npm run lint` currently succeeds while linting nothing | [09-quality](./sot/09-quality-and-testing.md) |
+| ESLint flat config, then lint in CI | `npm run lint` currently succeeds while linting nothing, because no workspace defines a `lint` script and there is no `eslint.config.js`. Type check and build now run in CI; lint is the remaining piece | [09-quality](./sot/09-quality-and-testing.md) |
 | Validate all configuration at boot with Zod | Only `JWT_SECRET` is checked; a wrong `BASE_URL` silently produces broken PDF links | [08-operations](./sot/08-operations.md) |
+| Production build must generate the Prisma client before pruning devDependencies | `backend`'s `postinstall` runs `prisma generate`, but `prisma` is a devDependency, so `npm ci --omit=dev` would run the hook without its CLI. Harmless today (no deploy pipeline exists), and a trap for whoever writes one | [08-operations](./sot/08-operations.md) |
 | Automated backups with a tested restore | None exist; recovery time is unknown | [08-operations](./sot/08-operations.md) |
 | Error tracking on API and SPA | Browser-side editor failures are invisible today | [08-operations](./sot/08-operations.md) |
 
