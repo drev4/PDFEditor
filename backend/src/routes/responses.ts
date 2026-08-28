@@ -2,6 +2,7 @@ import { Router, Request } from 'express'
 import { z } from 'zod'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
+import { compilePattern } from '../services/pattern-validator.js'
 import { responseRateLimit } from '../middleware/rateLimit.js'
 
 export const responsesRouter = Router()
@@ -97,15 +98,23 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
             validationErrors[field.name] = 'Must be a string value'
           } else {
             const validation = field.validation as any
+            // `else if`, deliberately: a value that already failed a length check
+            // must not reach the regex. Previously these were independent `if`s,
+            // so a 100 kB value was pattern-matched even when maxLength was 5.
             if (validation?.minLength && value.length < validation.minLength) {
               validationErrors[field.name] = `Minimum length is ${validation.minLength}`
-            }
-            if (validation?.maxLength && value.length > validation.maxLength) {
+            } else if (validation?.maxLength && value.length > validation.maxLength) {
               validationErrors[field.name] = `Maximum length is ${validation.maxLength}`
-            }
-            if (validation?.pattern) {
-              const regex = new RegExp(validation.pattern)
-              if (!regex.test(value)) {
+            } else if (validation?.pattern) {
+              // Compiled through the shared helper, never `new RegExp` here: the
+              // engine must not backtrack, and an unusable pattern must not throw.
+              const regex = compilePattern(validation.pattern)
+              if (!regex) {
+                console.warn(
+                  `Ignoring unusable pattern on field ${field.id} of form ${formId}: ` +
+                  `${JSON.stringify(validation.pattern)}`
+                )
+              } else if (!regex.test(value)) {
                 validationErrors[field.name] = 'Invalid format'
               }
             }

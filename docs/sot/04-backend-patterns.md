@@ -118,11 +118,23 @@ Three things about them are decisions rather than defaults:
 
 `req.ip` is only the client if `trust proxy` is right — [08-operations](./08-operations.md#trust_proxy_hops-and-why-it-is-not-a-detail).
 
-## 8. Adding a new endpoint
+## 8. Code-like input is compiled in one audited place
+
+A field's `validation.pattern` is written by a form author and executed against input from an anonymous respondent, on the public endpoint, on the only thread the process has. `services/pattern-validator.ts` is the only module allowed to turn one into something executable — `checkPattern` on write, `compilePattern` on read. **`new RegExp` must not appear at a call site.**
+
+Three things that module encodes, each of which was a live defect:
+
+- **The engine cannot backtrack.** RE2 is linear in input length. `/^(a+)+$/` against 33 characters took 155 s on a native `RegExp` and takes 0.05 ms on RE2. **A timeout is not an alternative** — `test()` is synchronous, so the `setTimeout` that is supposed to interrupt it cannot fire until it has already finished.
+- **An unusable pattern degrades to no constraint**, logged, never thrown. Throwing produced a 500 on every submission to that form, permanently, from a single typo.
+- **Length checks short-circuit the pattern.** They used to be independent `if`s, so a 100 kB value was still handed to the regex after failing `maxLength: 5`.
+
+RE2 is a native module, so its binary is tied to a Node ABI — see [08-operations](./08-operations.md#configuration). It is loaded defensively: if it will not load, the service still starts and patterns are simply not enforced. Never fall back to `RegExp`, which would reinstate the hang.
+
+## 9. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.
 
-## 9. What the backend is missing
+## 10. What the backend is missing
 
 Ordered by impact on being able to sell this, not by effort. Each has an entry in [`docs/BACKLOG.md`](../BACKLOG.md).
 

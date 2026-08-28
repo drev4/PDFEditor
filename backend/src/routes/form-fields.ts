@@ -5,6 +5,7 @@ import { prisma } from '../services/db.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { verifyFormOwnership, verifyFieldOwnership } from '../middleware/formOwnership.js'
 import { pdfProcessor, type ExtractedField } from '../services/pdf-processor.js'
+import { checkPattern } from '../services/pattern-validator.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -26,7 +27,17 @@ const createFieldSchema = z.object({
   validation: z.object({
     minLength: z.number().optional(),
     maxLength: z.number().optional(),
-    pattern: z.string().optional()
+    // A pattern is compiled and run against anonymous input on the public
+    // endpoint, so it is checked here rather than at submission time - the author
+    // finds out now, not when respondents start failing. See
+    // services/pattern-validator.ts.
+    pattern: z.string().optional().superRefine((value, ctx) => {
+      if (value === undefined) return
+      const check = checkPattern(value)
+      if (!check.ok) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: check.reason })
+      }
+    })
   }).optional(),
   order: z.number().default(0)
 })
