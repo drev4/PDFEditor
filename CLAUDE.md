@@ -52,9 +52,9 @@ In `.claude/agents/`. All read-only except `test-author`.
 
 ```bash
 npm run dev                      # both workspaces (docker-compose up -d first, for PostgreSQL)
-npm run test:frontend            # Vitest, 29 specs beside the source
-npm run test:backend             # Vitest + supertest over a mocked Prisma, 7 specs in backend/tests/
-npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, backend/tests/integration/
+npm run test:frontend            # Vitest, 29 specs / 237 tests beside the source
+npm run test:backend             # Vitest + supertest over a mocked Prisma, 10 specs / 98 tests in backend/tests/
+npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, 2 specs / 14 tests in backend/tests/integration/
 npm run test:e2e                 # Playwright, 34 tests; starts both apps itself
 npm run build --workspace=frontend   # includes vue-tsc type checking
 cd backend && npx tsc --noEmit       # backend type check
