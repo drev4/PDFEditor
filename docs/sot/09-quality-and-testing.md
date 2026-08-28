@@ -5,7 +5,7 @@
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 29 specs, 237 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 10 specs, 98 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| Backend route (mocked Prisma) | 11 specs, 107 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 2 specs, 14 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 6 specs, 34 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 

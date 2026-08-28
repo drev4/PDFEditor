@@ -41,7 +41,13 @@ export function usePDFRendering() {
       const bufferCopy = originalBuffer.slice(0)
 
       const loadingTask = pdfjsLib.getDocument({
-        data: bufferCopy
+        data: bufferCopy,
+        // pdf.js compiles font programs with `Function`/`eval` when it is allowed
+        // to, which would force `script-src 'unsafe-eval'` into the CSP in
+        // `index.html` and give back most of what that policy is for. This is the
+        // supported way to turn it off; the cost is a slower path for some
+        // embedded fonts, not a rendering failure.
+        isEvalSupported: false
       })
 
       const pdf = await loadingTask.promise

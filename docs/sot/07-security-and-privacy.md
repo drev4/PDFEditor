@@ -54,7 +54,7 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 | ~~S2~~ | ~~**No rate limiting anywhere.**~~ **Resolved** ([`features/0002`](../../features/0002-rate-limiting-on-public-write-paths.md)). The three unauthenticated write paths carry per-IP limiters. Two limits remain deliberately absent and are tracked in [`docs/BACKLOG.md`](../BACKLOG.md): a shared store (the current one is per-process, so the effective limit multiplies by replica count) and account-level lockout. | ~~High~~ | `middleware/rateLimit.ts` |
 | ~~S3~~ | ~~**Author-supplied regex executed on a public endpoint.**~~ **Resolved** ([`features/0004`](../../features/0004-safe-author-supplied-regex.md)). Patterns are compiled by RE2, which cannot backtrack, so execution is linear in input length: the case that took 155 s on a native `RegExp` now takes 0.05 ms. Patterns are also validated when stored, so an invalid one is rejected with a `400` instead of turning every later submission into a 500. | ~~High~~ | `backend/src/services/pattern-validator.ts` |
 | S4 | **JWT in `localStorage`, 7-day lifetime, not revocable.** Any XSS on the origin yields a week of full account access with no way to cut it short. The editor renders user-controlled content and loads PDF.js, which widens the XSS surface rather than narrowing it. | **High** | `frontend/src/services/api.ts` |
-| S5 | **No security headers.** No `helmet`, no CSP, no `X-Content-Type-Options`, no `Referrer-Policy`, no HSTS. PDFs are served from the same origin as the app, so a crafted file is same-origin content. | **Medium** | `backend/src/app.ts` |
+| ~~S5~~ | ~~**No security headers.**~~ **Resolved** ([`features/0007`](../../features/0007-security-headers-and-csp.md)). `helmet` sets the header set on every API response, and the SPA carries a CSP built in `frontend/vite.config.ts`. Three limits worth knowing, all deliberate: `style-src` needs `'unsafe-inline'` (measured — see below); the SPA policy is a `<meta>` element, so `frame-ancestors`, `report-uri` and `sandbox` cannot be expressed and must come from the production host; and there is no violation reporting. | ~~Medium~~ | `backend/src/app.ts`, `frontend/vite.config.ts` |
 | S6 | **Uploads are not scanned.** A file is accepted on mimetype plus a `pdf-lib` parse, then stored and served back to browsers from our own origin. | **Medium** | `middleware/upload.ts` |
 | S7 | **PII is collected from respondents with no notice, retention limit or erasure path.** Every submission stores `ipAddress` and `userAgent`, plus whatever the form author asked for — which in the target market means health, financial or employment data. | **Medium** (legal: high) | `routes/responses.ts` |
 | S8 | **No account deletion and no data export.** Neither the account holder nor a respondent has any way to exercise erasure or portability. | **Medium** (legal: high) | no endpoint exists |
@@ -64,15 +64,39 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 
 Correctly handled today, and worth not regressing: uploaded PDFs are reachable only through a signed, expiring URL, and the URL persisted in `Form.pdfUrl` is always the unsigned canonical one; ownership failures return 404 rather than 403; the public form endpoint strips `userId`; the 500 handler never leaks internal messages; user selects are explicit so `passwordHash` cannot escape; CORS is pinned to a single configured origin; the service refuses to start without `JWT_SECRET`.
 
+## Where the headers actually are
+
+The single most important thing to know before changing anything here: **a CSP constrains a document, and `backend/src/app.ts` never serves one.** It serves JSON and one PDF; `frontend/index.html` is served by Vite in development and by whatever hosts the built assets in production. So the work splits in two, and mounting `helmet()` alone would have closed the finding on paper while leaving the XSS path untouched.
+
+| Delivered by | Covers | Set in |
+|---|---|---|
+| `helmet` | Every API response: `nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cross-Origin-Opener-Policy`, `X-Frame-Options`, and no `X-Powered-By` | `backend/src/app.ts` |
+| A per-response `setHeader` | The signed PDF route: `default-src 'none'; object-src 'none'; frame-ancestors 'none'; sandbox`, plus `X-Frame-Options: DENY` | `backend/src/app.ts`, in the `/uploads/pdfs/:token/:filename` handler |
+| A `<meta http-equiv>` injected at build time | The SPA — the origin that actually runs application code | `frontend/vite.config.ts` (`buildCsp`) |
+
+Two headers are deliberately **not** what a default install would give:
+
+- **`contentSecurityPolicy: false` in the `helmet()` call.** Not an oversight. A policy on a JSON response governs nothing, and asserting its absence is a test in `backend/tests/security-headers.spec.ts` precisely so nobody "fixes" it.
+- **`Cross-Origin-Resource-Policy: cross-origin` on the PDF route only**, overriding helmet's `same-origin` default. The SPA is a different origin and must fetch that file; under the default every PDF in the editor and every published form silently fails to render. The access control there is the signed token, not the origin ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)).
+
+**HSTS is off by default**, behind `ENABLE_HSTS`. A browser that receives `Strict-Transport-Security` from `localhost` forces HTTPS on `localhost` for every port afterwards. The deployment turns it on where TLS terminates ([08-operations](./08-operations.md)).
+
+### What the SPA policy does not cover
+
+- **`style-src` requires `'unsafe-inline'`.** This was measured, not assumed: under `style-src 'self'` a single editor session produces 423 violations — 373 with `effectiveDirective: style-src-attr` (Vue `:style` bindings and the editor's absolutely positioned field overlays) and 50 with `style-src-elem` (PrimeVue 4 injecting its theme at runtime). Because both shapes occur, splitting into `style-src-elem` and `style-src-attr` grants the same permission with more words — it was tried. A nonce is not available: nonces are per-response and `index.html` is a static asset. Narrowing this means changing how the app styles things, not how the policy is written.
+- **`frame-ancestors`, `report-uri` and `sandbox` are absent.** A `<meta>`-delivered policy cannot express them; browsers ignore them and warn. They must be sent as a real header by whatever serves the SPA in production — recorded as a deployment requirement in [08-operations](./08-operations.md).
+- **There is no violation reporting**, so a policy the app quietly breaks in a browser nobody is watching will not be noticed. That needs somewhere to send reports, which is the structured-logging item (S9). Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+- **`script-src` is `'self'` with no `'unsafe-eval'`**, which required turning off pdf.js's eval-based font path (`isEvalSupported: false` in `frontend/src/composables/usePDFRendering.ts`). If a future change reintroduces a library that needs `eval`, the cost is the whole point of this policy — treat it as a design decision, not a config tweak.
+
 ## Recommended order of work
 
 Ordered by risk removed per unit of effort, not by severity alone:
 
 1. ~~**Rate limiting** (S2)~~ — done.
 2. ~~**A regex guard** (S3)~~ — done.
-3. **`helmet` plus a CSP** (S5). Near-zero effort.
+3. ~~**`helmet` plus a CSP** (S5)~~ — done. Cheaper than expected on the API and more subtle on the SPA, for the reason in **Where the headers actually are** below.
 4. ~~**Signed, expiring URLs for PDFs** (S1)~~ — done, on local disk. `services/pdf-url.ts` is the seam the move to object storage in [08-operations.md](./08-operations.md) replaces with presigned S3/R2 URLs; nothing else builds an `/uploads` path.
-5. **Token handling** (S4): shorten expiry, add refresh, and move the session to an `httpOnly` `Secure` `SameSite` cookie. This is a real change on both sides — plan it as a feature, not a patch.
+5. **Token handling** (S4): shorten expiry, add refresh, and move the session to an `httpOnly` `Secure` `SameSite` cookie. This is a real change on both sides — plan it as a feature, not a patch. **This is now the next item**, and the CSP from item 3 narrows the XSS path that gives it its severity without removing the need for it.
 6. **A privacy layer** (S7, S8): a retention policy per form, an IP-collection toggle, a respondent notice on the public form, account deletion, and per-account export.
 7. **Structured logging with redaction** (S9), which is also the observability prerequisite in [08](./08-operations.md).
 

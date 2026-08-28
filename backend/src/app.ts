@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
 import dotenv from 'dotenv'
 import path from 'path'
 import fs from 'fs'
@@ -9,7 +10,7 @@ import { formFieldsRouter } from './routes/form-fields.js'
 import { uploadRouter } from './routes/upload.js'
 import { responsesRouter } from './routes/responses.js'
 import { errorHandler } from './middleware/errorHandler.js'
-import { envInt } from './config/env.js'
+import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
 
 dotenv.config()
@@ -36,6 +37,32 @@ export const app = express()
 // a shared limit — visible and safe — rather than to no limit at all.
 const trustProxyHops = envInt('TRUST_PROXY_HOPS', 0, 0)
 app.set('trust proxy', trustProxyHops === 0 ? false : trustProxyHops)
+
+// Response headers (finding S5). Two things this does NOT do, both deliberate:
+//
+// 1. No Content-Security-Policy on API responses. A CSP constrains a document —
+//    what it may load, connect to and execute. This process serves JSON and one
+//    PDF; it never serves `index.html`. A policy here would govern nothing while
+//    looking like the finding was closed. The policy that matters is delivered
+//    with the SPA (`frontend/index.html`), on the origin that runs the
+//    application code. The PDF route below sets its own, because that response
+//    *is* a document when opened directly.
+//
+// 2. No HSTS unless the deployment actually terminates TLS. A browser that sees
+//    Strict-Transport-Security from `localhost` applies it to `localhost` on
+//    every port afterwards, which breaks unrelated local development in a way
+//    that is very hard to trace back to here. Off by default; the deployment
+//    turns it on. See docs/sot/08-operations.md.
+//
+// helmet's default `Cross-Origin-Resource-Policy: same-origin` is kept for API
+// responses and deliberately overridden on the PDF route — see there for why.
+const enableHsts = envBool('ENABLE_HSTS', false)
+app.use(helmet({
+  contentSecurityPolicy: false,
+  strictTransportSecurity: enableHsts
+    ? { maxAge: 31536000, includeSubDomains: true }
+    : false
+}))
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -80,6 +107,31 @@ app.get('/uploads/pdfs/:token/:filename', (req, res) => {
   // would keep serving them past the expiry the token exists to enforce.
   res.setHeader('Cache-Control', 'private, no-store')
   res.setHeader('X-Content-Type-Options', 'nosniff')
+
+  // Overrides helmet's default of `same-origin`. The SPA is a different origin
+  // from this API — they are separate servers in development and `VITE_API_URL`
+  // is compile-time, so they are separate in production too — and it has to be
+  // able to fetch this file. Under the default, every PDF in the editor and
+  // every published form silently fails to render.
+  //
+  // This is a real widening, and the reason it is acceptable is that the token
+  // is the access control: the URL is unguessable and expires. It is not a
+  // decision to repeat for any other route.
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+
+  // The bytes are attacker-supplied and served from our own origin, so if this
+  // URL is opened directly as a document it must not be able to act as one:
+  // no scripts, no plugins, no subresources, no same-origin access to anything.
+  // pdf.js fetches these bytes and renders them to a canvas, so this policy has
+  // no effect on the application's own viewer.
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; object-src 'none'; frame-ancestors 'none'; sandbox"
+  )
+  // helmet's global default is SAMEORIGIN, which would disagree with the
+  // `frame-ancestors 'none'` above for any browser falling back to the legacy
+  // header. Nothing on this origin needs to frame a PDF.
+  res.setHeader('X-Frame-Options', 'DENY')
 
   return res.sendFile(pdfPath)
 })
