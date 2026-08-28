@@ -60,7 +60,7 @@ npm run build --workspace=frontend   # includes vue-tsc type checking
 cd backend && npx tsc --noEmit       # backend type check
 ```
 
-The frontend suite requires Node `^20.19.0 || >=22.12.0` (see `.nvmrc`); on an older Node every spec fails to start, which is an environment problem, not a code failure.
+This repository requires Node **`>=22.12.0`** (see `.nvmrc`). It is enforced, not suggested: `npm ci` fails on an older Node, and every test/build script runs `scripts/check-node.mjs` first — which also verifies that the generated Prisma client and the native `re2` binary load. If something looks inexplicably broken, run `npm run check:node`.
 
 `npm run lint` exists but lints nothing — there is no ESLint config in the repo. Do not treat a passing `lint` as a signal.
 

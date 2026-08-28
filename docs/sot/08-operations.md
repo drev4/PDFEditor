@@ -13,6 +13,20 @@ How the system is configured, built, tested and run — and, honestly, what is m
 
 `docker-compose.yml` provisions the database only. It is a development dependency, not a deployment artifact — do not mistake it for one.
 
+## The supported Node version
+
+**Node `>=22.12.0`**, written in `.nvmrc` (22.12.0) and enforced three ways, because `engines` alone only warns:
+
+| Guard | Catches |
+|---|---|
+| `engines` in the root `package.json` plus `engine-strict=true` in `.npmrc` | Installing on an unsupported Node — `npm ci` now **fails** instead of printing `EBADENGINE` and carrying on |
+| `scripts/check-node.mjs`, wired to `pre*` hooks on every test/build/dev script | Switching Node *after* a good install, which is the common case and the one `engine-strict` cannot see |
+| `node-version-file: .nvmrc` in every CI job | CI and developers drifting apart — CI used to pin `20.x` while `.nvmrc` said 22.12.0 |
+
+`check-node.mjs` also asserts that `.nvmrc` satisfies `engines`, and with `--native` that the generated Prisma client and the `re2` binary both load. Run it directly with `npm run check:node`.
+
+On an unsupported version the failures never mention Node: the frontend suite will not start (`ERR_REQUIRE_ESM`), the build dies with `crypto.hash is not a function`, and `re2` stops loading — which leaves the backend passing almost every test while silently not enforcing field patterns.
+
 ## Configuration
 
 Both workspaces ship a committed `.env.example`; the real `.env` files are gitignored and created by hand.
@@ -40,7 +54,9 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 
 `backend` depends on `re2` (see [04-backend-patterns](./04-backend-patterns.md#8-code-like-input-is-compiled-in-one-audited-place)). Its install script downloads a prebuilt binary from GitHub and falls back to compiling with `node-gyp`, so a build toolchain is needed if that download is unavailable — `ubuntu-latest` in CI has one.
 
-The binary is tied to a **Node ABI**: a module built under Node 22 will not load under Node 20 and vice versa. `npm ci` builds the right one for whichever Node runs it, so CI is fine. Locally, **after switching Node version run `npm rebuild re2`** — otherwise the engine fails to load. Note that `.nvmrc` pins 22.12.0 while CI runs `node-version: 20.x`, so this is a live footgun rather than a hypothetical one.
+`re2@1.24.1` itself declares `engines: { node: ">=22" }`, which is **why this repository supports Node 22.12+ and nothing older** — adding it in [`features/0004`](../../features/0004-safe-author-supplied-regex.md) silently dropped Node 20, and `engines` went on claiming `^20.19.0 || >=22.12.0` until `engine-strict` caught it.
+
+The binary is tied to a **Node ABI**: one built under Node 22 will not load under Node 20 and vice versa. `npm ci` builds the right one for whichever Node runs it. Locally, **after switching Node version run `npm rebuild re2`** — otherwise the engine fails to load. `npm run check:node` checks exactly this and says so.
 
 If the module cannot load, the service still starts: `services/pattern-validator.ts` logs a loud error and treats every field `pattern` as no constraint. Safety is preserved — nothing falls back to a backtracking `RegExp` — but format validation is silently off, so treat that log line as an alert.
 
@@ -91,24 +107,39 @@ The SaaS schema changes in [10-saas-roadmap.md](./10-saas-roadmap.md) — `Organ
 
 ## Continuous integration
 
-`.github/workflows/test.yml`, on push and PR to `main` and `develop`, Node 20:
+`.github/workflows/test.yml`, on push and PR to `main` and `develop`. Every job takes its Node version from **`.nvmrc`** via `node-version-file` — the version is written in exactly one place. A superseded run is cancelled (`concurrency` with `cancel-in-progress`).
 
-- **`unit-tests`** — `npm ci`, frontend tests with coverage, backend tests with coverage, upload to Codecov (`fail_ci_if_error: false`), archive coverage artifacts.
-- **`integration-tests`** — a `postgres:16` service, `npm ci`, `prisma migrate deploy`, `npm run test:integration --workspace=backend`. The database-backed backend suite; see [09-quality-and-testing.md](./09-quality-and-testing.md#backend-database-backed-tests).
-- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `prisma migrate deploy`, `npm run test:e2e`, archive the Playwright report. The `RATE_LIMIT_*` variables are set high for it, in `playwright.config.ts` under `webServer.env` as well as in the workflow: every test registers its own user, and production limits would throttle the suite in a way that reads as a flaky test rather than a working limiter.
+- **`unit-tests`** — `npm ci`, `npm run check:node`, then **type check and build both workspaces** (`npm run build --workspace=frontend`, which runs `vue-tsc`, and `tsc --noEmit --project backend/tsconfig.json`), then the frontend and backend suites with coverage, uploaded to Codecov (`fail_ci_if_error: false`) and archived.
+- **`integration-tests`** — `needs: unit-tests`. A `postgres:16` service, `npm ci`, **`prisma generate`**, `prisma migrate deploy`, `npm run test:integration --workspace=backend`. See [09-quality-and-testing.md](./09-quality-and-testing.md#backend-database-backed-tests).
+- **`e2e-tests`** — `needs: unit-tests`. A `postgres:16` service, `npm ci`, **`prisma generate`**, cached Chromium, `prisma migrate deploy`, `npm run test:e2e`, Playwright report archived.
 
-What CI does not do, and should:
+Both database jobs are gated on `unit-tests`, because neither can pass when the cheap suites are already failing, and both take minutes.
+
+### `prisma generate` is not optional, and is not automatic
+
+The generated client is not committed and is not part of the package tree. `@prisma/client` ships a `postinstall`, but in a workspaces monorepo it does not help by itself: it does `process.chdir(process.env.INIT_CWD)`, and `INIT_CWD` is where `npm` was invoked — the repo root — so it looks for `prisma/schema.prisma` there, does not find `backend/prisma/schema.prisma`, and **warns rather than failing**. Note also that `prisma migrate deploy` does *not* generate the client; only `migrate dev` does.
+
+Left un-generated, `@prisma/client` is a stub that throws on construction. `backend/src/services/db.ts` constructs it at module scope, so the API dies at import — which is how a missing generate step presented as 34 unrelated E2E UI failures for twenty minutes.
+
+Two guards, deliberately overlapping:
+
+1. `backend/package.json` has `"postinstall": "prisma generate"`, so a fresh clone plus `npm ci` yields a working client.
+2. Every CI job that touches the database also runs `npx prisma generate` explicitly, so a pipeline using `--ignore-scripts` still works and a reader of the workflow can see it happen.
+
+**For a production build**, note that `prisma` is a devDependency: generate the client *before* pruning with `--omit=dev`, or the postinstall runs without its CLI.
+
+### The E2E job waits for the API, not just the frontend
+
+`playwright.config.ts` declares **two** `webServer` entries — the backend on `http://localhost:3000/health` and the frontend on `:5173` — both with `stdout`/`stderr` piped. Previously only the frontend was the readiness signal, so a backend that died at boot let the suite start anyway and fail 34 times with nothing in the log naming the cause. Now Playwright fails fast and the server's own output appears in the job log.
+
+What CI still does not do:
 
 | Gap | Why it matters |
 |---|---|
-| No type check | `vue-tsc` runs only inside `npm run build --workspace=frontend`, and the backend's `tsc` only in its build. CI never builds, so a type error reaches `develop` |
 | No lint | There is no ESLint configuration at all — see [09-quality-and-testing.md](./09-quality-and-testing.md) |
-| No build | Neither workspace is built in CI, so a broken production build is only discovered at deploy time |
 | Coverage is measured but not enforced | No threshold, and Codecov failures are ignored |
-| Migrations are applied but never *tested* | The `integration-tests` and `e2e-tests` jobs run `migrate deploy` against a fresh database, so a broken migration fails CI. Nothing exercises a migration against a database that already holds data |
+| Migrations are applied but never *tested* against existing data | The database jobs run `migrate deploy` against a fresh database, so a broken migration fails CI. Nothing exercises a migration against a database that already holds rows |
 | No dependency or secret scanning | No Dependabot, no `npm audit` gate, no secret scan |
-
-Adding type check, lint and build to the `unit-tests` job is a small change with a large return, and it should land before the CI pipeline grows any further.
 
 ## Observability
 

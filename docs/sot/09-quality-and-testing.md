@@ -11,7 +11,7 @@
 
 The two placement conventions are different on purpose and must not be mixed: **frontend tests sit next to their subject, backend tests sit in `backend/tests/`.**
 
-> **Node version.** The frontend suite needs Node `^20.19.0 || >=22.12.0` — Vite 7 and jsdom 27 both require it. Below that the whole suite fails to start with `ERR_REQUIRE_ESM`, and component specs fail on a missing `crypto.hash`. A `.nvmrc` pins the version; `engines` in the root `package.json` previously claimed `>=18.0.0`, which is why npm never warned. Backend tests (83 mocked + 14 database-backed, all passing) have no such constraint.
+> **Node version: `>=22.12.0`, and it now applies to everything.** The frontend suite needs it because of Vite 7 and jsdom 27 (below it, every spec fails to start with `ERR_REQUIRE_ESM` and the build dies on a missing `crypto.hash`), and **the backend needs it too** — `re2` declares `engines: node >=22`, and on a mismatched ABI it fails to load, at which point the backend passes 81 of 83 while silently not enforcing field patterns. That is enforced rather than documented: `engine-strict` at install, `scripts/check-node.mjs` on every test and build script, and `node-version-file: .nvmrc` in CI. See [08-operations](./08-operations.md#the-supported-node-version).
 
 ## Backend: integration tests over the real router
 
