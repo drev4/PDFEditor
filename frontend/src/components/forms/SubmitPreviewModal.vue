@@ -65,6 +65,7 @@
           severity="success" 
           class="px-6"
           :loading="isSubmitting"
+          data-testid="confirm-submit-button"
           @click="$emit('confirm')" 
         />
       </div>

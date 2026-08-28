@@ -55,7 +55,7 @@ npm run dev                      # both workspaces (docker-compose up -d first, 
 npm run test:frontend            # Vitest, 29 specs beside the source
 npm run test:backend             # Vitest + supertest over a mocked Prisma, 7 specs in backend/tests/
 npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, backend/tests/integration/
-npm run test:e2e                 # Playwright, needs both apps running
+npm run test:e2e                 # Playwright, 34 tests; starts both apps itself
 npm run build --workspace=frontend   # includes vue-tsc type checking
 cd backend && npx tsc --noEmit       # backend type check
 ```
@@ -81,4 +81,4 @@ The frontend suite requires Node `^20.19.0 || >=22.12.0` (see `.nvmrc`); on an o
 
 ## Current state, in one paragraph
 
-Auth, form CRUD, the field editor, AcroForm extraction and embedding, the public form flow, the responses dashboard and CSV export all work. The bulk-save data-loss defect is fixed ([`features/0001`](features/0001-stable-field-ids-and-safe-bulk-save.md)): field ids are stable across saves, the editor's save is a diff, and deleting a field that holds answers archives it (`Field.deletedAt`) instead of destroying them. Prisma migrations are baselined; every schema change goes through `migrate dev` / `migrate deploy`. The three unauthenticated write paths are rate limited per IP (`backend/src/middleware/rateLimit.ts`); note that this depends on `TRUST_PROXY_HOPS` being right for the deployment. There are no organizations, plans, billing, public API, structured logging, object storage or lint. The E2E suite currently fails 11 of 38 specs on `develop` and is not a usable gate.
+Auth, form CRUD, the field editor, AcroForm extraction and embedding, the public form flow, the responses dashboard and CSV export all work. The bulk-save data-loss defect is fixed ([`features/0001`](features/0001-stable-field-ids-and-safe-bulk-save.md)): field ids are stable across saves, the editor's save is a diff, and deleting a field that holds answers archives it (`Field.deletedAt`) instead of destroying them. Prisma migrations are baselined; every schema change goes through `migrate dev` / `migrate deploy`. The three unauthenticated write paths are rate limited per IP (`backend/src/middleware/rateLimit.ts`); note that this depends on `TRUST_PROXY_HOPS` being right for the deployment. There are no organizations, plans, billing, public API, structured logging, object storage or lint.
