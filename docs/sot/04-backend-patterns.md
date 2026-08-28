@@ -100,15 +100,33 @@ It also shows the one place raw SQL earns its keep. Before deciding whether a re
 
 It is also the canonical example of the pattern that belongs with it: **a routine edit must never issue a delete against data a customer produced.** The handler diffs on a client-supplied `id` rather than replacing the set, and a removal that has answers is archived (`deletedAt`) instead of deleted. Note what is *not* there — there is no branch on whether the form has responses. A conditional safe path is the wrong shape, because the destructive branch is then the one exercised in development and by tests. One algorithm, safe on every form. See [03-domain-model](./03-domain-model.md#the-deletedat-lifecycle).
 
-## 7. Adding a new endpoint
+## 7. Public write paths carry a named limiter
+
+`middleware/rateLimit.ts` exports one limiter per unauthenticated write path — `loginRateLimit`, `registerRateLimit`, `responseRateLimit` — and each is applied at its route, in the same middleware position `authenticate` occupies:
+
+```ts
+authRouter.post('/login', loginRateLimit, async (req, res, next) => { … })
+```
+
+Applied at the route, not globally, for the same reason auth is: the guard has to be visible when you read the handler. There is deliberately no global limiter — the authenticated editor legitimately bursts (a bulk field save, a PDF upload), and a global number that does not break it would be a guess.
+
+Three things about them are decisions rather than defaults:
+
+- **Limits come from the environment**, so the test suites and CI can set their own without weakening the production default. The window is fixed at startup; the limit is read per request, which is what lets a test drive the real configuration path instead of reaching into the limiter.
+- **The 429 body is an object, not a string.** The library's default handler passes `message` to `res.send`, so an object becomes JSON in this API's `{ error }` shape. A string would be sent as `text/html`, and `frontend/src/services/api.ts` calls `await response.json()` *before* it checks `response.ok` — a non-JSON body throws a `SyntaxError` there instead of producing an `ApiError`, and the user is told nothing useful.
+- **Login skips successful requests**, so the limit bites on failures and a person signing in normally cannot lock themselves out.
+
+`req.ip` is only the client if `trust proxy` is right — [08-operations](./08-operations.md#trust_proxy_hops-and-why-it-is-not-a-detail).
+
+## 8. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.
 
-## 8. What the backend is missing
+## 9. What the backend is missing
 
 Ordered by impact on being able to sell this, not by effort. Each has an entry in [`docs/BACKLOG.md`](../BACKLOG.md).
 
-1. **Rate limiting.** `POST /api/auth/login` and `POST /api/responses` are unauthenticated and completely unthrottled. This is the most exposed surface in the system.
+1. ~~**Rate limiting.**~~ Done — see §7.
 2. **Structured logging with request correlation** (pino), replacing `console.*`. Without a request id you cannot answer a B2B customer's "what happened to our submission at 14:32".
 3. **Object storage** (S3/R2) instead of local disk, behind signed URLs. Prerequisite for more than one replica and for revocable PDF access.
 4. **A job queue** (BullMQ + Redis) for PDF extraction and embedding, so a large document cannot block the event loop or time out a request.

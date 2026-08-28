@@ -22,13 +22,13 @@ Nothing gets added to this file without opening the route file first — see the
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/auth/register` | — | `{email, password (min 6), name?}` | `201 {user, token}` · `400` if the email exists or validation fails |
-| POST | `/auth/login` | — | `{email, password}` | `200 {user, token}` · `401 Invalid credentials` |
+| POST | `/auth/register` | — | `{email, password (min 6), name?}` | `201 {user, token}` · `400` if the email exists or validation fails · `429` when rate limited |
+| POST | `/auth/login` | — | `{email, password}` | `200 {user, token}` · `401 Invalid credentials` · `429` when rate limited |
 | GET | `/auth/me` | Bearer | — | `200 {user}` · `401` · `404` if the user no longer exists |
 
 `token` is a JWT signed with `JWT_SECRET`, payload `{userId}`, expiry `JWT_EXPIRES_IN` (default `7d`). `user` never includes `passwordHash` — every select is explicit.
 
-**No rate limiting on login.** See [07-security-and-privacy.md](./07-security-and-privacy.md).
+Both `POST` endpoints are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; register counts every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
 
 ## Forms — `routes/forms.ts`
 
@@ -105,7 +105,7 @@ The frontend must send back the ids the server gave it. `saveAllFields` in `fron
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/responses` | **Public** | Body `{formId (uuid), shareId, answers: Record<fieldId, unknown>}` |
+| POST | `/responses` | **Public** | Body `{formId (uuid), shareId, answers: Record<fieldId, unknown>}`. Rate limited per IP; `429` when exceeded |
 
 Validation, in order, before anything is persisted:
 
@@ -117,7 +117,20 @@ Validation, in order, before anything is persisted:
 
 Stores `ipAddress` and `userAgent` from the request. Returns `201 {success, responseId, message}`.
 
-Two things a caller should know: the `pattern` regex is **author-supplied and executed server-side on this public endpoint** (a ReDoS surface, see [07](./07-security-and-privacy.md)), and this endpoint has **no rate limiting**.
+One thing a caller should still know: the `pattern` regex is **author-supplied and executed server-side on this public endpoint**, which is a ReDoS surface — see S3 in [07](./07-security-and-privacy.md). The endpoint is rate limited, which bounds how fast that can be exploited but does not remove it.
+
+## The 429 response
+
+`POST /auth/login`, `POST /auth/register` and `POST /responses` answer with `429` once their per-IP limit is exceeded. The body uses the same shape as every other error in this API, which matters because `frontend/src/services/api.ts` parses the body as JSON before it inspects the status:
+
+```ts
+// 429
+{ error: 'Too many failed login attempts. Please wait a few minutes and try again.' }
+```
+
+Headers: `Retry-After` (seconds), plus the draft-8 `RateLimit` and `RateLimit-Policy` headers. `X-RateLimit-*` legacy headers are **not** sent.
+
+Limits, windows and the `trust proxy` hop count are configuration — [08-operations](./08-operations.md#configuration).
 
 ## Upload — `routes/upload.ts`
 

@@ -5,13 +5,13 @@
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 29 specs | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 7 specs | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| Backend route (mocked Prisma) | 8 specs | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 2 specs | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 6 specs | Playwright, Chromium | `e2e/*.spec.ts` |
 
 The two placement conventions are different on purpose and must not be mixed: **frontend tests sit next to their subject, backend tests sit in `backend/tests/`.**
 
-> **Node version.** The frontend suite needs Node `^20.19.0 || >=22.12.0` — Vite 7 and jsdom 27 both require it. Below that the whole suite fails to start with `ERR_REQUIRE_ESM`, and component specs fail on a missing `crypto.hash`. A `.nvmrc` pins the version; `engines` in the root `package.json` previously claimed `>=18.0.0`, which is why npm never warned. Backend tests (63 mocked + 14 database-backed, all passing) have no such constraint.
+> **Node version.** The frontend suite needs Node `^20.19.0 || >=22.12.0` — Vite 7 and jsdom 27 both require it. Below that the whole suite fails to start with `ERR_REQUIRE_ESM`, and component specs fail on a missing `crypto.hash`. A `.nvmrc` pins the version; `engines` in the root `package.json` previously claimed `>=18.0.0`, which is why npm never warned. Backend tests (70 mocked + 14 database-backed, all passing) have no such constraint.
 
 ## Backend: integration tests over the real router
 
@@ -52,6 +52,12 @@ npm run test:integration --workspace=backend   # or from the workspace
 
 Put a test here when the assertion is about **what the database does**, and only then. Validation, status codes and ownership belong in the mocked suite, which is an order of magnitude faster.
 
+### Testing something configured by the environment
+
+`backend/tests/rate-limit.spec.ts` is the reference. It sets the limits with `vi.stubEnv`, through the same `process.env` path production reads, rather than importing the limiter and changing its numbers — a test that reaches past the configuration is no longer testing what a deploy will do. It also resets the shared limiter state around every test, because the suites share one `app` and hit counts otherwise leak between tests.
+
+The general rule: **configure the unit the way production configures it.** If that is awkward, the awkwardness is telling you something about the configuration path.
+
 ## Frontend: behaviour, not internals
 
 Assert what a unit caused, not how it is built:
@@ -83,6 +89,7 @@ The last row is the remaining coverage gap of this kind: nothing verifies the ca
 | **No type check in CI.** `vue-tsc` and `tsc` only run inside builds, and CI never builds | Type errors reach `develop` |
 | **No PDF round-trip test** | Nothing verifies that embedded AcroForm positions match what the editor showed |
 | **Coverage collected but not enforced** | Coverage can fall silently; Codecov failures are ignored |
+| **The E2E suite fails on `develop`** | 11 of 38 specs fail on an unmodified checkout and the failing set changes between runs. It gates nothing in that state — a real regression would be lost in the noise. Its own P0 backlog row |
 | **Database-backed coverage is narrow** | Only the bulk save and archived-field visibility are covered. Form deletion, response submission and the `syncFieldsFromPDF` side effect still have no real-database test |
 
 When lint is added, use flat config (`eslint.config.js`) — the rest of the toolchain is on versions that assume it.

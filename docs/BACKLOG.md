@@ -10,7 +10,7 @@ Last reviewed: **2026-08-28**.
 
 | Item | Why | Reference |
 |---|---|---|
-| **Rate limiting** on `POST /api/auth/login` and `POST /api/responses` | The only two unauthenticated write paths, both completely unthrottled | [07-security](./sot/07-security-and-privacy.md) (S2) |
+| **The E2E suite fails on `develop`** | 11 of 38 specs fail on an unmodified `develop` checkout (auth flow, form management, PDF workflow, public form flow), and the failing set changes between runs. A suite in this state cannot gate anything: a real regression would be invisible in the noise. Triage it, then either fix or delete what it is testing | [09-quality](./sot/09-quality-and-testing.md) |
 | **Guard author-supplied regex** on the public response endpoint | A backtracking `pattern` blocks the single event loop for the whole service | [07-security](./sot/07-security-and-privacy.md) (S3) |
 | **Frontend test suite cannot run below Node 20.19** | Vite 7 and jsdom 27 require `^20.19.0 \|\| >=22.12.0`. All 29 specs fail to start on Node 20.9 with `ERR_REQUIRE_ESM`, and 7 more fail on the missing `crypto.hash`. `engines` said `>=18.0.0`, so npm never warned — corrected, plus a `.nvmrc`, but anyone already on an old Node needs to upgrade | [09-quality](./sot/09-quality-and-testing.md) |
 
@@ -18,6 +18,9 @@ Last reviewed: **2026-08-28**.
 
 | Item | Why | Reference |
 |---|---|---|
+| Shared rate-limit store (Redis) | The limiters use an in-memory store, so the effective limit multiplies by replica count and resets on every deploy. Fine at one replica; not fine the moment the service scales out. Depends on the Redis that arrives with the job queue | [07-security](./sot/07-security-and-privacy.md) · [`features/0002`](../features/0002-rate-limiting-on-public-write-paths.md) |
+| Account-level lockout on repeated failed logins | Per-IP limiting does not stop credential stuffing distributed across hosts. Deliberately deferred: a per-account limiter without an unlock path lets anyone lock a named user out by spamming their address, so it needs the notification and unlock flow designed with it (S10) | [07-security](./sot/07-security-and-privacy.md) (S10) |
+| A global fallback rate limiter | Only the three unauthenticated write paths are limited. Everything else — including `GET /api/forms/public/:shareId` and `/uploads` — is unthrottled. Picking a global number that does not break the editor's legitimate bursts needs traffic data we do not have yet | [07-security](./sot/07-security-and-privacy.md) |
 | Signed, expiring URLs for uploaded PDFs | `/uploads` is served publicly with no auth, no expiry, no revocation | [07-security](./sot/07-security-and-privacy.md) (S1) |
 | `helmet` + CSP + security headers | None are set today; near-zero effort | (S5) |
 | Session hardening: shorter JWT expiry, refresh tokens, `httpOnly` cookie | A 7-day non-revocable token in `localStorage` turns any XSS into a week of account access | (S4) |
@@ -28,7 +31,6 @@ Last reviewed: **2026-08-28**.
 | Type check, lint and build in CI | CI runs only tests, so type errors and broken builds reach `develop` | [08-operations](./sot/08-operations.md) |
 | ESLint flat config in both workspaces | `npm run lint` currently succeeds while linting nothing | [09-quality](./sot/09-quality-and-testing.md) |
 | Validate all configuration at boot with Zod | Only `JWT_SECRET` is checked; a wrong `BASE_URL` silently produces broken PDF links | [08-operations](./sot/08-operations.md) |
-| Add `BASE_URL` to `backend/.env.example` | Used by the upload route, missing from the template | [08-operations](./sot/08-operations.md) |
 | Automated backups with a tested restore | None exist; recovery time is unknown | [08-operations](./sot/08-operations.md) |
 | Error tracking on API and SPA | Browser-side editor failures are invisible today | [08-operations](./sot/08-operations.md) |
 
@@ -72,5 +74,5 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 |---|---|
 | `origin/feature/sprint-3-public-forms` | Merged to `main` via PR #3, still alive on the remote. Delete or keep as history — needs a decision |
 | Verify the full suite passes | `npm run test:all` has not been confirmed green in a clean checkout since the docs overhaul. Frontend (237), backend (63) and integration (14) are green on `feature/0001`; E2E has not been run |
-| `tests/forms.spec.ts > DELETE /api/forms/:id > should delete form` is flaky | Failed once in a full-suite run on `feature/0001`, then passed in five consecutive runs of the same command and in isolation. The test mocks only `form.findFirst` and `form.delete` and touches nothing that changed. Cause unknown — likely cross-file mock bleed in the shared `prismaMock` |
+| Two one-off failures in the mocked backend suite, neither reproducible | `tests/forms.spec.ts > DELETE /api/forms/:id > should delete form` failed once on `feature/0001` then passed 5 consecutive runs. `tests/rate-limit.spec.ts > does not limit a request under the limit` failed once on `feature/0002` then passed 15. Both were in `backend/tests/`, both passed in isolation, and no mechanism was found for either. Two is a pattern worth investigating — suspect shared state in the module-level `app` or the `prismaMock` across tests in a file |
 | Two abandoned bulk-fix commits on `develop` (`fb8acd8`, `771b77c`) | The apply-then-revert pair is already on the remote; net effect is zero, left alone rather than rewriting shared history |

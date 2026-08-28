@@ -27,7 +27,28 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `PORT` | no | `3000` | |
 | `NODE_ENV` | no | — | Read but not used to change behaviour anywhere |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
-| `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. **Not in `.env.example`** — a wrong value here produces PDF URLs that 404 in every environment except localhost |
+| `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
+| `TRUST_PROXY_HOPS` | no | `0` | **Number of reverse proxies in front of this process.** See below — it decides whether rate limiting works |
+| `RATE_LIMIT_LOGIN_MAX` | no | `10` | Failed logins per window per IP. Successful logins are refunded |
+| `RATE_LIMIT_LOGIN_WINDOW_MS` | no | `900000` (15 min) | |
+| `RATE_LIMIT_REGISTER_MAX` | no | `5` | Registrations per window per IP |
+| `RATE_LIMIT_REGISTER_WINDOW_MS` | no | `3600000` (1 hour) | |
+| `RATE_LIMIT_RESPONSES_MAX` | no | `20` | Public form submissions per window per IP |
+| `RATE_LIMIT_RESPONSES_WINDOW_MS` | no | `600000` (10 min) | |
+
+### `TRUST_PROXY_HOPS`, and why it is not a detail
+
+The rate limiters in `middleware/rateLimit.ts` key on `req.ip`. What Express puts there depends entirely on `trust proxy`, which `app.ts` sets from this variable. Both wrong values fail, in opposite directions:
+
+| Value | `req.ip` becomes | Result |
+|---|---|---|
+| Too low (e.g. `0` behind a load balancer) | The proxy's address | Every request looks like one client. The first attacker to trip a limit locks out **every** user — the limiter becomes an outage |
+| `true` | The leftmost `X-Forwarded-For` value | The client picks its own identity and rotates it. **Every limiter silently stops working.** `express-rate-limit` rejects this value for exactly this reason, so do not reach for it |
+| The real hop count | The client address | Correct |
+
+The default is `0`, which trusts nothing: a deploy that forgets to set it degrades to a shared limit — visible and annoying — rather than to no limit at all. **Set it to the number of proxies actually in front of the process when you put one there**, and re-check it whenever the ingress path changes.
+
+Verified behaviour, worth keeping true: with the default, rotating `X-Forwarded-For` does **not** bypass the limiter; with `TRUST_PROXY_HOPS=1`, each forwarded client gets its own budget.
 
 **`frontend/.env`**
 
@@ -35,7 +56,7 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 |---|---|---|---|
 | `VITE_API_URL` | no | `http://localhost:3000/api` | Baked in at build time, so each environment needs its own build |
 
-Two gaps to close: `BASE_URL` belongs in `backend/.env.example`, and there is no startup validation of configuration beyond `JWT_SECRET`. Validating the whole environment with a Zod schema at boot — the same technique already used for request bodies — turns a class of production misconfiguration into a startup crash, which is where you want it.
+One gap remains: there is no startup validation of configuration beyond `JWT_SECRET`. Validating the whole environment with a Zod schema at boot — the same technique already used for request bodies — turns a class of production misconfiguration into a startup crash, which is where you want it. `config/env.ts` does the narrow version of this for integers: an unparseable value is logged and the safe default is used, never a permissive one.
 
 ## Database migrations
 
@@ -66,7 +87,7 @@ The SaaS schema changes in [10-saas-roadmap.md](./10-saas-roadmap.md) — `Organ
 
 - **`unit-tests`** — `npm ci`, frontend tests with coverage, backend tests with coverage, upload to Codecov (`fail_ci_if_error: false`), archive coverage artifacts.
 - **`integration-tests`** — a `postgres:16` service, `npm ci`, `prisma migrate deploy`, `npm run test:integration --workspace=backend`. The database-backed backend suite; see [09-quality-and-testing.md](./09-quality-and-testing.md#backend-database-backed-tests).
-- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `prisma migrate deploy`, `npm run test:e2e`, archive the Playwright report.
+- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `prisma migrate deploy`, `npm run test:e2e`, archive the Playwright report. It sets the `RATE_LIMIT_*` variables high: the suite registers and logs in across every spec file and reruns on `retries`, so production limits would throttle it and the failure would read as a flaky test rather than a working limiter. A local E2E run needs the same values in `backend/.env`.
 
 What CI does not do, and should:
 

@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
+import { loginRateLimit, registerRateLimit } from '../middleware/rateLimit.js'
 
 export const authRouter = Router()
 
@@ -20,7 +21,7 @@ const loginSchema = z.object({
 })
 
 // POST /api/auth/register
-authRouter.post('/register', async (req, res, next) => {
+authRouter.post('/register', registerRateLimit, async (req, res, next) => {
   try {
     const validation = registerSchema.safeParse(req.body)
     if (!validation.success) {
@@ -58,7 +59,7 @@ authRouter.post('/register', async (req, res, next) => {
 })
 
 // POST /api/auth/login
-authRouter.post('/login', async (req, res, next) => {
+authRouter.post('/login', loginRateLimit, async (req, res, next) => {
   try {
     const validation = loginSchema.safeParse(req.body)
     if (!validation.success) {
