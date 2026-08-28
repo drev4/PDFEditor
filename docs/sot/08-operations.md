@@ -42,6 +42,7 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `NODE_ENV` | no | — | Read but not used to change behaviour anywhere |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
+| `UPLOAD_URL_TTL_SECONDS` | no | `900` (15 min), min `60` | How long a signed PDF URL stays valid. The link is a bearer capability, so longer is not free — see [07](./07-security-and-privacy.md) |
 | `TRUST_PROXY_HOPS` | no | `0` | **Number of reverse proxies in front of this process.** See below — it decides whether rate limiting works |
 | `RATE_LIMIT_LOGIN_MAX` | no | `10` | Failed logins per window per IP. Successful logins are refunded |
 | `RATE_LIMIT_LOGIN_WINDOW_MS` | no | `900000` (15 min) | |

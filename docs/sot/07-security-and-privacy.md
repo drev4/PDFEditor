@@ -29,7 +29,7 @@ Anonymous internet
   ├── POST /api/auth/register          rate limited per IP
   ├── POST /api/responses              writes to the database, no auth, rate limited per IP
   ├── GET  /api/forms/public/:shareId  reads a form, no auth, mutates viewCount, no throttle
-  └── GET  /uploads/pdfs/<file>        reads any uploaded PDF, no auth, no expiry, no throttle
+  └── GET  /uploads/pdfs/<sig>/<file>  reads one uploaded PDF, no auth, signature-gated, expiring, no throttle
 
 Authenticated user (JWT)
   └── /api/forms, /api/upload, /api/auth/me   scoped to resources they own
@@ -38,7 +38,7 @@ Server-side, no boundary
   └── PDF processing, filesystem writes
 ```
 
-These are the whole external attack surface. The three write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and `/uploads` is being replaced by signed URLs (S1).
+These are the whole external attack surface. The three write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and the PDF route now requires a signature this service issued, which bounds who can call it at all.
 
 **Author-supplied regex is compiled by RE2, and degrades to no constraint.** A `pattern` that the engine cannot compile — one stored before validation existed, or an engine that failed to load — is logged and treated as *no pattern constraint*, never thrown. Throwing would restore the 500 this fixed; rejecting would punish a respondent for the author's mistake. `pattern` is a formatting convenience that nothing downstream trusts, so unconstrained is the right degradation — but do not read the field as a guaranteed-enforced rule.
 
@@ -50,7 +50,7 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 
 | # | Finding | Severity | Where |
 |---|---|---|---|
-| S1 | **Uploaded PDFs are served publicly and permanently.** `app.ts` mounts `express.static` on `/uploads`. Any PDF is fetchable by URL with no token, no expiry and no revocation. Filenames are unguessable (`nanoid(12)` + timestamp), so this is security by obscurity: once a URL leaks — a browser history, a shared link, a proxy log — access cannot be withdrawn. Uploaded PDFs frequently contain the customer's own confidential template. | **High** | `backend/src/app.ts` |
+| ~~S1~~ | ~~**Uploaded PDFs are served publicly and permanently.**~~ **Resolved** ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)). `express.static` is gone. A PDF is reachable only through `GET /uploads/pdfs/:token/:filename`, where the token is an HMAC-SHA256 over the filename **and** an expiry, minted per read by `services/pdf-url.ts` and never persisted. A leaked URL now stops working on its own. Two limits worth knowing: the link is a **bearer capability** for its lifetime — anyone holding it can fetch that PDF, there is no per-viewer binding — and revocation is all-or-nothing (rotate `JWT_SECRET`, or delete the file). Per-file revocation is in [`docs/BACKLOG.md`](../BACKLOG.md). | ~~High~~ | `backend/src/services/pdf-url.ts` |
 | ~~S2~~ | ~~**No rate limiting anywhere.**~~ **Resolved** ([`features/0002`](../../features/0002-rate-limiting-on-public-write-paths.md)). The three unauthenticated write paths carry per-IP limiters. Two limits remain deliberately absent and are tracked in [`docs/BACKLOG.md`](../BACKLOG.md): a shared store (the current one is per-process, so the effective limit multiplies by replica count) and account-level lockout. | ~~High~~ | `middleware/rateLimit.ts` |
 | ~~S3~~ | ~~**Author-supplied regex executed on a public endpoint.**~~ **Resolved** ([`features/0004`](../../features/0004-safe-author-supplied-regex.md)). Patterns are compiled by RE2, which cannot backtrack, so execution is linear in input length: the case that took 155 s on a native `RegExp` now takes 0.05 ms. Patterns are also validated when stored, so an invalid one is rejected with a `400` instead of turning every later submission into a 500. | ~~High~~ | `backend/src/services/pattern-validator.ts` |
 | S4 | **JWT in `localStorage`, 7-day lifetime, not revocable.** Any XSS on the origin yields a week of full account access with no way to cut it short. The editor renders user-controlled content and loads PDF.js, which widens the XSS surface rather than narrowing it. | **High** | `frontend/src/services/api.ts` |
@@ -62,7 +62,7 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 | S10 | **Weak password policy, no lockout, no breach check.** Six characters, unlimited attempts. | **Medium** | `routes/auth.ts` |
 | S11 | **`viewCount` is incremented by any anonymous GET**, so the only usage metric the product has is trivially forgeable — and it is the kind of number a usage-based plan would eventually meter on. | **Low** | `routes/forms.ts` |
 
-Correctly handled today, and worth not regressing: ownership failures return 404 rather than 403; the public form endpoint strips `userId`; the 500 handler never leaks internal messages; user selects are explicit so `passwordHash` cannot escape; CORS is pinned to a single configured origin; the service refuses to start without `JWT_SECRET`.
+Correctly handled today, and worth not regressing: uploaded PDFs are reachable only through a signed, expiring URL, and the URL persisted in `Form.pdfUrl` is always the unsigned canonical one; ownership failures return 404 rather than 403; the public form endpoint strips `userId`; the 500 handler never leaks internal messages; user selects are explicit so `passwordHash` cannot escape; CORS is pinned to a single configured origin; the service refuses to start without `JWT_SECRET`.
 
 ## Recommended order of work
 
@@ -71,7 +71,7 @@ Ordered by risk removed per unit of effort, not by severity alone:
 1. ~~**Rate limiting** (S2)~~ — done.
 2. ~~**A regex guard** (S3)~~ — done.
 3. **`helmet` plus a CSP** (S5). Near-zero effort.
-4. **Signed, expiring URLs for PDFs** (S1), which arrives naturally with the move to object storage in [08-operations.md](./08-operations.md).
+4. ~~**Signed, expiring URLs for PDFs** (S1)~~ — done, on local disk. `services/pdf-url.ts` is the seam the move to object storage in [08-operations.md](./08-operations.md) replaces with presigned S3/R2 URLs; nothing else builds an `/uploads` path.
 5. **Token handling** (S4): shorten expiry, add refresh, and move the session to an `httpOnly` `Secure` `SameSite` cookie. This is a real change on both sides — plan it as a feature, not a patch.
 6. **A privacy layer** (S7, S8): a retention policy per form, an IP-collection toggle, a respondent notice on the public form, account deletion, and per-account export.
 7. **Structured logging with redaction** (S9), which is also the observability prerequisite in [08](./08-operations.md).
@@ -83,7 +83,7 @@ Needed for any privacy policy, DPA or security questionnaire, so it is maintaine
 | Data | Subject | Where | Lawful basis (intended) | Retention today |
 |---|---|---|---|---|
 | Email, name, password hash | Account holder | `users` | Contract | Indefinite — no deletion path |
-| Uploaded PDF | Account holder | Local disk, publicly served | Contract | Indefinite |
+| Uploaded PDF | Account holder | Local disk, served only through a signed expiring URL | Contract | Indefinite |
 | Form and field definitions | Account holder | `forms`, `fields` | Contract | Until the form is deleted |
 | Answer values | **Respondent** | `answers` | The form author's basis; we are the processor | Indefinite |
 | IP address, user agent | **Respondent** | `responses` | Legitimate interest (anti-abuse) — **but not documented, not disclosed, and not currently used for anti-abuse** | Indefinite |

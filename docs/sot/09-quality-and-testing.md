@@ -58,6 +58,8 @@ Put a test here when the assertion is about **what the database does**, and only
 
 The general rule: **configure the unit the way production configures it.** If that is awkward, the awkwardness is telling you something about the configuration path.
 
+One environment variable is not what you expect under Vitest. **Vitest mirrors Vite's `import.meta.env` into `process.env`, and Vite always defines `BASE_URL`** — as `/`, the public base path. So `process.env.BASE_URL || 'http://localhost:3000'` resolves to `/` in every backend spec, and any code that builds an absolute URL from it produces `//uploads/...` instead. Both vitest configs now pin `BASE_URL` to `http://localhost:3000` in their `env` block for this reason. If a new variable ever shares a name with something Vite defines, expect the same surprise.
+
 ## End to end: every test creates the data it needs
 
 The rule, and it is the whole reason this suite is trustworthy now: **an E2E test creates the data it needs and shares no identifier with any other test.** No fixed email, no fixed `shareId`, no dependence on a clean database or on what ran before.

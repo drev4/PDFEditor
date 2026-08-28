@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import fs from 'fs'
 import path from 'path'
+import { pdfFilenameFrom } from '../services/pdf-url.js'
 
 const prisma = new PrismaClient()
 
@@ -95,8 +96,10 @@ async function migrateExistingForms(options: { dryRun?: boolean; formId?: string
 
       try {
         // Construir ruta del PDF
-        const urlParts = form.pdfUrl.split('/')
-        const filename = urlParts[urlParts.length - 1]
+        const filename = pdfFilenameFrom(form.pdfUrl)
+        if (!filename) {
+          throw new Error(`Unrecognised PDF URL: ${form.pdfUrl}`)
+        }
         const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
 
         // Verificar que el archivo existe

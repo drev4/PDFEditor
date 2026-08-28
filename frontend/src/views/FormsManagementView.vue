@@ -217,7 +217,13 @@ async function handleEdit(form: Form) {
 
   try {
     const pdfFileName = form.pdfUrl.split('/').pop() || `${form.title}.pdf`
-    const response = await fetch(form.pdfUrl)
+
+    // Signed PDF URLs expire; the one on this cached row may be stale. Re-read
+    // the form so the download uses a freshly minted link.
+    const fresh = await formsStore.fetchForm(form.id)
+    if (!fresh.pdfUrl) throw new Error('This form has no PDF')
+
+    const response = await fetch(fresh.pdfUrl)
     if (!response.ok) throw new Error('Failed to download PDF')
 
     const blob = await response.blob()

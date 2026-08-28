@@ -8,6 +8,7 @@ import { pdfProcessor, type ExtractedField } from '../services/pdf-processor.js'
 import { checkPattern } from '../services/pattern-validator.js'
 import fs from 'fs'
 import path from 'path'
+import { pdfFilenameFrom } from '../services/pdf-url.js'
 
 export const formFieldsRouter = Router()
 
@@ -66,8 +67,9 @@ async function embedFieldsInPDF(form: { pdfUrl: string | null }, fieldsData: Emb
   if (!form.pdfUrl) return
 
   try {
-    const urlParts = form.pdfUrl.split('/')
-    const filename = urlParts[urlParts.length - 1]
+    const filename = pdfFilenameFrom(form.pdfUrl)
+    if (!filename) return
+
     const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
 
     if (!fs.existsSync(pdfPath)) {
