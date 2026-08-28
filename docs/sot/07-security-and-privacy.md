@@ -35,10 +35,12 @@ Authenticated user (JWT)
   └── /api/forms, /api/upload, /api/auth/me   scoped to resources they own
 
 Server-side, no boundary
-  └── PDF processing, filesystem writes, author-supplied regex execution
+  └── PDF processing, filesystem writes
 ```
 
 These are the whole external attack surface. The three write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and `/uploads` is being replaced by signed URLs (S1).
+
+**Author-supplied regex is compiled by RE2, and degrades to no constraint.** A `pattern` that the engine cannot compile — one stored before validation existed, or an engine that failed to load — is logged and treated as *no pattern constraint*, never thrown. Throwing would restore the 500 this fixed; rejecting would punish a respondent for the author's mistake. `pattern` is a formatting convenience that nothing downstream trusts, so unconstrained is the right degradation — but do not read the field as a guaranteed-enforced rule.
 
 **Per-IP is only as good as `req.ip`.** That depends on `trust proxy`, configured from `TRUST_PROXY_HOPS` in `app.ts` and defaulting to trusting nothing. Set too high — or to `true` — and the client can forge its own identity through `X-Forwarded-For` and bypass every limiter. See [08-operations](./08-operations.md#configuration).
 
@@ -50,7 +52,7 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 |---|---|---|---|
 | S1 | **Uploaded PDFs are served publicly and permanently.** `app.ts` mounts `express.static` on `/uploads`. Any PDF is fetchable by URL with no token, no expiry and no revocation. Filenames are unguessable (`nanoid(12)` + timestamp), so this is security by obscurity: once a URL leaks — a browser history, a shared link, a proxy log — access cannot be withdrawn. Uploaded PDFs frequently contain the customer's own confidential template. | **High** | `backend/src/app.ts` |
 | ~~S2~~ | ~~**No rate limiting anywhere.**~~ **Resolved** ([`features/0002`](../../features/0002-rate-limiting-on-public-write-paths.md)). The three unauthenticated write paths carry per-IP limiters. Two limits remain deliberately absent and are tracked in [`docs/BACKLOG.md`](../BACKLOG.md): a shared store (the current one is per-process, so the effective limit multiplies by replica count) and account-level lockout. | ~~High~~ | `middleware/rateLimit.ts` |
-| S3 | **Author-supplied regex executed on a public endpoint.** `routes/responses.ts` runs `new RegExp(field.validation.pattern).test(value)` on every submission. A catastrophically backtracking pattern — whether malicious or merely careless — blocks the single Node event loop for the entire service. | **High** | `backend/src/routes/responses.ts` |
+| ~~S3~~ | ~~**Author-supplied regex executed on a public endpoint.**~~ **Resolved** ([`features/0004`](../../features/0004-safe-author-supplied-regex.md)). Patterns are compiled by RE2, which cannot backtrack, so execution is linear in input length: the case that took 155 s on a native `RegExp` now takes 0.05 ms. Patterns are also validated when stored, so an invalid one is rejected with a `400` instead of turning every later submission into a 500. | ~~High~~ | `backend/src/services/pattern-validator.ts` |
 | S4 | **JWT in `localStorage`, 7-day lifetime, not revocable.** Any XSS on the origin yields a week of full account access with no way to cut it short. The editor renders user-controlled content and loads PDF.js, which widens the XSS surface rather than narrowing it. | **High** | `frontend/src/services/api.ts` |
 | S5 | **No security headers.** No `helmet`, no CSP, no `X-Content-Type-Options`, no `Referrer-Policy`, no HSTS. PDFs are served from the same origin as the app, so a crafted file is same-origin content. | **Medium** | `backend/src/app.ts` |
 | S6 | **Uploads are not scanned.** A file is accepted on mimetype plus a `pdf-lib` parse, then stored and served back to browsers from our own origin. | **Medium** | `middleware/upload.ts` |
@@ -67,7 +69,7 @@ Correctly handled today, and worth not regressing: ownership failures return 404
 Ordered by risk removed per unit of effort, not by severity alone:
 
 1. ~~**Rate limiting** (S2)~~ — done.
-2. **A regex guard** (S3): a length cap on `pattern`, a compile-time complexity check, and execution under a timeout — or move the check to a safe engine. Also validate the pattern at authoring time so the author learns immediately rather than the respondent.
+2. ~~**A regex guard** (S3)~~ — done.
 3. **`helmet` plus a CSP** (S5). Near-zero effort.
 4. **Signed, expiring URLs for PDFs** (S1), which arrives naturally with the move to object storage in [08-operations.md](./08-operations.md).
 5. **Token handling** (S4): shorten expiry, add refresh, and move the session to an `httpOnly` `Secure` `SameSite` cookie. This is a real change on both sides — plan it as a feature, not a patch.
@@ -98,4 +100,4 @@ For form responses the customer is the data controller and this product is the p
 2. **Every new public endpoint ships with rate limiting.** Add a named limiter in `middleware/rateLimit.ts` and apply it at the route, the way `authenticate` is applied. Its limit and window come from the environment, so the test suites and CI can set their own without weakening the production default.
 3. **New personal data added to a model updates the inventory above in the same PR.** A field that appears in the schema but not in this table cannot be answered for in an audit.
 4. **Never log a whole request, error or entity object.** Log identifiers and the fields you actually need.
-5. **User-supplied code-like input** — regex, templates, formulas, file names — is untrusted input with a resource cost, not just a value to validate.
+5. **User-supplied code-like input** — regex, templates, formulas, file names — is untrusted input with a resource cost, not just a value to validate. Compile it through one audited helper (`services/pattern-validator.ts` is the model), never at the call site, and remember that a synchronous evaluator **cannot** be bounded by a timeout on the same thread.

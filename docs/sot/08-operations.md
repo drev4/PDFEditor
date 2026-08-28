@@ -36,6 +36,14 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `RATE_LIMIT_RESPONSES_MAX` | no | `20` | Public form submissions per window per IP |
 | `RATE_LIMIT_RESPONSES_WINDOW_MS` | no | `600000` (10 min) | |
 
+### `re2` is a native dependency
+
+`backend` depends on `re2` (see [04-backend-patterns](./04-backend-patterns.md#8-code-like-input-is-compiled-in-one-audited-place)). Its install script downloads a prebuilt binary from GitHub and falls back to compiling with `node-gyp`, so a build toolchain is needed if that download is unavailable — `ubuntu-latest` in CI has one.
+
+The binary is tied to a **Node ABI**: a module built under Node 22 will not load under Node 20 and vice versa. `npm ci` builds the right one for whichever Node runs it, so CI is fine. Locally, **after switching Node version run `npm rebuild re2`** — otherwise the engine fails to load. Note that `.nvmrc` pins 22.12.0 while CI runs `node-version: 20.x`, so this is a live footgun rather than a hypothetical one.
+
+If the module cannot load, the service still starts: `services/pattern-validator.ts` logs a loud error and treats every field `pattern` as no constraint. Safety is preserved — nothing falls back to a backtracking `RegExp` — but format validation is silently off, so treat that log line as an alert.
+
 ### `TRUST_PROXY_HOPS`, and why it is not a detail
 
 The rate limiters in `middleware/rateLimit.ts` key on `req.ip`. What Express puts there depends entirely on `trust proxy`, which `app.ts` sets from this variable. Both wrong values fail, in opposite directions:

@@ -52,7 +52,7 @@ Mounted under `/api/forms`, so every path here is nested under a form. **There i
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/forms/:formId/fields` | Bearer + form ownership | Creates one field. Body validated by `createFieldSchema`. The client cannot supply an `id` |
+| POST | `/forms/:formId/fields` | Bearer + form ownership | Creates one field. Body validated by `createFieldSchema`. The client cannot supply an `id`. `400` if `validation.pattern` is not a usable regex — see below |
 | PUT | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | Partial body (`createFieldSchema.partial()`) |
 | DELETE | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | ⚠️ Cascades: deletes every `Answer` given to this field in past responses. The bulk save does **not** do this |
 | POST | `/forms/:formId/fields/bulk` | Bearer + form ownership | Body `{fields: BulkFieldData[]}`. A **diff**, not a replacement — see below. Re-embeds the AcroForm in the PDF on disk from the resulting live set |
@@ -86,6 +86,27 @@ Updates, creates, deletes and archives all run inside one `prisma.$transaction`,
 
 The frontend must send back the ids the server gave it. `saveAllFields` in `frontend/src/stores/formFields.store.ts` includes `id` for server ids and omits it for locally-created fields, which it distinguishes by the `field-` prefix it mints them with. Dropping the ids is what made an ordinary save destroy every collected answer.
 
+### `validation.pattern`
+
+Accepted by `POST /fields`, `PUT /fields/:fieldId` and the bulk save, and rejected with `400` when it is unusable. The message names the problem rather than saying "invalid":
+
+```jsonc
+// 400
+{ "error": "Validation error", "details": [
+  { "code": "custom", "message": "Invalid pattern: missing ]: [", "path": [0, "validation", "pattern"] }
+]}
+```
+
+Three rules, all enforced at write time by `services/pattern-validator.ts`:
+
+| Rule | Example rejection |
+|---|---|
+| At most 200 characters | `Pattern must be 200 characters or fewer (got 300)` |
+| Must be a valid regex | `Invalid pattern: missing ]: [` |
+| Must be supported by RE2 — **no lookahead, lookbehind or backreferences** | `Invalid pattern: invalid perl operator: (?=` |
+
+That third rule is the surprising one: `^(?=.*[A-Z]).+$` is a valid JavaScript regex and is refused. RE2 has no lookaround by design — it is what makes execution linear.
+
 `CreateFieldData` — identical in `backend` `createFieldSchema` and `frontend/src/services/fields.ts`; `BulkFieldData` is this plus an optional `id`:
 
 ```ts
@@ -117,7 +138,7 @@ Validation, in order, before anything is persisted:
 
 Stores `ipAddress` and `userAgent` from the request. Returns `201 {success, responseId, message}`.
 
-One thing a caller should still know: the `pattern` regex is **author-supplied and executed server-side on this public endpoint**, which is a ReDoS surface — see S3 in [07](./07-security-and-privacy.md). The endpoint is rate limited, which bounds how fast that can be exploited but does not remove it.
+`pattern` is author-supplied and executed server-side here, but it is compiled by RE2, which cannot backtrack — execution is linear in input length, and a pattern that will not compile is ignored rather than throwing. A value that already failed `minLength`/`maxLength` is never handed to the regex.
 
 ## The 429 response
 

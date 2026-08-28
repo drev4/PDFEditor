@@ -5,13 +5,13 @@
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 29 specs | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 8 specs | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| Backend route (mocked Prisma) | 9 specs | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 2 specs | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 6 specs, 34 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 The two placement conventions are different on purpose and must not be mixed: **frontend tests sit next to their subject, backend tests sit in `backend/tests/`.**
 
-> **Node version.** The frontend suite needs Node `^20.19.0 || >=22.12.0` — Vite 7 and jsdom 27 both require it. Below that the whole suite fails to start with `ERR_REQUIRE_ESM`, and component specs fail on a missing `crypto.hash`. A `.nvmrc` pins the version; `engines` in the root `package.json` previously claimed `>=18.0.0`, which is why npm never warned. Backend tests (70 mocked + 14 database-backed, all passing) have no such constraint.
+> **Node version.** The frontend suite needs Node `^20.19.0 || >=22.12.0` — Vite 7 and jsdom 27 both require it. Below that the whole suite fails to start with `ERR_REQUIRE_ESM`, and component specs fail on a missing `crypto.hash`. A `.nvmrc` pins the version; `engines` in the root `package.json` previously claimed `>=18.0.0`, which is why npm never warned. Backend tests (83 mocked + 14 database-backed, all passing) have no such constraint.
 
 ## Backend: integration tests over the real router
 
