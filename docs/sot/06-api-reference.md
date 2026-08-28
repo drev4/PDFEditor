@@ -172,7 +172,7 @@ Response `201 {url, filename, size, fields}`, where `url` is the **canonical, un
 
 Unauthenticated on purpose: an anonymous respondent has to load the PDF of a published form, and the editor's download paths use a bare `fetch` with no `Authorization` header. The capability is the signature, not a session.
 
-- `200` — `application/pdf`, `Content-Disposition: inline`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`
+- `200` — `application/pdf`, `Content-Disposition: inline`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: cross-origin`, `X-Frame-Options: DENY`, and `Content-Security-Policy: default-src 'none'; object-src 'none'; frame-ancestors 'none'; sandbox`. The CORP value overrides helmet's `same-origin` default because the SPA is a different origin — see [07-security](./07-security-and-privacy.md#where-the-headers-actually-are)
 - `403 {error: "This link is invalid or has expired."}` — bad signature, expired token, or a filename outside `/^[A-Za-z0-9_-]+\.pdf$/`. Expired and forged are **deliberately indistinguishable**
 - `404 {error: "File not found"}` — signature valid, file absent
 - `404 {error: "Not found"}` — anything else under `/uploads`, including every URL of the old unsigned shape

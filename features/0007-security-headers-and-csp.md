@@ -1,8 +1,8 @@
 # 0007 — Security headers, and a CSP delivered where it actually applies
 
-**Status:** backlog
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md); S5 in [07-security-and-privacy](../docs/sot/07-security-and-privacy.md))
-**Branch:** _(filled in when it moves to "in progress")_
+**Branch:** `feature/0007-security-headers-and-csp`
 **Related:** [`07-security-and-privacy`](../docs/sot/07-security-and-privacy.md) (S5, and S4 which this makes cheaper) · [`02-architecture`](../docs/sot/02-architecture.md) · [`08-operations`](../docs/sot/08-operations.md) · [`09-quality-and-testing`](../docs/sot/09-quality-and-testing.md)
 
 ## Context
@@ -77,3 +77,29 @@ Each of these is true or false when the work is done.
 > **Step 8 — verify.** `npm run test:backend`, `npm run test:integration`, `npm run test:frontend`, `npm run test:e2e`, `npx tsc --noEmit` in `backend/`, `npm run build --workspace=frontend`. All of them — the E2E run is the one that catches a broken PDF route, and this feature is exactly the kind that breaks it. Then by hand, with the console open and **zero CSP violations** in it: register, log in, open the editor with a PDF, add a field, save, open the public form, submit a response, and download the CSV. Report what the final policy is, verbatim.
 >
 > **Step 9 — document.** Run `sot-sync`. [`07-security-and-privacy`](../docs/sot/07-security-and-privacy.md): mark S5 resolved with what is actually set and, explicitly, **what is not** — the `style-src` concession if it was needed, the absence of CSP reporting, and the fact that a `<meta>` policy cannot carry `frame-ancestors`; update the "Recommended order of work" list, where S4 then becomes the next item. [`08-operations`](../docs/sot/08-operations.md): the new environment variable, and a deployment requirement that the production host must serve the SPA's CSP as a real header including the directives `<meta>` cannot express. [`04-backend-patterns`](../docs/sot/04-backend-patterns.md): one line on where response headers are set and why the PDF route differs. [`09-quality-and-testing`](../docs/sot/09-quality-and-testing.md): the new spec in the count table. Remove the `helmet` + CSP row from [`docs/BACKLOG.md`](../docs/BACKLOG.md), and file anything deferred — CSP reporting at minimum. Close step 3 in the [build order](../docs/sot/10-saas-roadmap.md#build-order). Set this file to `**Status:** done` and add an `## Outcome` section, as [`0002`](0002-rate-limiting-on-public-write-paths.md) and [`0005`](0005-working-ci-and-enforced-node-version.md) do.
+
+
+## Outcome
+
+**Done.** All nine acceptance criteria hold. Verified on Node 22.22.0: backend 11 specs / 107 tests, integration 2 / 14, frontend 29 / 237, E2E 34, plus `tsc --noEmit` on the backend and the frontend build (`vue-tsc`).
+
+**One E2E flake, reported rather than smoothed over.** Across six full E2E runs on this branch, `auth-flow.spec.ts > should register a new user successfully` failed once. It did not reproduce in three targeted runs or three further full runs. The failing run took 48.9 s against a usual ~25 s, so the likeliest cause is machine contention timing out `waitForURL`, not this change — nothing here touches registration, and the run before the documentation edits was green. Filed in [`docs/BACKLOG.md`](../docs/BACKLOG.md) rather than left in a sentence.
+
+**The central claim held.** `app.use(helmet())` alone would have closed the finding on paper. Express serves JSON and one PDF and never serves `index.html`, so the policy that matters is built in `frontend/vite.config.ts` and injected as a `<meta>` tag at build time. helmet's CSP is explicitly disabled on the API, and `backend/tests/security-headers.spec.ts` asserts that absence so it cannot be quietly "fixed".
+
+**The predicted trap was real.** helmet's default `Cross-Origin-Resource-Policy: same-origin` does block the SPA from fetching a PDF. The route now overrides it to `cross-origin`, and the assertion covering it was confirmed to fail for the right reason: removing the override produces `expected 'same-origin' to be 'cross-origin'` and nothing else in the suite moves.
+
+**`style-src` was measured rather than assumed, and the spec's guess was half wrong.** Under `style-src 'self'` a single editor session produces **423 violations**, and the console text (*"Applying inline style"*) misattributes them. The `securitypolicyviolation` event's `effectiveDirective` gives the real split:
+
+- **373 `style-src-attr`** — `style` attributes, from Vue `:style` bindings and the editor's absolutely positioned field overlays. The spec did not anticipate these at all.
+- **50 `style-src-elem`** — `<style>` elements, PrimeVue 4 injecting its theme at runtime. This is the part the spec predicted.
+
+Because both shapes occur, the narrower `style-src-elem` + `style-src-attr` split was tried and grants exactly the same permission with more words. `'unsafe-inline'` stands, with the measurement recorded in [07-security-and-privacy](../docs/sot/07-security-and-privacy.md#what-the-spa-policy-does-not-cover) and in a comment at the directive itself.
+
+**`script-src` is `'self'` with no `'unsafe-eval'`**, which required `isEvalSupported: false` on the one `getDocument` call. The spec expected a second call site in `useThumbnails.ts`; there is none — it receives an already-loaded document. No rendering regression was observed on the fixture PDFs or in the E2E run.
+
+**Zero CSP violations** across the real flows, checked in a browser rather than inferred: register → upload → pdf.js render → editor, and the public form. Both reported empty violation and console-error lists.
+
+**Scope notes.** The policy is built in `vite.config.ts` rather than written into `index.html` because `connect-src` must name the API origin (per-environment, `VITE_API_URL`) and because the dev server needs `ws:` for HMR — and the E2E suite runs against `npm run dev`, so a policy correct only for the built app would have failed in Playwright looking like an application bug. `X-Frame-Options: DENY` was added to the PDF route beyond the spec, to stop it disagreeing with its own `frame-ancestors 'none'`.
+
+**Deferred and filed** in [`docs/BACKLOG.md`](../docs/BACKLOG.md): CSP violation reporting (needs the S9 logging work), and narrowing `style-src`, which means changing how the app styles things rather than how the policy is written. Not touched, as scoped: S4, virus scanning, and any production host configuration — there is still no deployment, so the `frame-ancestors` requirement is recorded in [08-operations](../docs/sot/08-operations.md) rather than implemented.

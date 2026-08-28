@@ -50,6 +50,7 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `RATE_LIMIT_REGISTER_WINDOW_MS` | no | `3600000` (1 hour) | |
 | `RATE_LIMIT_RESPONSES_MAX` | no | `20` | Public form submissions per window per IP |
 | `RATE_LIMIT_RESPONSES_WINDOW_MS` | no | `600000` (10 min) | |
+| `ENABLE_HSTS` | no | `false` | Send `Strict-Transport-Security`. **Must stay off wherever the app is reachable over plain HTTP, including local development** — a browser that sees HSTS from `localhost` forces HTTPS on `localhost` for every port afterwards, and the breakage that follows never mentions this setting. Turn on where TLS terminates |
 
 ### `re2` is a native dependency
 
@@ -170,3 +171,4 @@ Requirements that follow from what is already in the code:
 3. **Per-environment frontend builds**, because `VITE_API_URL` is compile-time.
 4. **Secrets from a secret manager**, never from a committed file. `JWT_SECRET` rotation invalidates every session, so rotation needs the refresh-token work from [07](./07-security-and-privacy.md) first.
 5. **At least two API replicas behind a load balancer** — only possible after step 1.
+6. **The host serving the SPA must send a `Content-Security-Policy` response header.** The application ships one in a `<meta>` element built by `frontend/vite.config.ts`, which covers `script-src`, `connect-src` and the rest — but a `<meta>` policy cannot express `frame-ancestors`, `report-uri` or `sandbox`, and browsers ignore those directives there. At minimum the host must add `frame-ancestors 'none'` (clickjacking) to the policy already in the page. See [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).

@@ -132,11 +132,19 @@ RE2 is a native module, so its binary is tied to a Node ABI — see [08-operatio
 
 `services/pdf-url.ts` follows the same shape for a different kind of untrusted-adjacent value. A `Form.pdfUrl` is a client-supplied string that ends up as a filesystem path and as a URL handed to a browser, so exactly one module produces, parses and verifies it — `pdfFilenameFrom`, `canonicalPdfUrl`, `signPdfUrl`, `verifyPdfToken`. **Nothing else may split a `pdfUrl` on `/` or build an `/uploads` path by hand.** Three call sites used to do that independently; they now all go through the helper, which is also the single seam that a move to presigned object-storage URLs replaces.
 
-## 9. Adding a new endpoint
+## 9. Response headers are global, except where a route earns an exception
+
+`helmet` is mounted once in `app.ts` and covers every response. A route that needs something different sets it with `res.setHeader` **in the handler, with a comment saying why** — the exception has to be visible next to the code it applies to, like the ownership checks in §2.
+
+There is exactly one exception today, and it is the shape to copy: `GET /uploads/pdfs/:token/:filename` overrides `Cross-Origin-Resource-Policy` to `cross-origin` because the SPA is a different origin, and adds a restrictive `Content-Security-Policy` because the bytes are attacker-supplied. Both are argued in the comment.
+
+**Do not add a CSP to API responses.** This process serves JSON, not documents; a policy there constrains nothing while making the security posture look better than it is. That absence is asserted in `backend/tests/security-headers.spec.ts` so it cannot be quietly "fixed". The policy that matters is on the SPA — [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).
+
+## 10. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.
 
-## 10. What the backend is missing
+## 11. What the backend is missing
 
 Ordered by impact on being able to sell this, not by effort. Each has an entry in [`docs/BACKLOG.md`](../BACKLOG.md).
 
