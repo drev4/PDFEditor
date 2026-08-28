@@ -4,6 +4,8 @@ The live backlog. One row per item, ordered by what stands between the product a
 
 When an item is picked up it gets an execution spec in [`features/`](../features/README.md) and its row links to it. Reasoning behind each block is in [`docs/sot/`](./sot/README.md).
 
+**This file is not where the next task is chosen.** It answers *what is missing and how much it matters*; the [build order](./sot/10-saas-roadmap.md#build-order) answers *what is next*, because it carries the dependencies between items and a priority column cannot. When the two disagree, **the chain wins** — a priority is a judgement and can be revised, a dependency cannot. There is already one live case: *shared rate-limit store (Redis)* sits in P1 but needs the Redis that arrives with the P2 job queue.
+
 Last reviewed: **2026-08-28**.
 
 ## P0 — Blocks any real customer

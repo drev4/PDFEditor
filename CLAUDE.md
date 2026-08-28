@@ -22,7 +22,7 @@ It is being built to be sold, B2B and B2C. That changes what "done" means: data 
 | Write tests, or decide a change is done | [09-quality-and-testing](docs/sot/09-quality-and-testing.md) |
 | Build anything toward multi-tenancy or billing | [10-saas-roadmap](docs/sot/10-saas-roadmap.md) |
 
-Live backlog: [`docs/BACKLOG.md`](docs/BACKLOG.md). Specs for work in flight: [`features/`](features/README.md).
+Live backlog: [`docs/BACKLOG.md`](docs/BACKLOG.md) — *what is missing*. Build order: [`10-saas-roadmap`](docs/sot/10-saas-roadmap.md#build-order) — *what is next*. **Pick the next task from the build order, not from the backlog's priority column**, and when the two disagree the chain wins: a priority is a judgement, a dependency is not. Specs for work in flight: [`features/`](features/README.md).
 
 `docs/archive/` is retired and known to contain false statements. Never cite it.
 
