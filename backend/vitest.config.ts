@@ -5,7 +5,12 @@ export default defineConfig({
         globals: true,
         environment: 'node',
         env: {
-            JWT_SECRET: 'test-jwt-secret'
+            JWT_SECRET: 'test-jwt-secret',
+            // The suites drive these endpoints repeatedly; the rate-limit spec
+            // tightens them per test through the same process.env path.
+            RATE_LIMIT_LOGIN_MAX: '1000',
+            RATE_LIMIT_REGISTER_MAX: '1000',
+            RATE_LIMIT_RESPONSES_MAX: '1000'
         },
         setupFiles: ['./tests/setup.ts'],
         coverage: {

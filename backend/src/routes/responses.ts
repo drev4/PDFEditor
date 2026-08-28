@@ -2,6 +2,7 @@ import { Router, Request } from 'express'
 import { z } from 'zod'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
+import { responseRateLimit } from '../middleware/rateLimit.js'
 
 export const responsesRouter = Router()
 
@@ -12,7 +13,7 @@ const submitResponseSchema = z.object({
 })
 
 // POST /api/responses - Submit form response (no auth required)
-responsesRouter.post('/', async (req: Request, res, next) => {
+responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => {
   try {
     const validation = submitResponseSchema.safeParse(req.body)
     if (!validation.success) {
