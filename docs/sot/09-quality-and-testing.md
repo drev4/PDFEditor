@@ -7,7 +7,7 @@
 | Frontend unit / component | 29 specs | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
 | Backend route (mocked Prisma) | 8 specs | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 2 specs | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
-| End to end | 6 specs | Playwright, Chromium | `e2e/*.spec.ts` |
+| End to end | 6 specs, 34 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 The two placement conventions are different on purpose and must not be mixed: **frontend tests sit next to their subject, backend tests sit in `backend/tests/`.**
 
@@ -58,6 +58,38 @@ Put a test here when the assertion is about **what the database does**, and only
 
 The general rule: **configure the unit the way production configures it.** If that is awkward, the awkwardness is telling you something about the configuration path.
 
+## End to end: every test creates the data it needs
+
+The rule, and it is the whole reason this suite is trustworthy now: **an E2E test creates the data it needs and shares no identifier with any other test.** No fixed email, no fixed `shareId`, no dependence on a clean database or on what ran before.
+
+`e2e/helpers.ts` is the seam that makes that cheap:
+
+| Helper | Use |
+|---|---|
+| `registerNewUser(page)` | Registers a fresh account through the UI and lands on `/dashboard` |
+| `loginUser(page, user)` | Logs an existing user in through the UI |
+| `createPublishedForm(request)` | Seeds a published form with one field **over the HTTP API**, returns its `shareId` |
+| `uniqueEmail(prefix)` | `Date.now()` **plus** a uuid fragment |
+
+Never inline a registration block again — that is what broke the suite for months ([`features/0003`](../../features/0003-e2e-suite-green-and-independent.md)). Every test in a describe shared one module-scope email, so the second registration returned `400 Email already registered`, the app stayed on `/register`, and the following `waitForURL` timed out. `Date.now()` alone is not unique: parallel workers import a module in the same millisecond.
+
+`createPublishedForm` goes through the API rather than Prisma on purpose. A database seed skips the routes, and this suite exists to exercise them — a Prisma seed would have sailed through the bulk-save data-loss defect of [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md), which lived in a handler.
+
+**Prefer `data-testid` over visible copy.** Several failures were assertions on text the app had never rendered, and one on a `.pdf-viewer` class that does not exist (it is `pdf-viewer-container`; a CSS selector matches whole class tokens, so the two never matched). A test that breaks when someone rewords a button is a test people learn to ignore.
+
+**A test must be able to fail for the reason its name gives.** Seven tests in `pdf-workflow.spec.ts` had names about upload, viewer rendering and toolbars, and bodies that only asserted `.dashboard-view` was visible. They reported coverage that did not exist, which is worse than no test. They are now three that assert what they claim, one of which genuinely uploads a PDF.
+
+Verify independence, not just a green run:
+
+```bash
+npm run test:e2e -- --workers=1     # the CI setting
+npm run test:e2e                    # parallel
+npm run test:e2e                    # again, WITHOUT resetting the database
+npm run test:e2e -- --repeat-each=2 # order and state sensitivity
+```
+
+Rate limits are set for the suite in `playwright.config.ts` under `webServer.env`, because every test registers a user and the register limiter defaults to 5/hour ([`features/0002`](../../features/0002-rate-limiting-on-public-write-paths.md)). A clean checkout needs no local setup.
+
 ## Frontend: behaviour, not internals
 
 Assert what a unit caused, not how it is built:
@@ -89,7 +121,6 @@ The last row is the remaining coverage gap of this kind: nothing verifies the ca
 | **No type check in CI.** `vue-tsc` and `tsc` only run inside builds, and CI never builds | Type errors reach `develop` |
 | **No PDF round-trip test** | Nothing verifies that embedded AcroForm positions match what the editor showed |
 | **Coverage collected but not enforced** | Coverage can fall silently; Codecov failures are ignored |
-| **The E2E suite fails on `develop`** | 11 of 38 specs fail on an unmodified checkout and the failing set changes between runs. It gates nothing in that state — a real regression would be lost in the noise. Its own P0 backlog row |
 | **Database-backed coverage is narrow** | Only the bulk save and archived-field visibility are covered. Form deletion, response submission and the `syncFieldsFromPDF` side effect still have no real-database test |
 
 When lint is added, use flat config (`eslint.config.js`) — the rest of the toolchain is on versions that assume it.
@@ -100,7 +131,7 @@ A change is done when all of these are true. This is the checklist the `ship-che
 
 1. The change does what its `features/` spec or issue said, and nothing else. Scope that grew is either removed or acknowledged in the PR description.
 2. **Tests were added at the level that would have caught the bug.** For a fix, that means a test that fails without the change — write it first and watch it fail.
-3. `npm run test:frontend`, `npm run test:backend` and `npm run test:integration` pass. E2E if the change touches a user-visible flow.
+3. `npm run test:frontend`, `npm run test:backend`, `npm run test:integration` **and `npm run test:e2e`** pass. All of them, every time — a feature is not finished while any suite is red, including failures that predate the branch.
 4. Type checking passes in both workspaces: `npm run build --workspace=frontend` and `npx tsc --noEmit` in `backend/`.
 5. The API contract is unchanged, or [06-api-reference.md](./06-api-reference.md) was updated **after re-reading the route file** (`api-contract-guard`).
 6. Schema changes carry a migration and an explicit written statement of the `onDelete` behaviour of every new relation ([03-domain-model.md](./03-domain-model.md)).

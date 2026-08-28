@@ -169,16 +169,29 @@ describe('Rate limiting', () => {
       vi.stubEnv('RATE_LIMIT_LOGIN_MAX', 'not-a-number')
       prismaMock.user.findUnique.mockResolvedValue(null)
 
-      // The default is 10, so three attempts must not be limited. A bad value
-      // must never be read as "no limit".
-      const responses = await hit(3, () =>
-        request(app).post('/api/auth/login').send({
-          email: 'someone@example.com',
-          password: 'wrong-password'
-        })
-      )
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'someone@example.com',
+        password: 'wrong-password'
+      })
 
-      expect(responses.every(r => r.status === 401)).toBe(true)
+      // The draft-8 policy header reports the limit actually in force, so assert
+      // it directly. Inferring it from "N requests were not blocked" would
+      // depend on how many hits the shared limiter happens to be holding, which
+      // this test does not control - and that made it flaky.
+      expect(res.headers['ratelimit-policy']).toMatch(/\bq=10\b/)
+      expect(res.status).toBe(401)
+    })
+
+    it('uses a configured limit when it is valid', async () => {
+      vi.stubEnv('RATE_LIMIT_LOGIN_MAX', '7')
+      prismaMock.user.findUnique.mockResolvedValue(null)
+
+      const res = await request(app).post('/api/auth/login').send({
+        email: 'someone@example.com',
+        password: 'wrong-password'
+      })
+
+      expect(res.headers['ratelimit-policy']).toMatch(/\bq=7\b/)
     })
   })
 })

@@ -87,7 +87,7 @@ The SaaS schema changes in [10-saas-roadmap.md](./10-saas-roadmap.md) — `Organ
 
 - **`unit-tests`** — `npm ci`, frontend tests with coverage, backend tests with coverage, upload to Codecov (`fail_ci_if_error: false`), archive coverage artifacts.
 - **`integration-tests`** — a `postgres:16` service, `npm ci`, `prisma migrate deploy`, `npm run test:integration --workspace=backend`. The database-backed backend suite; see [09-quality-and-testing.md](./09-quality-and-testing.md#backend-database-backed-tests).
-- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `prisma migrate deploy`, `npm run test:e2e`, archive the Playwright report. It sets the `RATE_LIMIT_*` variables high: the suite registers and logs in across every spec file and reruns on `retries`, so production limits would throttle it and the failure would read as a flaky test rather than a working limiter. A local E2E run needs the same values in `backend/.env`.
+- **`e2e-tests`** — a `postgres:16` service, `npm ci`, install Chromium, `prisma migrate deploy`, `npm run test:e2e`, archive the Playwright report. The `RATE_LIMIT_*` variables are set high for it, in `playwright.config.ts` under `webServer.env` as well as in the workflow: every test registers its own user, and production limits would throttle the suite in a way that reads as a flaky test rather than a working limiter.
 
 What CI does not do, and should:
 

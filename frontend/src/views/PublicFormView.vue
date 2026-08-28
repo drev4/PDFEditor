@@ -66,6 +66,7 @@
             <button
               @click="handleSubmit"
               :disabled="isSubmitting"
+              data-testid="public-submit-button"
               class="relative group px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
             >
               <div v-if="isSubmitting" class="flex items-center gap-2">

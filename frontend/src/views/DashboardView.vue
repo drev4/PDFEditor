@@ -71,6 +71,8 @@
               size="small"
               v-tooltip.bottom="'Logout'"
               class="hidden sm:flex"
+              data-testid="logout-button"
+              aria-label="Logout"
             />
           </div>
         </div>
