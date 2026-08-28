@@ -9,6 +9,13 @@ export default defineConfig({
         environment: 'node',
         env: {
             JWT_SECRET: 'test-jwt-secret',
+            // Vitest mirrors Vite's `import.meta.env` into `process.env`, and
+            // Vite always defines BASE_URL — as `/`, the public base path. So
+            // `process.env.BASE_URL || 'http://localhost:3000'` silently
+            // resolves to `/` under test and every PDF URL comes out relative.
+            // Pin it to what a deploy sets, or the specs test a URL shape
+            // production never produces.
+            BASE_URL: 'http://localhost:3000',
             // The suites drive these endpoints repeatedly; the rate-limit spec
             // tightens them per test through the same process.env path.
             RATE_LIMIT_LOGIN_MAX: '1000',

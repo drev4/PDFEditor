@@ -246,7 +246,13 @@ async function handleEdit(form: Form) {
         life: 2000
       })
 
-      const response = await fetch(form.pdfUrl)
+      // The PDF URL is signed and short-lived, so the one on this cached list
+      // row may already have expired — the dashboard can sit open for hours.
+      // Re-read the form to mint a fresh link before downloading.
+      const fresh = await formsStore.fetchForm(form.id)
+      if (!fresh.pdfUrl) throw new Error('This form has no PDF')
+
+      const response = await fetch(fresh.pdfUrl)
       if (!response.ok) throw new Error('Failed to download PDF')
 
       const blob = await response.blob()

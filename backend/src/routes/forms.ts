@@ -7,6 +7,7 @@ import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { verifyFormOwnership } from '../middleware/formOwnership.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
+import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -26,6 +27,19 @@ const updateFormSchema = z.object({
   settings: z.record(z.unknown()).optional()
 })
 
+/**
+ * Every form that leaves this API goes through here.
+ *
+ * `Form.pdfUrl` holds the canonical, unsigned URL — it is written once at upload
+ * and read forever after, so a signed value stored there would stop verifying
+ * one TTL later. The signature is therefore minted per response, never
+ * persisted. Miss one `res.json({ form })` and that screen's PDF 403s while
+ * every other screen works.
+ */
+function toApiForm<T extends { pdfUrl: string | null }>(form: T): T {
+  return { ...form, pdfUrl: signPdfUrl(form.pdfUrl) }
+}
+
 // GET /api/forms - List user's forms
 formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
@@ -44,7 +58,7 @@ formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
       }
     })
 
-    res.json({ forms })
+    res.json({ forms: forms.map(toApiForm) })
   } catch (error) {
     next(error)
   }
@@ -68,20 +82,24 @@ formsRouter.post('/', authenticate, async (req: AuthRequest, res, next) => {
         userId: req.userId!,
         title,
         description,
-        pdfUrl,
+        // Only ever the canonical unsigned URL reaches the column. A client that
+        // echoes back a `pdfUrl` it read from this API would otherwise persist a
+        // signature, and the form would break one TTL later.
+        pdfUrl: pdfUrl === undefined ? undefined : canonicalPdfUrl(pdfUrl),
         shareId: nanoid(12)
       }
     })
 
-    res.status(201).json({ form })
+    res.status(201).json({ form: toApiForm(form) })
   } catch (error) {
     next(error)
   }
 })
 
 async function syncFieldsFromPDF(formId: string, pdfUrl: string) {
-  const urlParts = pdfUrl.split('/')
-  const filename = urlParts[urlParts.length - 1]
+  const filename = pdfFilenameFrom(pdfUrl)
+  if (!filename) return null
+
   const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
 
   if (!fs.existsSync(pdfPath)) return null
@@ -142,13 +160,13 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
           where: { id },
           include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
         })
-        return res.json({ form: updatedForm })
+        return res.json({ form: updatedForm ? toApiForm(updatedForm) : updatedForm })
       } catch (error) {
         console.error('Error syncing fields from PDF:', error)
       }
     }
 
-    res.json({ form })
+    res.json({ form: toApiForm(form) })
   } catch (error) {
     next(error)
   }
@@ -168,11 +186,16 @@ formsRouter.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
 
     const data = validation.data
 
+    // See the note in POST /: the column holds canonical URLs only.
+    if (data.pdfUrl !== undefined) {
+      data.pdfUrl = canonicalPdfUrl(data.pdfUrl) ?? undefined
+    }
+
     await verifyFormOwnership(req, id)
 
     const form = await prisma.form.update({ where: { id }, data: data as any })
 
-    res.json({ form })
+    res.json({ form: toApiForm(form) })
   } catch (error) {
     next(error)
   }
@@ -192,7 +215,7 @@ formsRouter.patch('/:id/status', authenticate, async (req: AuthRequest, res, nex
 
     const form = await prisma.form.update({ where: { id }, data: { status } })
 
-    res.json({ form })
+    res.json({ form: toApiForm(form) })
   } catch (error) {
     next(error)
   }
@@ -232,7 +255,7 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
 
     const { userId, ...publicForm } = form
 
-    res.json({ form: publicForm })
+    res.json({ form: toApiForm(publicForm) })
   } catch (error) {
     next(error)
   }

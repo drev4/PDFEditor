@@ -130,6 +130,8 @@ Three things that module encodes, each of which was a live defect:
 
 RE2 is a native module, so its binary is tied to a Node ABI — see [08-operations](./08-operations.md#configuration). It is loaded defensively: if it will not load, the service still starts and patterns are simply not enforced. Never fall back to `RegExp`, which would reinstate the hang.
 
+`services/pdf-url.ts` follows the same shape for a different kind of untrusted-adjacent value. A `Form.pdfUrl` is a client-supplied string that ends up as a filesystem path and as a URL handed to a browser, so exactly one module produces, parses and verifies it — `pdfFilenameFrom`, `canonicalPdfUrl`, `signPdfUrl`, `verifyPdfToken`. **Nothing else may split a `pdfUrl` on `/` or build an `/uploads` path by hand.** Three call sites used to do that independently; they now all go through the helper, which is also the single seam that a move to presigned object-storage URLs replaces.
+
 ## 9. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.

@@ -8,7 +8,7 @@ Last reviewed: **2026-08-28**.
 
 ## P0 — Blocks any real customer
 
-**Empty.** The data-loss defect, the unthrottled public write paths, the ReDoS surface, the red E2E suite and the unenforced Node version are all closed ([`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md)–[`0005`](../features/0005-working-ci-and-enforced-node-version.md)). The next things that stand between this and a paying customer are in P1 — signed URLs for uploaded PDFs (S1) and session hardening (S4) first.
+**Empty.** The data-loss defect, the unthrottled public write paths, the ReDoS surface, the red E2E suite, the unenforced Node version and the publicly served uploaded PDFs are all closed ([`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md)–[`0006`](../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)). The next things that stand between this and a paying customer are in P1 — session hardening (S4) first, then `helmet` + CSP (S5), which is near-zero effort.
 
 ## P1 — Security, privacy and operational readiness
 
@@ -19,7 +19,7 @@ Last reviewed: **2026-08-28**.
 | A global fallback rate limiter | Only the three unauthenticated write paths are limited. Everything else — including `GET /api/forms/public/:shareId` and `/uploads` — is unthrottled. Picking a global number that does not break the editor's legitimate bursts needs traffic data we do not have yet | [07-security](./sot/07-security-and-privacy.md) |
 | No UI for authoring a field `pattern` | `FieldPropertiesPanel.vue` has no pattern input, so the only way to set one is the API. Now that patterns are validated and a useful `400` names the problem, a UI is worth having — it needs live validation and must explain that lookahead/lookbehind/backreferences are unsupported | [`features/0004`](../features/0004-safe-author-supplied-regex.md) |
 | Frontend still compiles patterns with native `RegExp` | `frontend/src/composables/useFormValidation.ts:42` runs the author's pattern in the respondent's browser. Lower severity than the server case — it burns the respondent's own tab, not shared infrastructure, and it is already `try/catch`-wrapped — but it should agree with the backend's engine, or the two will disagree about which patterns are valid | [`features/0004`](../features/0004-safe-author-supplied-regex.md) |
-| Signed, expiring URLs for uploaded PDFs | `/uploads` is served publicly with no auth, no expiry, no revocation | [07-security](./sot/07-security-and-privacy.md) (S1) |
+| `Form.pdfUrl` is an unconstrained client-supplied string | `createFormSchema` / `updateFormSchema` accept any `z.string()`, so an author can point their own form at another author's uploaded filename. Filenames are unguessable, so this is obscurity, not a control — and since [`features/0006`](../features/0006-signed-expiring-urls-for-uploaded-pdfs.md) the API will mint a valid signed URL for whatever filename is in the column. The fix is to verify at write time that the file came from an upload this user made, which needs an uploads table | [07-security](./sot/07-security-and-privacy.md) |
 | `helmet` + CSP + security headers | None are set today; near-zero effort | (S5) |
 | Session hardening: shorter JWT expiry, refresh tokens, `httpOnly` cookie | A 7-day non-revocable token in `localStorage` turns any XSS into a week of account access | (S4) |
 | Structured logging (`pino`) with request ids and redaction | No way to answer "what happened to our submission at 14:32"; also the only way to see the silent PDF-embed failures | [08-operations](./sot/08-operations.md) · (S9) |
@@ -42,6 +42,7 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 | Member invitations and roles (`owner / admin / member`) | The first feature that makes B2B real |
 | `Plan` catalogue + entitlements service, `402` on limit reached | Validates limit UX before money is involved |
 | Stripe integration + `Subscription` | Revenue |
+| Per-file revocation for signed PDF URLs | Today revocation is all-or-nothing: rotate `JWT_SECRET` (invalidating every outstanding link) or delete the file. Withdrawing access to one PDF while leaving others valid needs a database-backed nonce or key version per file. Cheap to add alongside the uploads table above |
 | Object storage (S3/R2) for PDFs | Blocks running more than one replica or redeploying on ephemeral disk |
 | Job queue (BullMQ + Redis) for PDF extraction and embedding | Currently synchronous inside the request; timeout risk on large PDFs |
 | Public API with per-organization API keys | Requires stable field ids first |
@@ -60,6 +61,7 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 | Evaluate VueUse for `useDragAndDrop`, `useGridOverlay`, `useToolbarDrag` | Case by case; some encode editor-specific behaviour |
 | Soft delete or export prompt before `DELETE /api/forms/:id` | Cascades to every response with no undo |
 | `DELETE /api/forms/:formId/fields/:fieldId` still hard-deletes answers | The bulk save now archives a field that holds responses; the individual delete still cascades them away. Deliberately left as an explicit user act in [`features/0001`](../features/0001-stable-field-ids-and-safe-bulk-save.md), but the two paths should agree — probably by archiving here too, with a confirmation that says how many answers are affected |
+| No E2E coverage of opening a saved form for editing | `handleEdit` in `FormsList.vue` and `FormsManagementView.vue` downloads the form's PDF and loads its fields, and no test touches it. [`features/0006`](../features/0006-signed-expiring-urls-for-uploaded-pdfs.md) changed both and had to be verified by hand against the running app. One Playwright test would cover the whole path |
 | No UI for archived fields | A field archived by a save is invisible to its owner except as a toast at save time and a column in the responses table. No list, no un-archive, no way to tell an archived column from a live one in the dashboard |
 | The bulk save's concurrency guard is untested | The `SELECT … FOR UPDATE` in the bulk handler is what stops a response submitted mid-save from having its answer cascaded away. Nothing exercises it — a real test needs two connections and deliberate interleaving |
 | Nothing exercises a migration against a database that already holds data | CI applies migrations to a fresh database only, so a migration that is fine on empty tables and wrong on populated ones passes |

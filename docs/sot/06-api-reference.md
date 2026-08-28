@@ -14,7 +14,8 @@ Nothing gets added to this file without opening the route file first — see the
 /api/forms      -> formFieldsRouter    (same prefix as formsRouter — field paths are nested)
 /api/upload     -> uploadRouter
 /api/responses  -> responsesRouter
-/uploads        -> express.static      (raw PDF files, NO authentication)
+/uploads/pdfs/:token/:filename  -> signed PDF download (no auth; the signature IS the capability)
+/uploads/*                      -> 404 (the old unauthenticated static mount is gone)
 /health         -> { status, timestamp }
 ```
 
@@ -161,7 +162,24 @@ Limits, windows and the `trust proxy` hop count are configuration — [08-operat
 
 Then: `pdfProcessor.validatePDF` — on failure the file is deleted and the request fails with `400`. Then `extractFieldsFromPDF` — best-effort, a failure is logged and the upload still succeeds with `fields: []`.
 
-Response `201 {url, filename, size, fields}`, where `url` is `${BASE_URL}/uploads/pdfs/<filename>` and is publicly fetchable without a token.
+Response `201 {url, filename, size, fields}`, where `url` is the **canonical, unsigned** `${BASE_URL}/uploads/pdfs/<filename>`. This is the value to persist as `Form.pdfUrl`, and it is deliberately not a signed URL — a signature stored in that column would stop verifying one TTL later and permanently break the form. It is not fetchable on its own.
+
+## Serving an uploaded PDF — `app.ts`
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/uploads/pdfs/:token/:filename` | — | `token` is `<expiry-unix-seconds>.<hmac-sha256-hex>`, minted by `services/pdf-url.ts` |
+
+Unauthenticated on purpose: an anonymous respondent has to load the PDF of a published form, and the editor's download paths use a bare `fetch` with no `Authorization` header. The capability is the signature, not a session.
+
+- `200` — `application/pdf`, `Content-Disposition: inline`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`
+- `403 {error: "This link is invalid or has expired."}` — bad signature, expired token, or a filename outside `/^[A-Za-z0-9_-]+\.pdf$/`. Expired and forged are **deliberately indistinguishable**
+- `404 {error: "File not found"}` — signature valid, file absent
+- `404 {error: "Not found"}` — anything else under `/uploads`, including every URL of the old unsigned shape
+
+**Every response that carries a form carries a freshly signed `pdfUrl`** — `GET /api/forms`, `GET /api/forms/:id`, `GET /api/forms/public/:shareId`, `POST /api/forms`, `PUT /api/forms/:id`, `PATCH /api/forms/:id/status`. All of them go through one `toApiForm` serializer in `routes/forms.ts`. Conversely `POST /api/forms` and `PUT /api/forms/:id` normalise an incoming `pdfUrl` back to canonical form before writing, so a client echoing back a value it read cannot persist a signature.
+
+TTL is configuration — [08-operations](./08-operations.md#configuration).
 
 ## Error format — `middleware/errorHandler.ts`
 
