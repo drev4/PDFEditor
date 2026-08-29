@@ -42,7 +42,7 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 
 | Item | Why |
 |---|---|
-| `Organization` + `Membership`, migrate `Form.userId` → `Form.organizationId` | The longest-lead schema change; cheap now, a rewrite later |
+| `Organization` + `Membership`, migrate `Form.userId` → `Form.organizationId` | The longest-lead schema change; cheap now, a rewrite later. Specced as [`features/0009`](../features/0009-organizations-own-resources.md) — **next**, per the [build order](./sot/10-saas-roadmap.md#build-order) |
 | Member invitations and roles (`owner / admin / member`) | The first feature that makes B2B real |
 | `Plan` catalogue + entitlements service, `402` on limit reached | Validates limit UX before money is involved |
 | Stripe integration + `Subscription` | Revenue |
