@@ -51,22 +51,34 @@ function toApiForm<T extends { pdfUrl: string | null }>(form: T): Omit<T, 'organ
   return { ...rest, pdfUrl: signPdfUrl(form.pdfUrl) } as Omit<T, 'organizationId' | 'createdByUserId'>
 }
 
+/**
+ * The response and field counts every form response carries.
+ *
+ * Shared rather than repeated because it was not, and the routes drifted: only
+ * the list included `_count`, so publishing a form from the share dialog — a
+ * PATCH whose response replaced the row in the store — wiped the counts and the
+ * dialog reported 0 responses for a form that had hundreds. A client should not
+ * have to know which endpoint returns a whole form and which returns a partial
+ * one.
+ */
+const formCounts = {
+  _count: {
+    select: {
+      // Archived fields are gone from the editor; they must not inflate
+      // the field count shown on the dashboard.
+      fields: { where: { deletedAt: null } },
+      responses: true
+    }
+  }
+} as const
+
 // GET /api/forms - List user's forms
 formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const forms = await prisma.form.findMany({
       where: callerCanReachForm(req),
       orderBy: { createdAt: 'desc' },
-      include: {
-        _count: {
-          select: {
-            // Archived fields are gone from the editor; they must not inflate
-            // the field count shown on the dashboard.
-            fields: { where: { deletedAt: null } },
-            responses: true
-          }
-        }
-      }
+      include: formCounts
     })
 
     res.json({ forms: forms.map(toApiForm) })
@@ -153,7 +165,10 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
 
     const form = await prisma.form.findFirst({
       where: { id, ...callerCanReachForm(req) },
-      include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
+      include: {
+        fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } },
+        ...formCounts
+      }
     })
 
     if (!form) {
@@ -206,7 +221,11 @@ formsRouter.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
 
     await verifyFormOwnership(req, id)
 
-    const form = await prisma.form.update({ where: { id }, data: data as any })
+    const form = await prisma.form.update({
+      where: { id },
+      data: data as any,
+      include: formCounts
+    })
 
     res.json({ form: toApiForm(form) })
   } catch (error) {
@@ -226,7 +245,11 @@ formsRouter.patch('/:id/status', authenticate, async (req: AuthRequest, res, nex
 
     await verifyFormOwnership(req, id)
 
-    const form = await prisma.form.update({ where: { id }, data: { status } })
+    const form = await prisma.form.update({
+      where: { id },
+      data: { status },
+      include: formCounts
+    })
 
     res.json({ form: toApiForm(form) })
   } catch (error) {

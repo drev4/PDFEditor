@@ -165,7 +165,7 @@ Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as 
 | `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
 | `/dashboard/editor` | `EditorView` | none — its own top bar and left rail |
 
-`AppShell.vue` is the 232px sidebar and is where the four nav destinations live. The **editor has no app sidebar**, as the `Editor` artboard draws it: one document, and the chrome gets out of the way. Its left rail (Documents / Forms / Pages) is part of the screen and is always present — it used to appear only once a document was open, so the screen you landed on had no structure at all.
+`AppShell.vue` is the 232px sidebar and is where the four nav destinations live. The **editor has no app sidebar**, as the `Editor` artboard draws it: one document, and the chrome gets out of the way. Its left rail is **one fixed rail** — the field types, then the page thumbnails, as the `Editor` artboard draws it (`components/editor/EditorRail.vue`). It replaced two overlapping things: a tabbed rail (Documents / Forms / Pages) and a floating toolbar that auto-collapsed on mouseout and *also* offered the field types. Two places to add a field, one of which hid itself, is why the rail has no disclosure of its own; it collapses into a drawer only below `lg`, where it cannot sit beside the document.
 
 ### What the canvas has that the app does not
 
@@ -176,13 +176,35 @@ Nobody should read the canvas as a description of the product. What is drawn and
 - **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
 
-### Editor edits are persisted, and were not
+### Editor edits are held, then saved explicitly
 
 The editor's tools modify the PDF in the browser with pdf-lib and write the result to `documentStore.activeDocument.arrayBuffer`. Nothing sent it anywhere, so **every text and image edit was lost on reload** while the UI showed it as applied.
 
-`useFormManagement().persistEditedDocument()` closes that: it uploads the edited bytes through the existing `POST /api/upload` and repoints the form with `PATCH /api/forms/:id`. No new endpoint, because those two already do exactly this. It deliberately does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced. Both consequences, and the drawing tool which was not covered, are in [`docs/BACKLOG.md`](../BACKLOG.md).
+They are now held deliberately, not accidentally. `documentStore.hasUnsavedEdits` records that there is something to commit; `useFormManagement().persistEditedDocument()` commits it, from **`Save all` in the editor panel and nowhere else**. The first attempt at this uploaded on every placement, which is worse than it sounds: it makes a stray click a fact on the server and leaves someone who is experimenting with no way back.
 
-A failed save sets `documentStore.error` rather than reporting that the edit failed. The edit did not fail; it is on the page. Saying which is the difference between a user retrying and a user closing the tab believing their work is stored.
+Because the edits are held, three things have to exist together and are easy to drop one of:
+
+- `Save all` saves the fields **first**, then the document bytes. The field save embeds the AcroForm into the PDF on the server; uploading the browser's copy afterwards is the only order that does not overwrite it.
+- The editor says the edits are unsaved, next to the button that saves them.
+- `EditorView.vue` guards both exits — `beforeunload` for closing the tab, `onBeforeRouteLeave` for navigating away.
+
+`persistEditedDocument` uploads through the existing `POST /api/upload` and repoints the form with `PATCH /api/forms/:id`; no new endpoint, because those two already do this. It does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced ([`docs/BACKLOG.md`](../BACKLOG.md)).
+
+### Page rotation
+
+Field positions are stored **once**, in canvas pixels at the base scale with the page upright, because that is what the backend embeds against (`pdf-processor.ts`). Rotating the view must never change what is stored — only where the field is drawn.
+
+Two faults lived here. pdf.js already renders a rotated page (`getViewport({ scale, rotation })`), and `PDFViewer.vue` **also** applied a CSS `rotate()` to the wrapper: at 90° the page displayed at 180°, and the field overlay sat nowhere near it. The CSS rotation is gone. Second, nothing mapped field geometry through the rotation at all.
+
+`utils/pdfCoordinates.ts` now holds three functions with tests, including the round trip that is the property that matters:
+
+| | |
+|---|---|
+| `rotateFieldRect` | stored rect → where to draw it |
+| `unrotateFieldPoint` | a click on the rotated page → what to store |
+| `unrotatedPageSize` | the page's upright size, worked back out of the canvas pdf.js produced |
+
+They are inverses, and a disagreement between them saves fields in the wrong place silently. Dragging and resizing are refused while the page is rotated rather than applying an unmapped screen delta — see [`docs/BACKLOG.md`](../BACKLOG.md).
 
 The **landing page** is designed and unbuilt, and is a [parallel track](./10-saas-roadmap.md#parallel-track-the-landing-page) rather than a step in the chain.
 

@@ -10,6 +10,7 @@
       'field-dropdown': field.type === 'dropdown'
     }"
     :style="fieldStyle"
+    :title="isRotated ? 'Rotate the page back to upright to move or resize this field' : undefined"
     @mousedown.stop="onMouseDown"
     @click.stop="onClick"
   >
@@ -39,8 +40,8 @@
       </span>
     </template>
 
-    <!-- Resize Handles (only when selected) -->
-    <template v-if="isSelected">
+    <!-- Resize Handles (only when selected, and only upright) -->
+    <template v-if="isSelected && !isRotated">
       <div class="resize-handle nw" @mousedown.stop="startResize($event, 'nw')"></div>
       <div class="resize-handle ne" @mousedown.stop="startResize($event, 'ne')"></div>
       <div class="resize-handle sw" @mousedown.stop="startResize($event, 'sw')"></div>
@@ -56,10 +57,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useFormFieldsStore, type FormField } from '@/stores/formFields.store'
+import { rotateFieldRect } from '@/utils/pdfCoordinates'
 import { useToast } from 'primevue/usetoast'
 
 const props = defineProps<{
   field: FormField
+  pageWidth: number
+  pageHeight: number
+  rotation: number
+  scaleFactor: number
 }>()
 
 const formFieldsStore = useFormFieldsStore()
@@ -67,12 +73,35 @@ const toast = useToast()
 
 const isSelected = computed(() => formFieldsStore.selectedFieldId === props.field.id)
 
-const fieldStyle = computed(() => ({
-  left: `${props.field.position.x}px`,
-  top: `${props.field.position.y}px`,
-  width: `${props.field.position.width}px`,
-  height: `${props.field.position.height}px`
-}))
+// Where the field is *drawn*. What is stored never changes when the page is
+// turned — see rotateFieldRect in utils/pdfCoordinates.ts.
+const fieldStyle = computed(() => {
+  const rect = rotateFieldRect(
+    props.field.position,
+    props.pageWidth,
+    props.pageHeight,
+    props.rotation,
+    props.scaleFactor
+  )
+
+  return {
+    left: `${rect.x}px`,
+    top: `${rect.y}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`
+  }
+})
+
+/**
+ * Dragging and resizing are turned off while the page is rotated.
+ *
+ * Both work in screen deltas, and on a turned page a screen delta is not a
+ * stored delta — applying it unmapped writes a position that is wrong on the
+ * printed PDF, silently and permanently. Refusing to move a field is a
+ * nuisance; moving it somewhere the author did not point is data corruption.
+ * Mapping the deltas per handle is the real fix and is in docs/BACKLOG.md.
+ */
+const isRotated = computed(() => props.rotation % 360 !== 0)
 
 // What the tag above a placed field says. `Dropdown · required` is the shape
 // the Editor artboard draws: the type, and the one property an author needs to
@@ -105,6 +134,10 @@ const onClick = () => {
 
 const onMouseDown = (e: MouseEvent) => {
   if (isResizing.value) return
+  if (isRotated.value) {
+    formFieldsStore.selectField(props.field.id)
+    return
+  }
 
   formFieldsStore.selectField(props.field.id)
   isDragging.value = true
@@ -148,6 +181,7 @@ const stopDrag = async () => {
 }
 
 const startResize = (e: MouseEvent, handle: string) => {
+  if (isRotated.value) return
   isResizing.value = true
   resizeHandle.value = handle
   resizeStart.value = {

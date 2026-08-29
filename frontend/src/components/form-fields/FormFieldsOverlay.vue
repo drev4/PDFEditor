@@ -11,6 +11,10 @@
       v-for="field in currentPageFields"
       :key="field.id"
       :field="field"
+      :page-width="pageSize.pageWidth"
+      :page-height="pageSize.pageHeight"
+      :rotation="rotation"
+      :scale-factor="scaleFactor"
     />
 
     <!-- Preview when adding new field -->
@@ -43,6 +47,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import { unrotateFieldPoint, unrotatedPageSize } from '@/utils/pdfCoordinates'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
 import { useToast } from 'primevue/usetoast'
@@ -62,6 +67,20 @@ const overlayRef = ref<HTMLDivElement | null>(null)
 const previewPosition = ref<{ x: number; y: number } | null>(null)
 
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
+const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
+
+/**
+ * Positions are stored in canvas pixels at the base scale with the page
+ * upright. The canvas we are drawing on is at the current scale and may be
+ * turned, so both have to be divided back out before anything is compared to a
+ * stored coordinate.
+ */
+const BASE_SCALE = 1.5
+const scaleFactor = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)
+
+const pageSize = computed(() =>
+  unrotatedPageSize(props.canvasWidth, props.canvasHeight, rotation.value, scaleFactor.value)
+)
 
 const currentPageFields = computed(() => {
   return formFieldsStore.getFieldsForPage(currentPage.value)
@@ -132,8 +151,31 @@ const handleOverlayClick = async (e: MouseEvent) => {
   }
 
   const rect = overlayRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left - defaultFieldSize.value.width / 2
-  const y = e.clientY - rect.top - defaultFieldSize.value.height / 2
+  const size = defaultFieldSize.value
+
+  // The click arrives in screen space on a page that may be turned. What gets
+  // stored has to be in the upright, base-scale space the backend embeds
+  // against, so the point goes back through the inverse of the transform the
+  // field is drawn with. Storing the raw click is how a field placed on a
+  // rotated page ends up somewhere else on the printed PDF.
+  const screenX = e.clientX - rect.left - size.width / 2
+  const screenY = e.clientY - rect.top - size.height / 2
+
+  const stored = unrotateFieldPoint(
+    {
+      x: Math.max(0, Math.min(screenX, rect.width - size.width)),
+      y: Math.max(0, Math.min(screenY, rect.height - size.height))
+    },
+    pageSize.value.pageWidth,
+    pageSize.value.pageHeight,
+    rotation.value,
+    scaleFactor.value
+  )
+
+  // A quarter turn maps the top-left corner of the drawn box to a different
+  // corner of the stored box, so clamp after mapping rather than before.
+  const x = Math.max(0, Math.min(stored.x, pageSize.value.pageWidth - size.width))
+  const y = Math.max(0, Math.min(stored.y, pageSize.value.pageHeight - size.height))
 
   // Create the field
   const fieldType = formFieldsStore.fieldTypeToAdd
@@ -149,10 +191,10 @@ const handleOverlayClick = async (e: MouseEvent) => {
     required: false,
     border: false, // Por defecto, los campos son transparentes sin borde
     position: {
-      x: Math.max(0, Math.min(x, rect.width - defaultFieldSize.value.width)),
-      y: Math.max(0, Math.min(y, rect.height - defaultFieldSize.value.height)),
-      width: defaultFieldSize.value.width,
-      height: defaultFieldSize.value.height,
+      x,
+      y,
+      width: size.width,
+      height: size.height,
       page: currentPage.value
     },
     options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Opción 1', 'Opción 2'] : undefined

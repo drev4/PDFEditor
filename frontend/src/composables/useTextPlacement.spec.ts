@@ -30,14 +30,6 @@ vi.mock('pdf-lib', () => ({
   }
 }))
 
-// Placing text now persists the edited PDF. Mocked here so these tests stay
-// about text placement and do not make a real upload call — which they were
-// doing, and swallowing the 401 it came back with.
-const persistEditedDocument = vi.fn().mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
-vi.mock('./useFormManagement', () => ({
-  useFormManagement: () => ({ persistEditedDocument })
-}))
-
 describe('useTextPlacement', () => {
   let canvasRef: any
   let documentStore: ReturnType<typeof useDocumentStore>
@@ -58,11 +50,6 @@ describe('useTextPlacement', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
-  })
-
-  beforeEach(() => {
-    persistEditedDocument.mockClear()
-    persistEditedDocument.mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
   })
 
   describe('confirmTextPlacement', () => {
@@ -238,9 +225,13 @@ describe('useTextPlacement', () => {
   })
 
   // Regression. The text tool drew into the in-memory PDF buffer and stopped
-  // there: nothing uploaded it, so every text edit was gone on reload while
-  // the UI showed it as applied.
-  describe('persisting the edit', () => {
+  // there: nothing recorded that the document had changed, so the edit was
+  // lost on reload with nothing having warned the user.
+  //
+  // It is deliberately not uploaded here. An edit is not a decision until the
+  // user saves, and writing every placement straight to the server left
+  // someone experimenting with no way back.
+  describe('marking the document as edited', () => {
     const placeText = async () => {
       const { confirmTextPlacement } = useTextPlacement(canvasRef)
       editorStore.setTextPreview({
@@ -255,13 +246,15 @@ describe('useTextPlacement', () => {
       await confirmTextPlacement()
     }
 
-    it('uploads the edited document after placing text', async () => {
+    it('marks the document as having unsaved edits', async () => {
+      expect(documentStore.hasUnsavedEdits).toBe(false)
+
       await placeText()
 
-      expect(persistEditedDocument).toHaveBeenCalledTimes(1)
+      expect(documentStore.hasUnsavedEdits).toBe(true)
     })
 
-    it('does not upload anything when the text is blank', async () => {
+    it('does not mark anything when the text is blank', async () => {
       const { confirmTextPlacement } = useTextPlacement(canvasRef)
       editorStore.setTextPreview({
         text: '   ',
@@ -275,28 +268,13 @@ describe('useTextPlacement', () => {
 
       await confirmTextPlacement()
 
-      expect(persistEditedDocument).not.toHaveBeenCalled()
+      expect(documentStore.hasUnsavedEdits).toBe(false)
     })
 
-    it('tells the user when the text was applied but not saved', async () => {
-      vi.spyOn(console, 'error').mockImplementation(() => {})
-      persistEditedDocument.mockRejectedValueOnce(new Error('Network down'))
-
+    it('commits the text to the in-memory buffer', async () => {
       await placeText()
 
-      // The distinction that matters: the edit is on the page, the save is not
-      // done, and the message says so rather than claiming the text failed.
-      expect(documentStore.error).toMatch(/could not be saved/i)
-    })
-
-    it('leaves the text on the page when the save fails', async () => {
-      vi.spyOn(console, 'error').mockImplementation(() => {})
-      persistEditedDocument.mockRejectedValueOnce(new Error('Network down'))
-
-      await placeText()
-
-      // Cleared preview means the text was committed to the buffer; a failed
-      // upload must not roll that back or the user loses work they can see.
+      // A cleared preview means the text was applied rather than left pending.
       expect(editorStore.textPreview).toBeNull()
     })
   })

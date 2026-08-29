@@ -94,14 +94,21 @@
         />
 
         <Button
-          label="Update Fields"
+          :label="documentStore.hasUnsavedEdits ? 'Save all (unsaved changes)' : 'Save all'"
           icon="pi pi-save"
           @click="handleUpdateFields"
           class="w-full"
           severity="info"
-          outlined
-          :loading="formFieldsStore.loading"
+          :outlined="!documentStore.hasUnsavedEdits"
+          :loading="formFieldsStore.loading || isUploadingPDF"
         />
+
+        <!-- The text and image tools change the PDF in the browser and nothing
+             is sent until this is pressed, so the editor has to say so. -->
+        <p v-if="documentStore.hasUnsavedEdits" class="text-meta text-limit flex items-start gap-1">
+          <i class="pi pi-exclamation-circle mt-0.5"></i>
+          <span>Text and images you added are only in this browser. Save all to store them.</span>
+        </p>
 
         <Button
           label="Upload PDF to Server"
@@ -271,7 +278,27 @@ async function handleSaveForm() {
 async function handleUpdateFields() {
   try {
     const fieldCount = formFieldsStore.fields.length
+    const hadDocumentEdits = documentStore.hasUnsavedEdits
+
     await formFieldsStore.saveAllFields()
+
+    // The order matters. Saving the fields embeds them into the PDF on the
+    // server, so the document bytes have to go up afterwards or the upload
+    // would overwrite that with the browser's copy, which has no AcroForm.
+    if (hadDocumentEdits) {
+      isUploadingPDF.value = true
+      try {
+        await formManagement.persistEditedDocument()
+        toast.add({
+          severity: 'success',
+          summary: 'Document saved',
+          detail: 'The text and images you added are now stored.',
+          life: 3000
+        })
+      } finally {
+        isUploadingPDF.value = false
+      }
+    }
 
     // Show enhanced message indicating fields are embedded in PDF
     toast.add({

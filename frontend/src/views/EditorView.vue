@@ -68,19 +68,15 @@
     </header>
 
     <!-- Mobile rail -->
+    <!-- Below `lg` the rail cannot sit beside the document, so it moves into a
+         drawer. That is the only reason it is ever collapsed. -->
     <Drawer v-model:visible="mobileMenuVisible" header="Document" class="w-80">
       <div class="flex flex-col h-full">
-        <TabView class="flex-1 flex flex-col sidebar-tabs">
-          <TabPanel value="0" header="Docs">
-            <DocumentsList @select="mobileMenuVisible = false" />
-          </TabPanel>
-          <TabPanel value="1" header="Forms">
-            <FormsList @select="mobileMenuVisible = false" />
-          </TabPanel>
-          <TabPanel value="2" header="Pages">
-            <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
-          </TabPanel>
-        </TabView>
+        <EditorRail
+          class="flex flex-1 w-full border-r-0"
+          :pdf-doc="pdfViewerRef?.pdfDoc || null"
+          @click="mobileMenuVisible = false"
+        />
 
         <div class="p-4 border-t border-line">
           <Button
@@ -100,22 +96,10 @@
            way the Editor artboard draws it. It used to appear only once a
            document was open, so the screen you land on had no structure at all
            and no way to reach a document from inside the editor. -->
-      <aside
-        class="hidden lg:flex w-rail flex-shrink-0 bg-surface-subtle border-r border-line overflow-hidden flex-col"
-        data-testid="editor-rail"
-      >
-        <TabView class="flex-1 flex flex-col sidebar-tabs">
-          <TabPanel value="0" header="Documents" class="flex-1">
-            <DocumentsList />
-          </TabPanel>
-          <TabPanel value="1" header="Forms" class="flex-1">
-            <FormsList />
-          </TabPanel>
-          <TabPanel value="2" header="Pages" class="flex-1">
-            <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
-          </TabPanel>
-        </TabView>
-      </aside>
+      <EditorRail
+        class="hidden lg:flex"
+        :pdf-doc="pdfViewerRef?.pdfDoc || null"
+      />
 
       <!-- Empty state: same restrained language as the Forms dropzone. -->
       <div
@@ -171,15 +155,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { RouterLink, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import ProgressSpinner from 'primevue/progressspinner'
 import Toast from 'primevue/toast'
-import TabView from 'primevue/tabview'
-import TabPanel from 'primevue/tabpanel'
 import { useAuthStore } from '@/stores/auth.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
@@ -187,11 +169,9 @@ import { useFormsStore } from '@/stores/forms.store'
 import { useFieldsErrorHandler } from '@/composables/useFieldsErrorHandler'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
+import EditorRail from '@/components/editor/EditorRail.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import BrandMark from '@/components/ui/BrandMark.vue'
-import DocumentsList from '@/components/pdf/DocumentsList.vue'
-import FormsList from '@/components/forms/FormsList.vue'
-import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
 import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 
 const authStore = useAuthStore()
@@ -206,6 +186,33 @@ const mobileMenuVisible = ref(false)
 
 // Initialize error handler for fields
 useFieldsErrorHandler()
+
+/**
+ * Edits made with the text and image tools live in the browser until `Save all`.
+ * That is deliberate — an experiment should not become a fact on the server —
+ * but it means closing the tab throws them away, so the browser has to ask.
+ *
+ * Only registered while there is something to lose: an unconditional handler
+ * would prompt on every navigation away from an untouched document.
+ */
+const warnOnUnsavedEdits = (event: BeforeUnloadEvent) => {
+  if (!documentStore.hasUnsavedEdits) return
+  event.preventDefault()
+  // Browsers show their own wording; a non-empty value is what triggers it.
+  event.returnValue = ''
+}
+
+onMounted(() => window.addEventListener('beforeunload', warnOnUnsavedEdits))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnOnUnsavedEdits))
+
+// Leaving the editor by router link loses the same work, and the browser
+// cannot help with that one.
+onBeforeRouteLeave(() => {
+  if (!documentStore.hasUnsavedEdits) return true
+  return window.confirm(
+    'The text and images you added have not been saved. Leave the editor and lose them?'
+  )
+})
 
 onMounted(() => {
   formsStore.fetchForms()
@@ -244,55 +251,3 @@ watch(() => documentStore.error, (error) => {
   }
 })
 </script>
-
-<style scoped>
-.sidebar-tabs {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.sidebar-tabs :deep(.p-tabview-nav-container) {
-  background: transparent;
-  border-bottom: 1px solid theme('colors.line.DEFAULT');
-  padding: 0 0.75rem;
-}
-
-.sidebar-tabs :deep(.p-tabview-nav) {
-  background: transparent;
-  border: none;
-  gap: 0.25rem;
-}
-
-.sidebar-tabs :deep(.p-tabview-nav-link) {
-  background: transparent;
-  border: none;
-  color: theme('colors.muted');
-  padding: 0.6rem 0.5rem;
-  font-weight: 500;
-  font-size: 12.5px;
-}
-
-.sidebar-tabs :deep(.p-highlight .p-tabview-nav-link) {
-  color: theme('colors.ink');
-  border-bottom: 1.5px solid theme('colors.ink');
-  background: transparent;
-}
-
-.sidebar-tabs :deep(.p-tabview-panels) {
-  background: transparent;
-  padding: 0;
-  flex: 1;
-  overflow: hidden;
-  border: none;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-tabs :deep(.p-tabview-panel) {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-</style>

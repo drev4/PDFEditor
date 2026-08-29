@@ -222,6 +222,7 @@ export function useFormManagement() {
 
     const { url } = await uploadPDF(file)
     await formsStore.updateForm(formId, { pdfUrl: url })
+    documentStore.markSaved()
 
     return url
   }

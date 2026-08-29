@@ -78,6 +78,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Field } from '@/services/forms'
+import { rotateFieldRect } from '@/utils/pdfCoordinates'
 
 const props = defineProps<{
   field: Field
@@ -85,6 +86,9 @@ const props = defineProps<{
   errorMessage?: string
   scale: number
   baseScale?: number
+  rotation?: number
+  pageWidth?: number
+  pageHeight?: number
 }>()
 
 defineEmits<{
@@ -98,11 +102,27 @@ const fieldStyle = computed(() => {
   const scaleFactor = props.scale / BASE_SCALE
   const { x, y, width, height } = props.field.position
 
+  // The page's upright size in stored units, which rotation is measured
+  // against. With no page size there is nothing to mirror against, so fall back
+  // to the upright placement rather than guessing and putting the field
+  // somewhere arbitrary.
+  const pageWidth = props.pageWidth ?? 0
+  const pageHeight = props.pageHeight ?? 0
+  const rotation = pageWidth && pageHeight ? (props.rotation ?? 0) : 0
+
+  const rect = rotateFieldRect(
+    { x, y, width, height },
+    pageWidth,
+    pageHeight,
+    rotation,
+    scaleFactor
+  )
+
   return {
-    left: `${x * scaleFactor}px`,
-    top: `${y * scaleFactor}px`,
-    width: `${width * scaleFactor}px`,
-    height: `${height * scaleFactor}px`
+    left: `${rect.x}px`,
+    top: `${rect.y}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`
   }
 })
 </script>

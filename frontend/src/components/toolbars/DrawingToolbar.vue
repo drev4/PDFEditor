@@ -26,32 +26,13 @@
       </button>
     </div>
 
-    <!-- Separator -->
-    <div class="toolbar-separator" v-show="!isCollapsed">
-      <span>Campos</span>
-    </div>
-    <div class="toolbar-separator collapsed-separator" v-show="isCollapsed"></div>
-
-    <!-- Form Field Tools -->
-    <div class="toolbar-tools field-tools">
-      <button
-        v-for="tool in fieldTools"
-        :key="tool.id"
-        :class="{ 'active': activeTool === tool.id }"
-        :title="tool.label"
-        @click="selectFieldTool(tool)"
-      >
-        <i :class="tool.icon"></i>
-        <span v-show="!isCollapsed">{{ tool.label }}</span>
-      </button>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { useToolbarDrag } from '@/composables/useToolbarDrag'
-import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import { useFormFieldsStore } from '@/stores/formFields.store'
 
 const formFieldsStore = useFormFieldsStore()
 
@@ -62,13 +43,9 @@ const tools = [
   { id: 'image', label: 'Imagen', icon: 'pi pi-image', group: 'general' }
 ]
 
-// Form field tools
-const fieldTools = [
-  { id: 'field-text', label: 'Campo texto', icon: 'pi pi-pencil', fieldType: 'text' },
-  { id: 'field-checkbox', label: 'Casilla', icon: 'pi pi-check-square', fieldType: 'checkbox' },
-  { id: 'field-radio', label: 'Opción múltiple', icon: 'pi pi-circle', fieldType: 'radio' },
-  { id: 'field-dropdown', label: 'Desplegable', icon: 'pi pi-chevron-down', fieldType: 'dropdown' }
-]
+// Field types are not here any more: they are in the editor rail, which is
+// always visible. This toolbar collapses on mouseout, and a control that hides
+// itself is a poor place for the primary action of the screen.
 
 // State
 const toolbarRef = ref<HTMLElement | null>(null)
@@ -106,13 +83,6 @@ const selectTool = (toolId: string) => {
   activeTool.value = toolId
   formFieldsStore.cancelAddingField()
   emit('select-tool', toolId)
-}
-
-// Field tool selection
-const selectFieldTool = (tool: { id: string; fieldType: string }) => {
-  activeTool.value = tool.id
-  formFieldsStore.startAddingField(tool.fieldType as FieldType)
-  emit('select-tool', tool.id)
 }
 
 // Cleanup

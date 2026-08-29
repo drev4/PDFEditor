@@ -19,15 +19,30 @@
             <i class="pi pi-refresh text-[13px]" :class="{ 'pi-spin': formsStore.loading }" />
           </button>
 
-          <!-- The one accent action on this screen. -->
+          <!-- The one accent action on this screen. It starts a *new* form:
+               going straight to the editor reopened whatever document was
+               still in the store, so "New form" showed the last form the user
+               had been editing. -->
           <button
             type="button"
             class="flex items-center gap-1.5 h-control px-3.5 rounded-control bg-accent hover:bg-accent-pressed text-white text-row font-medium transition-colors"
-            @click="router.push('/dashboard/editor')"
+            data-testid="new-form-button"
+            @click="startNewForm"
           >
             <i class="pi pi-plus text-[12px]" />
             <span>New form</span>
           </button>
+
+          <!-- Owned by `startNewForm`, which opens it. Hidden because the
+               button above is the affordance; this is only the file dialog. -->
+          <input
+            ref="newFormInput"
+            type="file"
+            accept="application/pdf"
+            class="hidden"
+            data-testid="new-form-input"
+            @change="handleNewFormFile"
+          />
         </div>
       </header>
 
@@ -146,7 +161,7 @@
           <span class="text-body text-muted text-center">
             Drop a PDF here. Existing PDF forms keep their fields.
           </span>
-          <FileUploader @loaded="router.push('/dashboard/editor')" />
+          <FileUploader @loaded="router.push('/dashboard/editor')" @before-select="resetEditorState" />
         </div>
       </div>
     </div>
@@ -177,6 +192,7 @@ import StatusPill from '@/components/ui/StatusPill.vue'
 import ShareFormModal from '@/components/forms/ShareFormModal.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import { useFormsStore } from '@/stores/forms.store'
+import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
 import { relativeTime } from '@/utils/formatDate'
@@ -187,10 +203,52 @@ const toast = useToast()
 const confirm = useConfirm()
 const formsStore = useFormsStore()
 const documentStore = useDocumentStore()
+const formFieldsStore = useFormFieldsStore()
 const formManagement = useFormManagement()
 
 const showShareModal = ref(false)
 const selectedForm = ref<Form | null>(null)
+const newFormInput = ref<HTMLInputElement | null>(null)
+
+/**
+ * Everything the editor holds about the form being worked on.
+ *
+ * The editor reads its document and its fields from stores that outlive the
+ * route, so opening it without clearing them shows the previous form. That is
+ * what made "New form" open an existing one.
+ */
+function resetEditorState() {
+  documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
+  formFieldsStore.clearFields()
+  formFieldsStore.setCurrentForm(null)
+  documentStore.markSaved()
+}
+
+function startNewForm() {
+  resetEditorState()
+  newFormInput.value?.click()
+}
+
+async function handleNewFormFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Reset the input so picking the same file twice still fires `change`.
+  input.value = ''
+
+  if (!file || file.type !== 'application/pdf') return
+
+  try {
+    await documentStore.loadPDF(file)
+    router.push('/dashboard/editor')
+  } catch (err) {
+    toast.add({
+      severity: 'error',
+      summary: 'Could not open that PDF',
+      detail: err instanceof Error ? err.message : 'The file could not be read',
+      life: 5000
+    })
+  }
+}
 
 type Tab = 'all' | FormStatus
 const tabs: { value: Tab; label: string }[] = [
@@ -249,6 +307,10 @@ async function handleEdit(form: Form) {
   }
 
   try {
+    // Same reason as `startNewForm`: whatever is already open would otherwise
+    // still be there underneath the form being opened.
+    resetEditorState()
+
     const pdfFileName = form.pdfUrl.split('/').pop() || `${form.title}.pdf`
 
     // Signed PDF URLs expire; the one on this cached row may be stale. Re-read

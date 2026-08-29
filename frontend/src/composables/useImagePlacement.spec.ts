@@ -34,13 +34,6 @@ const createMockImageFile = (name: string, type: string) => {
   return file
 }
 
-// Placing an image now persists the edited PDF. Mocked so these tests stay
-// about image placement rather than making a real upload call.
-const persistEditedDocument = vi.fn().mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
-vi.mock('./useFormManagement', () => ({
-  useFormManagement: () => ({ persistEditedDocument })
-}))
-
 describe('useImagePlacement', () => {
   let canvasRef: any
   let documentStore: ReturnType<typeof useDocumentStore>
@@ -61,11 +54,6 @@ describe('useImagePlacement', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
-  })
-
-  beforeEach(() => {
-    persistEditedDocument.mockClear()
-    persistEditedDocument.mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
   })
 
   describe('toggleFlipHorizontal', () => {
@@ -228,10 +216,10 @@ describe('useImagePlacement', () => {
     })
   })
 
-  // Same regression the text tool had: the image was drawn into the in-memory
-  // buffer and nothing uploaded it, so it was gone on reload.
-  describe('persisting the edit', () => {
-    const placeImage = async () => {
+  // Same regression the text tool had: the image went into the in-memory
+  // buffer and nothing recorded that there was anything to save.
+  describe('marking the document as edited', () => {
+    it('marks the document as having unsaved edits', async () => {
       editorStore.setImagePreview({
         file: createMockImageFile('signature.png', 'image/png'),
         dataUrl: 'data:image/png;base64,mock',
@@ -242,22 +230,10 @@ describe('useImagePlacement', () => {
         maintainAspectRatio: true
       })
       const { confirmImagePlacement } = useImagePlacement(canvasRef)
+
       await confirmImagePlacement()
-    }
 
-    it('uploads the edited document after placing an image', async () => {
-      await placeImage()
-
-      expect(persistEditedDocument).toHaveBeenCalledTimes(1)
-    })
-
-    it('tells the user when the image was applied but not saved', async () => {
-      vi.spyOn(console, 'error').mockImplementation(() => {})
-      persistEditedDocument.mockRejectedValueOnce(new Error('Network down'))
-
-      await placeImage()
-
-      expect(documentStore.error).toMatch(/could not be saved/i)
+      expect(documentStore.hasUnsavedEdits).toBe(true)
     })
   })
 })

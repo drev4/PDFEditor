@@ -6,6 +6,10 @@ Base URL: `VITE_API_URL` on the frontend, default `http://localhost:3000/api`.
 
 Nothing gets added to this file without opening the route file first — see the `api-contract-guard` skill.
 
+
+> **Every route that returns a form returns its `_count`** (`fields` excluding archived, and `responses`). This was not true — only `GET /api/forms` included it — and the share dialog, which reads `_count.responses`, showed 0 for a form with hundreds the moment it was published, because `PATCH /:id/status` returned a form without counts and the client wrote that over the row it had. The shape is defined once as `formCounts` in `backend/src/routes/forms.ts`. Covered by `backend/tests/integration/form-counts.spec.ts`, which needs a real database because `_count` is computed by one.
+
+
 ## Router mounting (`app.ts`)
 
 ```

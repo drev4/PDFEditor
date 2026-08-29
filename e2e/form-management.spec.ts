@@ -117,6 +117,35 @@ test.describe('The shell', () => {
     await expect(page.locator('[data-testid="app-sidebar"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="back-to-forms"]')).toBeVisible();
   });
+
+  // One rail, always open. The field types used to live in a floating toolbar
+  // that collapsed on mouseout, and the rail was a set of tabs.
+  test('the rail offers every field type and the pages, without disclosure', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+    const rail = page.locator('[data-testid="editor-rail"]');
+
+    for (const type of ['text', 'textarea', 'checkbox', 'radio', 'dropdown']) {
+      await expect(rail.locator(`[data-testid="add-field-${type}"]`)).toBeVisible();
+    }
+
+    await expect(rail.getByText('Fields', { exact: true })).toBeVisible();
+    await expect(rail.getByText('Pages', { exact: true }).first()).toBeVisible();
+  });
+
+  // "New form" went straight to the editor, which still held whatever document
+  // was last opened - so it reopened an existing form instead of starting one.
+  test('New form asks for a PDF instead of reopening the last one', async ({ page }) => {
+    const button = page.locator('[data-testid="new-form-button"]');
+    await expect(button).toBeVisible();
+
+    const input = page.locator('[data-testid="new-form-input"]');
+    await expect(input).toBeAttached();
+    await expect(input).toHaveAttribute('accept', 'application/pdf');
+
+    // It stays on the list until a file is actually chosen.
+    await button.click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+  });
 });
 
 test.describe('Navigation and Routing', () => {

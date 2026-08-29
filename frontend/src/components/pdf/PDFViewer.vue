@@ -31,7 +31,12 @@
             @select-tool="handleToolSelection"
           />
 
-          <div class="pdf-canvas-wrapper" :style="{ transform: `rotate(${rotation}deg)` }">
+          <!-- No CSS rotation here. pdf.js already renders the page rotated
+               (`getViewport({ scale, rotation })` in usePDFRendering.ts), so
+               turning the wrapper as well rotated everything twice: at 90 the
+               page showed at 180, and the field overlay - positioned in
+               unrotated coordinates - sat nowhere near the page. -->
+          <div class="pdf-canvas-wrapper">
             <!-- Grid Overlay -->
             <canvas
               ref="gridCanvasRef"
