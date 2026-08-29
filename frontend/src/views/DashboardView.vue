@@ -1,97 +1,82 @@
 <template>
-  <div class="dashboard-view h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-    <!-- Modern Header -->
-    <header class="bg-white/80 backdrop-blur-lg border-b border-gray-200/50 shadow-sm sticky top-0 z-40">
-      <div class="container mx-auto px-6 py-4">
-        <div class="flex items-center justify-between">
-          <!-- Logo and Brand -->
-          <div class="flex items-center gap-3">
-            <!-- Mobile Menu Toggle -->
-            <Button
-              icon="pi pi-bars"
-              text
-              rounded
-              class="lg:hidden text-gray-600"
-              @click="mobileMenuVisible = true"
-            />
+  <div class="dashboard-view h-screen flex flex-col bg-surface">
+    <!-- Top bar. The Editor artboard gives this 54px, a quiet document title
+         and controls that stay neutral so the page itself is the loud thing. -->
+    <header
+      class="flex items-center gap-3.5 h-[54px] flex-shrink-0 px-4 border-b border-line bg-surface"
+    >
+      <Button
+        icon="pi pi-bars"
+        text
+        rounded
+        size="small"
+        class="lg:hidden"
+        aria-label="Menu"
+        @click="mobileMenuVisible = true"
+      />
 
-            <div class="bg-gradient-to-br from-blue-600 to-indigo-600 p-2.5 rounded-xl shadow-lg">
-              <i class="pi pi-file-pdf text-white text-2xl"></i>
-            </div>
-            <div class="hidden sm:block">
-              <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                PDF Editor Pro
-              </h1>
-              <p class="text-xs text-gray-500 font-medium">Professional PDF Editing Suite</p>
-            </div>
-          </div>
+      <BrandMark class="hidden sm:flex" />
 
-          <!-- User Actions -->
-          <div class="flex items-center gap-2 sm:gap-3">
-            <!-- User Info (Hidden on very small screens) -->
-            <div class="text-right mr-2 hidden md:block">
-              <p class="text-sm font-medium text-gray-800">{{ authStore.user?.name || authStore.user?.email }}</p>
-              <p class="text-xs text-gray-500">{{ authStore.user?.email }}</p>
-            </div>
-
-            <!-- Separator -->
-            <div class="h-8 w-px bg-gray-300 hidden sm:block"></div>
-
-            <!-- My Forms Button -->
-            <Button
-              icon="pi pi-list"
-              v-tooltip.bottom="'My Forms'"
-              @click="router.push('/dashboard/forms')"
-              severity="primary"
-              outlined
-              size="small"
-              class="hidden sm:flex"
-            />
-
-            <!-- Upload & Close buttons -->
-            <FileUploader v-if="!documentStore.activeDocument" />
-            <template v-else>
-              <!-- Show close button on all screens if doc active -->
-              <Button
-                icon="pi pi-times"
-                @click="closeDocument"
-                severity="secondary"
-                outlined
-                size="small"
-                v-tooltip.bottom="'Close Document'"
-              />
-            </template>
-
-            <router-link to="/dashboard/team">
-              <Button
-                icon="pi pi-users"
-                severity="secondary"
-                outlined
-                size="small"
-                v-tooltip.bottom="'Team'"
-                data-testid="team-link"
-              />
-            </router-link>
-
-            <!-- Logout Button -->
-            <Button
-              icon="pi pi-sign-out"
-              @click="handleLogout"
-              severity="danger"
-              outlined
-              size="small"
-              v-tooltip.bottom="'Logout'"
-              class="hidden sm:flex"
-              data-testid="logout-button"
-              aria-label="Logout"
-            />
-          </div>
-        </div>
+      <div v-if="documentStore.activeDocument" class="flex items-center gap-2.5 min-w-0">
+        <div class="w-px h-[22px] bg-line hidden sm:block" />
+        <span class="text-base font-medium truncate max-w-[280px]">
+          {{ documentStore.activeDocument.name }}
+        </span>
       </div>
+
+      <div class="flex-grow" />
+
+      <RouterLink
+        to="/dashboard/forms"
+        class="hidden sm:flex items-center gap-1.5 h-control-xs px-3 rounded-control border border-line text-body font-medium text-ink hover:bg-surface-sunken transition-colors"
+      >
+        <i class="pi pi-file text-[13px]" />
+        <span>Forms</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/dashboard/team"
+        class="hidden sm:flex items-center gap-1.5 h-control-xs px-3 rounded-control border border-line text-body font-medium text-ink hover:bg-surface-sunken transition-colors"
+        data-testid="team-link"
+      >
+        <i class="pi pi-users text-[13px]" />
+        <span>Members</span>
+      </RouterLink>
+
+      <FileUploader v-if="!documentStore.activeDocument" />
+      <button
+        v-else
+        type="button"
+        class="flex items-center justify-center w-control-xs h-control-xs rounded-control border border-line text-muted hover:text-ink hover:bg-surface-sunken transition-colors"
+        aria-label="Close document"
+        v-tooltip.bottom="'Close document'"
+        @click="closeDocument"
+      >
+        <i class="pi pi-times text-[13px]" />
+      </button>
+
+      <div class="w-px h-[22px] bg-line" />
+
+      <div class="hidden md:block text-right">
+        <p class="text-meta text-muted truncate max-w-[180px]">
+          {{ authStore.user?.email }}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        class="flex items-center justify-center w-control-xs h-control-xs rounded-control border border-line text-muted hover:text-danger hover:border-danger transition-colors"
+        data-testid="logout-button"
+        aria-label="Logout"
+        v-tooltip.bottom="'Log out'"
+        @click="handleLogout"
+      >
+        <i class="pi pi-sign-out text-[13px]" />
+      </button>
     </header>
 
-    <!-- Drawer for Mobile Sidebar -->
-    <Drawer v-model:visible="mobileMenuVisible" header="Dashboard Menu" class="w-80">
+    <!-- Mobile rail -->
+    <Drawer v-model:visible="mobileMenuVisible" header="Document" class="w-80">
       <div class="flex flex-col h-full">
         <TabView class="flex-1 flex flex-col sidebar-tabs">
           <TabPanel value="0" header="Docs">
@@ -104,61 +89,49 @@
             <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
           </TabPanel>
         </TabView>
-        
-        <div class="p-4 border-t border-gray-100 flex flex-col gap-2">
-            <Button 
-                label="Logout" 
-                icon="pi pi-sign-out" 
-                severity="danger" 
-                text 
-                @click="handleLogout" 
-                class="w-full justify-start"
-            />
+
+        <div class="p-4 border-t border-line">
+          <Button
+            label="Log out"
+            icon="pi pi-sign-out"
+            severity="danger"
+            text
+            class="w-full justify-start"
+            @click="handleLogout"
+          />
         </div>
       </div>
     </Drawer>
 
-    <!-- Main Content -->
     <main class="flex-1 flex overflow-hidden">
-      <!-- Welcome Screen - Show when no documents are loaded -->
+      <!-- Empty state. The canvas draws this as a dashed dropzone on the Forms
+           screen, in the same restrained language: no hero, no gradient. -->
       <div
         v-if="!documentStore.hasDocuments"
-        class="flex-1 flex items-center justify-center p-4 sm:p-8 overflow-y-auto"
+        class="flex-1 flex items-center justify-center p-6 bg-surface-sunken overflow-y-auto"
       >
-        <div class="max-w-2xl w-full">
-          <!-- Hero Section -->
-          <div class="text-center mb-8 sm:mb-12 animate-fade-in">
-            <div class="inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-3xl shadow-2xl mb-6 animate-float">
-              <i class="pi pi-file-pdf text-white text-4xl sm:text-5xl"></i>
-            </div>
-            <h2 class="text-3xl sm:text-4xl font-bold text-gray-800 mb-4">
-              Welcome back
-            </h2>
-            <p class="text-base sm:text-lg text-gray-600 max-w-xl mx-auto leading-relaxed">
-              Continue editing your PDF documents or manage your active forms.
-            </p>
-          </div>
+        <div class="w-full max-w-[520px]">
+          <h1 class="text-title">Start a form</h1>
+          <p class="mt-1 text-body text-muted">
+            Upload a PDF, place the fields, share the link.
+          </p>
 
-          <!-- Upload Area -->
-          <div class="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 sm:p-8 mb-8 hover:shadow-2xl transition-shadow">
-            <div class="border-3 border-dashed border-blue-300 rounded-xl p-8 sm:p-12 text-center bg-gradient-to-br from-blue-50 to-indigo-50 hover:border-blue-400 transition-colors">
-              <i class="pi pi-cloud-upload text-5xl sm:text-6xl text-blue-600 mb-4 block"></i>
-              <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-2">
-                Upload New PDF
-              </h3>
-              <p class="text-sm text-gray-600 mb-6">
-                Select a file to start editing
-              </p>
-              <FileUploader class="inline-block" />
-            </div>
+          <div
+            class="mt-6 flex flex-col items-center justify-center gap-3 py-10 px-6 rounded-card border border-dashed border-line-strong bg-surface text-center"
+          >
+            <i class="pi pi-cloud-upload text-[22px] text-faint" />
+            <p class="text-body text-muted">
+              Drop a PDF here, or browse. Existing PDF forms keep their fields.
+            </p>
+            <FileUploader class="inline-block" />
           </div>
         </div>
       </div>
 
-      <!-- Document Workspace - Show when documents are loaded -->
       <template v-else>
-        <!-- Left Sidebar - Tabbed View (Hidden on mobile, using Drawer instead) -->
-        <aside class="hidden lg:flex w-72 bg-white/80 backdrop-blur-lg border-r border-gray-200/50 overflow-hidden flex-col">
+        <aside
+          class="hidden lg:flex w-rail flex-shrink-0 bg-surface-subtle border-r border-line overflow-hidden flex-col"
+        >
           <TabView class="flex-1 flex flex-col sidebar-tabs">
             <TabPanel value="0" header="Documents" class="flex-1">
               <DocumentsList />
@@ -172,45 +145,40 @@
           </TabView>
         </aside>
 
-        <!-- Center - PDF Viewer -->
-        <div class="flex-1 flex overflow-hidden flex-col md:flex-row">
-          <div class="flex-1 relative">
+        <div class="flex-1 flex overflow-hidden flex-col md:flex-row min-w-0">
+          <div class="flex-1 relative bg-surface-sunken min-w-0">
             <PDFViewer ref="pdfViewerRef" />
           </div>
 
-          <!-- Right Sidebar - Editor Tools (Stack on smaller screens if needed, or hide) -->
           <aside v-if="documentStore.activeDocument" class="flex">
             <PDFEditor />
-            <!-- Field Properties Panel (shows when a field is selected or fields exist) -->
-            <FieldPropertiesPanel 
-                v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField" 
-                class="hidden xl:flex"
+            <FieldPropertiesPanel
+              v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField"
+              class="hidden xl:flex"
             />
           </aside>
         </div>
       </template>
     </main>
 
-    <!-- Loading Overlay -->
     <div
       v-if="documentStore.isLoading"
-      class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+      class="fixed inset-0 bg-ink/40 flex items-center justify-center z-50"
     >
-      <div class="bg-white rounded-2xl p-8 shadow-2xl max-w-sm text-center">
-        <ProgressSpinner />
-        <p class="mt-6 text-gray-700 font-medium">Loading your PDF...</p>
-        <p class="text-sm text-gray-500 mt-2">Please wait a moment</p>
+      <div class="bg-surface rounded-card border border-line shadow-menu px-8 py-7 text-center">
+        <ProgressSpinner style="width: 34px; height: 34px" strokeWidth="4" />
+        <p class="mt-5 text-body font-medium">Loading your PDF</p>
+        <p class="text-meta text-muted mt-1">This takes a moment for a large file.</p>
       </div>
     </div>
 
-    <!-- Toast -->
     <Toast position="top-right" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch, onMounted } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
@@ -226,6 +194,7 @@ import { useFieldsErrorHandler } from '@/composables/useFieldsErrorHandler'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
+import BrandMark from '@/components/ui/BrandMark.vue'
 import DocumentsList from '@/components/pdf/DocumentsList.vue'
 import FormsList from '@/components/forms/FormsList.vue'
 import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
@@ -243,10 +212,6 @@ const mobileMenuVisible = ref(false)
 
 // Initialize error handler for fields
 useFieldsErrorHandler()
-
-const showSidebar = computed(() => {
-  return documentStore.hasDocuments || formsStore.formsCount > 0 || formsStore.loading
-})
 
 onMounted(() => {
   formsStore.fetchForms()
@@ -286,8 +251,7 @@ watch(() => documentStore.error, (error) => {
 })
 </script>
 
-<style>
-/* Custom styles for sidebar tabs */
+<style scoped>
 .sidebar-tabs {
   display: flex;
   flex-direction: column;
@@ -296,35 +260,28 @@ watch(() => documentStore.error, (error) => {
 
 .sidebar-tabs :deep(.p-tabview-nav-container) {
   background: transparent;
-  border-bottom: 1px solid rgba(229, 231, 235, 0.5);
-  padding: 0 1rem;
+  border-bottom: 1px solid theme('colors.line.DEFAULT');
+  padding: 0 0.75rem;
 }
 
 .sidebar-tabs :deep(.p-tabview-nav) {
   background: transparent;
   border: none;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .sidebar-tabs :deep(.p-tabview-nav-link) {
   background: transparent;
   border: none;
-  color: #6b7280;
-  padding: 0.75rem 1rem;
-  transition: all 0.2s;
+  color: theme('colors.muted');
+  padding: 0.6rem 0.5rem;
   font-weight: 500;
-  font-size: 0.875rem;
-}
-
-.sidebar-tabs :deep(.p-tabview-nav-link:hover) {
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.05);
-  border-radius: 0.5rem;
+  font-size: 12.5px;
 }
 
 .sidebar-tabs :deep(.p-highlight .p-tabview-nav-link) {
-  color: #2563eb;
-  border-bottom: 2px solid #2563eb;
+  color: theme('colors.ink');
+  border-bottom: 1.5px solid theme('colors.ink');
   background: transparent;
 }
 

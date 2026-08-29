@@ -36,7 +36,7 @@ test.describe('PDF Workflow', () => {
   });
 
   test('should show the app name and a logout control in the header', async ({ page }) => {
-    await expect(page.locator('text=PDF Editor Pro').first()).toBeVisible();
+    await expect(page.locator('text=VuePDF Forms').first()).toBeVisible();
     await expect(page.locator('[data-testid="logout-button"]')).toBeVisible();
   });
 });

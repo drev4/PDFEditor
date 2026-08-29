@@ -172,7 +172,7 @@ const handleSubmit = async () => {
     toast.add({
       severity: 'success',
       summary: 'Account created!',
-      detail: 'Welcome to PDF Editor Pro',
+      detail: 'Welcome to VuePDF Forms',
       life: 3000
     })
 
