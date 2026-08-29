@@ -32,13 +32,59 @@ model Organization {
   id          String       @id @default(uuid())
   name        String
   slug        String       @unique
+  /// Which entry of the plan catalogue in `services/plans.ts` this organization
+  /// is entitled to. A plain string rather than a Prisma enum on purpose:
+  /// adding or renaming a plan is a product decision that must not require a
+  /// migration, and an unknown value here resolves to the free plan rather than
+  /// crashing (`resolvePlan`).
+  ///
+  /// This is the source of truth *until step 8 of the build order*. When
+  /// `Subscription` arrives, the plan is derived from the subscription and this
+  /// column becomes its cache or disappears — either way `getEntitlements` is
+  /// the only thing that reads it, so the change is one function wide.
+  planKey     String       @default("free") @map("plan_key")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   forms       Form[]
   memberships Membership[]
   invitations Invitation[]
+  usageCounters UsageCounter[]
 
   @@map("organizations")
+}
+
+/// One row per organization per calendar month: how many responses that
+/// organization **accepted** during the period.
+///
+/// It is a meter, not a cache of `SELECT count(*)`, and the difference is the
+/// whole reason the table exists. It counts *submissions accepted during the
+/// period*: deleting a form cascades its responses away (see the cascade map in
+/// docs/sot/03-domain-model.md) and does **not** decrement this. Anyone
+/// comparing this number to the surviving `responses` rows will find them
+/// disagreeing, and that is correct — a customer must not be able to reclaim
+/// the month's quota by deleting their data, and the number an invoice is one
+/// day computed from cannot move retroactively.
+///
+/// `period` is `YYYY-MM` in **UTC**, produced only by `currentPeriod()` in
+/// `services/entitlements.ts`. A period boundary computed in two places is a
+/// period boundary computed two ways.
+///
+/// Incremented inside the same transaction that writes the `Response`, so a
+/// rejected submission leaves neither a response nor an inflated count.
+model UsageCounter {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  /// `YYYY-MM`, UTC.
+  period         String
+  responses      Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, period])
+  @@index([organizationId])
+  @@map("usage_counters")
 }
 
 /// `owner` invites anyone, changes roles, removes members and can delete the

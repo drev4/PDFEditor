@@ -7,6 +7,7 @@ Source of record: `backend/prisma/schema.prisma`. Everything below was read out 
 ```
 Organization 1───* Membership *───1 User
 Organization 1───* Form 1───* Field 1───* Answer *───1 Response *───1 Form
+Organization 1───* UsageCounter     (one row per calendar month)
 User 1───* RefreshToken
 User 0───* Form            (createdByUserId — provenance, never ownership)
 ```
@@ -16,13 +17,14 @@ User 0───* Form            (createdByUserId — provenance, never ownershi
 | Entity | Purpose | Notes that matter |
 |---|---|---|
 | `User` | An account | `id, email (unique), passwordHash, name?`. Owns nothing directly — reaches forms through `Membership`. |
-| `Organization` | The tenant. Owns forms | `id, name, slug (unique)`. Created for every user at signup. |
+| `Organization` | The tenant. Owns forms | `id, name, slug (unique)`. Created for every user at signup. `planKey` (default `"free"`) names an entry of the catalogue in `services/plans.ts` — a plain string rather than an enum so that adding a plan needs no migration, and an unknown value resolves **downward** to free ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)). It is the source of truth for entitlements only until `Subscription` arrives. |
 | `Membership` | Which users may act on which organization's resources | `(organizationId, userId)` unique. `role: owner \| admin \| member`, **enforced** since [`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md) by `requireRole` in `middleware/membership.ts`. An organization is never left without an owner. |
 | `Invitation` | A pending offer of membership, redeemable once | Bound to an `email` and a `role`. `tokenHash` is a SHA-256, never the token. `expiresAt` / `revokedAt` / `acceptedAt` are what make it expiring, cancellable and single-use — a JWT was rejected here for the same reason it was in [`0008`](../../features/0008-session-hardening.md): it cannot be revoked. The link is delivered by the inviter, because this service cannot send email. |
 | `Form` | A PDF plus its field layout | Belongs to an `Organization` (`organizationId`, required). `createdByUserId` records who made it and is **nullable and never an authorization input** — a deleted user must not take the organization's forms with them. `shareId` (nanoid 12) is the public identifier. `status: draft \| published \| closed`. `settings: Json?` is writable through `PUT /forms/:id` but is never read by any code — a free extension point for per-form configuration (branding, limits, webhooks) that needs no migration. `viewCount` incremented on every public fetch. |
 | `Field` | One input placed on the PDF | `type: text \| textarea \| checkbox \| radio \| dropdown`. `position: Json` in **canvas** coordinates. `options: Json?` for radio/dropdown. `validation: Json?` = `{minLength?, maxLength?, pattern?}`. `order: Int` drives render and tab order. `deletedAt: DateTime?` — non-null means **archived**: removed from the editor and the public form, still present in the responses table and the CSV export. See [the `deletedAt` lifecycle](#the-deletedat-lifecycle). |
 | `Response` | One public submission | Stores `ipAddress` and `userAgent`. No respondent identity beyond that. `pdfUrl?` exists on the model but nothing writes it today. |
 | `Answer` | One value in one submission | `value: String` — **everything is a string**, including booleans (`String(value)`). Type meaning is reconstructed at read time. |
+| `UsageCounter` | The response meter: one row per organization per calendar month | `(organizationId, period)` unique, `period` is `YYYY-MM` in **UTC**, produced only by `currentPeriod()` in `services/entitlements.ts`. It counts **submissions accepted during the period**, not rows that still exist — see the invariant below. Written only inside the transaction that writes a `Response` ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)). |
 | `RefreshToken` | One issued refresh token — the part of a session that can be taken away | `tokenHash` is a SHA-256 of the token, never the token; a fast hash is right **here and nowhere else** in this codebase, because the input is 32 bytes of CSPRNG output rather than a low-entropy secret. `family` ties every token descended from one login together, which is what makes replay detectable. `revokedAt` is how logout, rotation and reuse detection all take effect. Written only by `services/refresh-token.ts` ([`features/0008`](../../features/0008-session-hardening.md)). |
 
 ## Invariants
@@ -34,6 +36,9 @@ Rules the system depends on. Some are enforced, some are only conventions — th
 | A `Form` is only readable by its owner through the authenticated API | `verifyFormOwnership` in every owning handler | Enforced, but by convention — nothing stops a new route from forgetting the call |
 | The public endpoint never leaks `userId` | Explicit destructuring in `routes/forms.ts` | Enforced at one site only; a new public field would have to remember this |
 | Only `published` forms accept responses | Status check in `routes/responses.ts` | Enforced |
+| An organization never has more forms `published` than its plan allows | `assertCanPublishForm` in **both** `PATCH /forms/:id/status` and `PUT /forms/:id` | Enforced, but by convention — a third way to set `status: 'published'` would have to remember the call |
+| `UsageCounter.responses` never decreases | Nothing decrements it; the only write is an `increment` inside the submission transaction | Enforced by there being no other write path. **It will disagree with `SELECT count(*)` on `responses`, and that is correct** — deleting a form cascades its responses away and must not refund the month's quota, because this is the number an invoice will one day be computed from |
+| A respondent is never told anything about the owner's plan | `POST /responses` answers `403` with the wording a closed form gets; `GET /forms/public/:shareId` answers `404` | Enforced at both sites, and asserted in `tests/integration/entitlements.spec.ts` |
 | A `Field.id` handed out by the server is stable for the life of the field | The bulk save is a diff keyed on `id`; `createFieldSchema` refuses a client-supplied `id`, so only the server mints them | Enforced by the write path — see [04-backend-patterns](./04-backend-patterns.md) |
 | An `Answer` always points at a `Field` row that still exists | Removal of a field that has answers is a soft delete, never a `delete` | Enforced in the bulk handler; **not** a database constraint — `DELETE /forms/:formId/fields/:fieldId` still hard-deletes |
 | An `Answer.fieldId` always belongs to the same form as its `Response.formId` | Filter in `routes/responses.ts`, which silently drops foreign field ids with a `console.warn` | Enforced at write time; **not** a database constraint |
@@ -67,6 +72,7 @@ Nothing is currently missing that a known workload needs.
 | `Field.form` → `Form` | `Cascade` | Deleting a form deletes its fields. Correct. |
 | `Response.form` → `Form` | `Cascade` | Deleting a form deletes its responses. Correct and intended — but irreversible, with no soft delete and no export prompt. |
 | `Answer.response` → `Response` | `Cascade` | Correct. |
+| `UsageCounter.organization` → `Organization` | `Cascade` | Deleting an organization removes its meters. Nothing is lost that matters: the tenant and everything it was metered for are gone in the same statement. **Note what is *not* here — deleting a `Form` does not touch a counter**, which is the whole reason the meter is a table and not a `count(*)`. |
 | `RefreshToken.user` → `User` | `Cascade` | Deleting a user deletes their sessions. Correct and uncontroversial: this table holds no customer-produced data, only credentials that are worthless once the account is gone. |
 | **`Answer.field` → `Field`** | **`Cascade`** | Deleting a field destroys every answer ever given to it, across all past responses. Only two write paths can fire it, and one of them refuses to — see below. |
 
@@ -102,9 +108,13 @@ One consequence worth knowing: `GET /forms/:id` re-extracts fields from the PDF 
 
 ## What is missing for multi-tenancy
 
-`Form.userId` hard-codes the assumption that a form's owner is one user. Every ownership check reads `where: { userId: req.userId }`. Moving to organization ownership therefore touches every route that reads or writes a `Form`, plus their tests.
+Multi-tenancy itself is **built**: `Organization`, `Membership` and `Invitation` exist, `Form.organizationId` is required, and every authorization check resolves a membership ([`features/0009`](../../features/0009-organizations-own-resources.md), [`0010`](../../features/0010-member-invitations-and-role-enforcement.md)). This section used to say the opposite; it was left behind by those two changes.
 
-The target model and the migration path are in [10-saas-roadmap.md](./10-saas-roadmap.md). Nothing about `Organization`, `Membership`, `Plan` or `Subscription` exists in the schema today.
+What is still absent from the schema, and where it is due:
+
+- **`Subscription`** — step 8 of the [build order](./10-saas-roadmap.md#build-order). Until it exists, `Organization.planKey` is what says which plan an organization is on, and nothing can change that column from inside the product.
+- **`Plan` as a table** — deliberately not a table. It is a frozen constant in `backend/src/services/plans.ts`, and it earns a table only when a customer needs limits nobody else has.
+- **An uploads table**, which is what would let `Form.pdfUrl` be verified against a file the organization actually uploaded ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
 ## Rules for changing this model
 

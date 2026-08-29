@@ -160,6 +160,7 @@ import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Toast from 'primevue/toast'
 import { useFormFieldsStore } from '@/stores/formFields.store'
+import { ApiError } from '@/services/api'
 import { useFormsStore } from '@/stores/forms.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
@@ -413,12 +414,16 @@ async function handlePublish(formId: string) {
       life: 3000
     })
   } catch (error) {
-    console.error('Error publishing form:', error)
+    // A 402 is the plan refusing, not the publish breaking — so it is not
+    // logged as an error and does not say "failed". The full LimitReached
+    // screen is on the dashboard; the editor gets the server's sentence.
+    const isLimit = error instanceof ApiError && error.status === 402
+    if (!isLimit) console.error('Error publishing form:', error)
     toast.add({
-      severity: 'error',
-      summary: 'Publish Failed',
-      detail: 'Failed to publish form',
-      life: 5000
+      severity: isLimit ? 'warn' : 'error',
+      summary: isLimit ? 'Plan limit reached' : 'Publish Failed',
+      detail: isLimit ? (error as ApiError).message : 'Failed to publish form',
+      life: isLimit ? 6000 : 5000
     })
   }
 }

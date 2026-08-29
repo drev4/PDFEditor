@@ -4,6 +4,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { PrismaClient } from '@prisma/client'
+import { passThroughTransaction } from './mock-transaction'
 
 // Mock Prisma
 vi.mock('../src/services/db', async () => {
@@ -18,6 +19,8 @@ const prismaMock = prisma as unknown as DeepMockProxy<PrismaClient>
 describe('Responses Routes', () => {
     beforeEach(() => {
         mockReset(prismaMock)
+        // Submitting writes inside a transaction since features/0012.
+        passThroughTransaction(prismaMock)
     })
 
     const mockForm = {

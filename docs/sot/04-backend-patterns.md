@@ -153,7 +153,35 @@ New resources get their organization from `requireOrganizationId(req)` in `middl
 
 **Roles are a second, different check.** `requireRole(req, ['owner'])` returns the caller's membership or throws, and it distinguishes two rejections that must not be collapsed: **`404`** when the caller is not in the organization at all, **`403`** when they are but their role does not allow the action. Collapsing them either leaks existence or tells a legitimate member their own organization does not exist. Anything that could remove an owner calls `assertNotLastOwner` first — an organization with no owner cannot be administered or deleted, and nothing here can repair one.
 
-## 10. Response headers are global, except where a route earns an exception
+## 10. Plan limits are explicit calls, and `402` is not `403`
+
+`backend/src/services/entitlements.ts` is where every plan limit is checked, and it is called the way §2 calls ownership: **explicitly, inside the handler**, never mounted as a layer. Each resource has a different limit and a middleware cannot know which one applies without re-deriving the route.
+
+The plan catalogue is a **frozen constant** in `backend/src/services/plans.ts`, not a table — a table is a second source of truth that can drift from the code enforcing it, and it earns its place only when a customer needs limits nobody else has. `Organization.planKey` says which entry applies, and `resolvePlan` degrades an unknown key **downward** to free, because the failure mode of guessing high is giving the product away silently.
+
+Two rejections that must never be collapsed:
+
+- **`402 Payment Required` — a plan limit.** The caller could have this if they paid.
+- **`403 Forbidden` — a permission failure.** What `requireRole` throws. Paying changes nothing.
+
+The frontend shows "upgrade your plan" for one and "you do not have access" for the other, and it must be able to tell them apart **without parsing a message string** — `FormsManagementView.vue` branches on `ApiError.status === 402`.
+
+**A `402` must never reach a respondent.** This is the rule that shapes the whole design. The person filling in a public form is not the customer: telling them the plan is exhausted is meaningless to them, and it publishes the customer's billing state to anyone holding a share link. So the two public paths borrow the answers they already had:
+
+| Path | When the month's responses are spent | Why |
+|---|---|---|
+| `GET /forms/public/:shareId` | `404 Form not found` | Same as a closed form. It refuses **before** anybody fills the form in — enforcing only at submit would mean the respondent types everything and then loses it |
+| `POST /responses` | `403 Form is not accepting responses` | Byte-identical to the unpublished-form rejection, so an exhausted plan is indistinguishable from a closed form |
+
+**Publishing is what is metered, not creating.** Drafting is always free; the limit is on how many forms are `published` at once, which is what the design canvas draws and what makes "unpublish another one" a real alternative to upgrading. It is checked in `PATCH /forms/:id/status` *and* `PUT /forms/:id`, because `updateFormSchema` accepts `status` and gating only one of them leaves the limit reachable through the other.
+
+**The meter is claimed atomically, never read-then-written.** `assertResponseWithinLimit(tx, organizationId)` upserts the counter with an `increment` and compares the value it gets back, inside the same transaction as the `Response`. The upsert takes the row lock, so a second concurrent submission blocks and then reads `limit + 1` and throws — and the throw rolls back the increment and the response together. Read-compare-increment would let two submissions both pass at `limit - 1`, and a compensating decrement is a thing to get wrong. Nothing may catch that throw before the transaction boundary.
+
+**One function resolves a plan, and it is `effectivePlan`.** `resolvePlan` maps a stored key to a catalogue entry and stays pure; `effectivePlan` is that plus the temporary `DEV_PLAN_KEY` override ([08-operations](./08-operations.md)). Every limit check calls the latter, so the override has exactly one way in and one way out — and so that deleting it later is a local edit rather than a hunt.
+
+Finally, the boundary that survives into step 8: **nothing in `routes/` imports anything from a billing provider.** Domain routes ask the entitlements service a question about limits; only `SubscriptionService` will ever know Stripe exists.
+
+## 11. Response headers are global, except where a route earns an exception
 
 `helmet` is mounted once in `app.ts` and covers every response. A route that needs something different sets it with `res.setHeader` **in the handler, with a comment saying why** — the exception has to be visible next to the code it applies to, like the ownership checks in §2.
 
@@ -163,11 +191,11 @@ There is exactly one exception today, and it is the shape to copy: `GET /uploads
 
 **Do not add a CSP to API responses.** This process serves JSON, not documents; a policy there constrains nothing while making the security posture look better than it is. That absence is asserted in `backend/tests/security-headers.spec.ts` so it cannot be quietly "fixed". The policy that matters is on the SPA — [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).
 
-## 11. Adding a new endpoint
+## 12. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.
 
-## 12. What the backend is missing
+## 13. What the backend is missing
 
 Ordered by impact on being able to sell this, not by effort. Each has an entry in [`docs/BACKLOG.md`](../BACKLOG.md).
 

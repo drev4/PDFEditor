@@ -9,6 +9,7 @@ import { requireMembership, requireRole, assertNotLastOwner } from '../middlewar
 import { invitationRateLimit } from '../middleware/rateLimit.js'
 import { issueRefreshToken } from '../services/refresh-token.js'
 import { setRefreshCookie } from '../services/session-cookie.js'
+import { getEntitlements } from '../services/entitlements.js'
 import {
   createInvitation,
   findRedeemable,
@@ -32,6 +33,32 @@ const acceptSchema = z.object({
   // Only used when the invited address has no account yet.
   password: z.string().min(6).optional(),
   name: z.string().optional()
+})
+
+// GET /api/organizations/entitlements — any member may see the plan and usage.
+//
+// Not owner-only: the sidebar card and the plan screen are visible to everyone
+// in the organization, and a member who cannot see why publishing was refused
+// has no way to understand the product. It carries no billing identifiers and
+// no organization id — only what the plan allows and what has been used.
+organizationsRouter.get('/entitlements', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireMembership(req)
+    const { plan, usage } = await getEntitlements(organizationId)
+
+    res.json({
+      plan: {
+        key: plan.key,
+        name: plan.name,
+        maxPublishedForms: plan.maxPublishedForms,
+        maxResponsesPerMonth: plan.maxResponsesPerMonth,
+        seats: plan.seats
+      },
+      usage
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
 // GET /api/organizations/members — any member may see who else is here.

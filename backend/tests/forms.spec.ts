@@ -142,6 +142,10 @@ describe('Forms Routes', () => {
 
     it('should update form status', async () => {
       prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+      // Publishing checks the plan's published-form limit since features/0012.
+      // An organization with room, so this stays a test about the update.
+      prismaMock.organization.findUnique.mockResolvedValue({ planKey: 'free' } as any)
+      prismaMock.form.count.mockResolvedValue(0)
       prismaMock.form.update.mockResolvedValue({
         ...mockForm,
         status: 'published'

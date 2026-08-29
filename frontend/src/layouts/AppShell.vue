@@ -24,8 +24,11 @@
 
       <div class="flex-grow" />
 
-      <!-- Account. The canvas also puts a plan card above this; there are no
-           plans yet, so nothing is drawn rather than a number being invented. -->
+      <!-- The plan card the canvas puts above the account row. It draws itself
+           only once the plan has loaded; see PlanCard.vue. -->
+      <PlanCard />
+
+      <!-- Account. -->
       <div class="flex items-center gap-2.5 px-[18px] pb-[18px] pt-2.5">
         <div
           class="flex items-center justify-center w-6 h-6 rounded-full bg-surface-track text-muted text-tiny font-semibold flex-shrink-0"
@@ -84,17 +87,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import Toast from 'primevue/toast'
 import { useToast } from 'primevue/usetoast'
 import { useAuthStore } from '@/stores/auth.store'
+import { usePlanStore } from '@/stores/plan.store'
 import BrandMark from '@/components/ui/BrandMark.vue'
+import PlanCard from '@/components/plan/PlanCard.vue'
 import { useAppNav } from '@/composables/useAppNav'
 
 const authStore = useAuthStore()
+const planStore = usePlanStore()
 const router = useRouter()
 const toast = useToast()
+
+// The shell wraps every signed-in screen, so this is the one place the plan has
+// to be fetched. A failure is silent on purpose: the card simply does not draw,
+// and an error toast about the plan on a screen the user opened to do something
+// else is noise they cannot act on.
+onMounted(() => {
+  if (!planStore.plan) planStore.load().catch(() => {})
+})
 
 const { navItems, isActive } = useAppNav()
 

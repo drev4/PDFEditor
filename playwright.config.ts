@@ -51,6 +51,13 @@ export default defineConfig({
                 // the user or a logout every fifteen minutes — would have no
                 // coverage at all. At 3 seconds most tests cross at least one.
                 JWT_ACCESS_TTL: '3s',
+                // Plan limits are ON here regardless of the developer's
+                // `.env`. `app.ts` calls `dotenv.config()`, so a local
+                // `DEV_PLAN_KEY=dev` would otherwise reach the suite and
+                // quietly disable the thing under test. Empty rather than
+                // absent: dotenv does not overwrite a key that is already
+                // present, and an absent key it would happily fill in.
+                DEV_PLAN_KEY: '',
             },
         },
         {

@@ -43,7 +43,7 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `RATE_LIMIT_REFRESH_MAX` | no | `60` | Session refreshes per window per IP |
 | `RATE_LIMIT_REFRESH_WINDOW_MS` | no | `900000` (15 min) | |
 | `PORT` | no | `3000` | |
-| `NODE_ENV` | no | — | Read but not used to change behaviour anywhere |
+| `NODE_ENV` | no | — | Sets Prisma's query logging (`services/db.ts`), and **gates `DEV_PLAN_KEY` below**. That gate is an allowlist, so an unset or unexpected value is the safe case |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
 | `UPLOAD_URL_TTL_SECONDS` | no | `900` (15 min), min `60` | How long a signed PDF URL stays valid. The link is a bearer capability, so longer is not free — see [07](./07-security-and-privacy.md) |
@@ -57,7 +57,19 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `INVITATION_TTL_HOURS` | no | `72`, min `1` | How long an invitation link is valid. It is a bearer capability — there is no email service, so the inviter copies and sends it — which means anyone holding it can spend it until it expires |
 | `RATE_LIMIT_INVITATION_MAX` | no | `20` | Invitation acceptances per window per IP |
 | `RATE_LIMIT_INVITATION_WINDOW_MS` | no | `900000` (15 min) | |
+| `DEV_PLAN_KEY` | no | unset | **Development only, and temporary.** Forces every organization onto one plan, ignoring `organizations.plan_key`. `dev` lifts every limit; `free`/`pro`/`team` pin everyone to that real plan, which is how the limit screens get driven deliberately. **Honoured only when `NODE_ENV` is `development` or `test`** — see below |
 | `ENABLE_HSTS` | no | `false` | Send `Strict-Transport-Security`. **Must stay off wherever the app is reachable over plain HTTP, including local development** — a browser that sees HSTS from `localhost` forces HTTPS on `localhost` for every port afterwards, and the breakage that follows never mentions this setting. Turn on where TLS terminates |
+
+### `DEV_PLAN_KEY`, and the allowlist that makes it safe
+
+Plan limits are real from [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) onward, which makes the product harder to *build* — one published form on the free plan is not a workable development environment. `DEV_PLAN_KEY` is the escape hatch, and it is **meant to be deleted** once there are separate environments to run in. Removing it is a block at the bottom of `backend/src/services/plans.ts`, two call sites in `entitlements.ts`, and a line in `.env.example`.
+
+The dangerous version of this feature is the one that reads `NODE_ENV !== 'production'`. That honours the override whenever `NODE_ENV` is unset, misspelled, or dropped by a process manager — every one of which is an ordinary way a real deployment ends up giving the product away with **no error anywhere**. So the check is an **allowlist**: the override applies when `NODE_ENV` is exactly `development` or `test`, and in every other case it is ignored and a `console.error` says so. The failure mode of a missing `NODE_ENV` is that limits are enforced.
+
+Two consequences worth knowing:
+
+- **It is visible.** The plan is named `Developer` and that name is rendered in the sidebar card and on the Settings screen. Seeing `Developer` where a customer would see `Free` is the signal that limits are off. The pseudo-plan is deliberately **not** a member of `PLANS`, so it cannot be sold to anyone.
+- **The suites pin it off.** `backend/src/app.ts` calls `dotenv.config()` and every spec imports it, so a developer's local `DEV_PLAN_KEY=dev` reaches the tests — it did, and four of them failed. `vitest.config.ts`, `vitest.integration.config.ts` and `playwright.config.ts` all set `DEV_PLAN_KEY: ''`. Empty rather than absent, because dotenv fills in a key that is missing but leaves one that is already present.
 
 ### `re2` is a native dependency
 

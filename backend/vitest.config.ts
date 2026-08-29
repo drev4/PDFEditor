@@ -19,7 +19,14 @@ export default defineConfig({
             RATE_LIMIT_REGISTER_MAX: '1000',
             RATE_LIMIT_RESPONSES_MAX: '1000',
             RATE_LIMIT_REFRESH_MAX: '1000',
-            RATE_LIMIT_INVITATION_MAX: '1000'
+            RATE_LIMIT_INVITATION_MAX: '1000',
+            // Plan limits are ON in the suites regardless of the developer's
+            // `.env`. `src/app.ts` calls `dotenv.config()` and every spec
+            // imports it, so a local `DEV_PLAN_KEY=dev` would otherwise reach
+            // these tests and disable the behaviour they assert — which it did,
+            // and four of them failed before this line existed. Empty rather
+            // than absent: dotenv does not overwrite a key already present.
+            DEV_PLAN_KEY: '',
         },
         setupFiles: ['./tests/setup.ts'],
         coverage: {

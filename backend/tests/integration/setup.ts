@@ -15,10 +15,13 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // Truncating `users` and `forms` cascades to fields, responses and answers.
-  // `refresh_tokens` is named explicitly rather than left to the cascade, so a
-  // reader can see that sessions are cleared between tests too.
+  // `refresh_tokens`, `invitations` and `usage_counters` are named explicitly
+  // rather than left to the cascade, so a reader can see that sessions,
+  // outstanding invitations and the usage meter are cleared between tests too.
+  // A counter surviving into the next test would silently spend the next
+  // organization's monthly allowance.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "usage_counters", "invitations", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
   )
 })
 
