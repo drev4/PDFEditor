@@ -1,8 +1,8 @@
 # 0010 — Member invitations, and roles that are actually enforced
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md)) — step 5 of the [build order](../docs/sot/10-saas-roadmap.md#build-order)
-**Branch:** _(filled in when it moves to "in progress")_
+**Branch:** `feature/0010-member-invitations-and-role-enforcement`
 **Related:** [`10-saas-roadmap`](../docs/sot/10-saas-roadmap.md) · [`03-domain-model`](../docs/sot/03-domain-model.md) · [`04-backend-patterns`](../docs/sot/04-backend-patterns.md) (§9) · [`07-security-and-privacy`](../docs/sot/07-security-and-privacy.md) · [`06-api-reference`](../docs/sot/06-api-reference.md)
 
 ## Context
@@ -98,3 +98,44 @@ It takes a token and grants access to a customer's data. It needs a named per-IP
 > **Step 9 — an E2E test that crosses the boundary.** One Playwright test: an owner invites, the link is accepted by a second account, and that account then loads a form created by the first. Nothing else in the suite proves two people can share an organization, and that is the whole feature.
 >
 > **Step 10 — document.** Run `sot-sync`. [03-domain-model](../docs/sot/03-domain-model.md): the `Invitation` entity and its cascade row. [07-security-and-privacy](../docs/sot/07-security-and-privacy.md): roles are now **enforced** — correct the row that says they are not — plus the invitation link as a bearer capability with its expiry and revocation, in the style [`0006`](0006-signed-expiring-urls-for-uploaded-pdfs.md) used for the PDF URL, and the `404` / `403` split. [04-backend-patterns](../docs/sot/04-backend-patterns.md): extend §9 with the role check, since §9 currently describes tenancy only. [06-api-reference](../docs/sot/06-api-reference.md) after re-reading the routes (`api-contract-guard`). [08-operations](../docs/sot/08-operations.md): the invitation TTL and limiter variables. [09-quality-and-testing](../docs/sot/09-quality-and-testing.md): spec counts. Remove the *Member invitations* and *Enforce `Membership.role`* rows from [`docs/BACKLOG.md`](../docs/BACKLOG.md); the *organization can outlive its last member* row **stays**, narrowed to the account-deletion case this feature does not close. File the email provider and the audit log. Close step 5 in the [build order](../docs/sot/10-saas-roadmap.md#build-order). Set this file to `**Status:** done` and add an `## Outcome`.
+
+
+## Outcome
+
+**Done.** All eleven acceptance criteria hold. Verified on Node 22.22.0: backend 12 specs / 115 tests, integration **7 / 72**, frontend **30 / 250**, E2E **8 / 41**, plus `tsc --noEmit` on the backend and the frontend build.
+
+### The no-email constraint held, and shaped everything
+
+Confirmed rather than assumed: no mail provider, dependency or configuration exists. So an invitation returns a **link, exactly once**, and the inviter delivers it. That makes it a bearer capability, and the controls follow from that rather than from a checklist — unguessable, stored only as a SHA-256, expiring (72 h), single-use, revocable, bound to one address, and rate limited with one identical answer for unknown / expired / revoked / spent.
+
+The consequence lands in the UI too: the link panel is the loudest thing on the members page, because losing it means the invitation exists and nobody can ever accept it. `lastCreatedInvitation` lives in the store rather than a component for the same reason.
+
+### Combining the two backlog rows was right
+
+Both negative checks confirm they are one unit of undo:
+
+- Disabling the role check fails exactly the three "may not" tests — a `member` could invite, remove members and change roles. That is what shipping invitations alone would have meant.
+- Disabling the last-owner guard fails exactly the two last-owner tests.
+
+Neither touched anything else, which is what makes them useful rather than noisy.
+
+### Things the code decided
+
+- **`admin` may invite only `member`s.** Handing out `admin` or `owner` is how an organization changes hands, so it is an owner's decision.
+- **An existing account is asked to sign in rather than joined on the link alone.** Otherwise holding the link would be enough to attach access to somebody else's account.
+- **Accepting as a new user does not also create a personal organization** — the trap the spec named. `requireMembership` picks the oldest membership, so a person in two organizations would land in one arbitrarily. Asserted by `does not also give them a personal organization`.
+- **Removing a member deletes only the membership.** Their account survives and the forms they created stay with the organization, because `Form.createdByUserId` is provenance ([`0009`](0009-organizations-own-resources.md)).
+
+### Verified in a real browser
+
+`e2e/team.spec.ts` is the only test in the suite that proves the product is more than single-player: an owner invites, a **second browser context** with no session opens the link, sets a password, joins, and then sees the team. Plus the link refusing to be spent twice, and the only owner being refused when they try to demote themselves.
+
+### An honest note on the first test run
+
+Eleven of the fourteen role tests failed before the endpoints existed, as intended — but three passed vacuously, because a missing route also answers `404`. They only became meaningful once the routes existed. That is exactly the ambiguity the `404` / `403` split is there to manage, and it is worth knowing that "asserts 404" is a weak assertion against code that does not exist yet.
+
+### Deferred and filed
+
+In [`docs/BACKLOG.md`](../docs/BACKLOG.md): **email delivery** (wants the job queue at step 8 for retries and a delivery record), and **no audit of who invited, removed or promoted whom** — for a B2B buyer that is a due-diligence question, and after an incident it is the only way to answer "who let them in". It wants structured logging (S9) first.
+
+The *organization can outlive its last member* row **stays**, narrowed: this feature closed both paths reachable from the application, and what remains is user deletion cascading a membership away — which only account deletion (S8) can trigger.

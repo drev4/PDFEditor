@@ -18,7 +18,7 @@ Everything below is the state of the code on **2026-08-28**, read out of the sou
 | Logout | Server-side. `POST /api/auth/logout` revokes the family, so a captured refresh token stops working. Local state is cleared even if the request fails |
 | CSRF | `POST /api/auth/refresh` and `POST /api/auth/logout` are the only cookie-authenticated routes and carry `middleware/csrf.ts`. Everything else authenticates with a header, which cannot be set cross-site, so it is not a CSRF target |
 | Authorization | **Tenancy.** A caller may act on a form when a `Membership` links them to the organization that owns it — `verifyFormOwnership` / `verifyFieldOwnership`, called per handler. `Form.createdByUserId` is provenance and is never an input. Membership is resolved from the database per request, **not** carried in the JWT: access tokens live 15 minutes and cannot be revoked, so a membership claim inside one would keep working for 15 minutes after someone was removed from an organization |
-| Roles | `owner \| admin \| member` are **stored but not enforced**. Nothing reads `Membership.role` to make a decision, so every member of an organization can do everything. Tracked in [`docs/BACKLOG.md`](../BACKLOG.md) |
+| Roles | `owner \| admin \| member`, **enforced** ([`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md)). `requireRole` in `middleware/membership.ts` is the only reader. `owner` invites anyone, changes roles, removes members; `admin` manages forms and invites `member`s; `member` manages forms. **An organization can never be left without an owner** — demoting or removing the last one is refused |
 | Lockout / throttling | Per-IP rate limits on `POST /api/auth/login` (failed attempts only), `POST /api/auth/register` and `POST /api/responses` — `middleware/rateLimit.ts`. **No account-level lockout**: a per-account limiter without an unlock path would let anyone lock a named user out by spamming their address, so it is deferred to S10 |
 | MFA / SSO | **None** |
 
@@ -99,6 +99,33 @@ Two credentials, deliberately split, because they have opposite requirements.
 - **`SameSite=Lax` requires the SPA and the API to be same-site**, which is a deployment property nothing in the code enforces. Development is same-site (`localhost` on two ports), so this will look fine locally and fail in production if the two are put on unrelated domains. The requirement is in [08-operations](./08-operations.md); `SameSite=None` is not a fix, because Safari and Firefox block third-party cookies outright.
 - **No idle timeout and no session listing.** A refresh token lives 7 days regardless of use, and a user cannot see or revoke their other sessions. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **No account-level lockout** (S10), unchanged by this work.
+
+## Invitations are bearer capabilities
+
+There is **no email service in this application** — no provider, no dependency, no configuration. An invitation therefore produces a link the inviter copies and delivers themselves, the same idiom as the `shareId` public form link. That makes it the same class of thing as the signed PDF URL in [`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md): whoever holds it can spend it.
+
+What bounds it:
+
+| Control | How |
+|---|---|
+| Unguessable | 32 bytes of CSPRNG output, base64url |
+| Not recoverable from the database | Stored as a SHA-256; the raw token exists only in the response that creates it |
+| Expiring | `INVITATION_TTL_HOURS`, default **72** |
+| Single-use | `acceptedAt` is set inside the accepting transaction |
+| Cancellable | `revokedAt`, set by `DELETE /api/organizations/invitations/:id`. **A JWT would not have been** — the same reason it was rejected for sessions in [`0008`](../../features/0008-session-hardening.md) |
+| Bound to one address | Accepting while signed in as a different email is refused with `409`, not silently granted — a forwarded link must not put the wrong person inside a customer's organization |
+| Throttled | `POST /api/organizations/invitations/accept` is unauthenticated by design and carries a named per-IP limiter. Unknown, expired, revoked and already-accepted tokens all answer identically, so it is not an oracle |
+
+**What this does not do:** nothing notifies the invited person. If the inviter loses the link before sending it, the invitation is unusable and has to be revoked and reissued. An email provider is filed in [`docs/BACKLOG.md`](../BACKLOG.md); it wants the job queue that arrives at step 8 of the [build order](./10-saas-roadmap.md#build-order).
+
+### Two rejections, two codes
+
+| Situation | Status | Why |
+|---|---|---|
+| Not a member of the organization | `404` | A `403` confirms the resource exists. Unchanged from [`0009`](../../features/0009-organizations-own-resources.md) |
+| A member whose role does not allow it | `403` | They already know it exists — they are inside the organization. Hiding it tells them nothing and makes the product feel broken |
+
+Both are asserted on the same endpoint in `backend/tests/integration/organization-roles.spec.ts`. This mirrors the `402` / `403` split the roadmap specifies for plan limits versus permissions.
 
 ## Where the headers actually are
 

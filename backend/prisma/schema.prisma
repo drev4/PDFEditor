@@ -16,6 +16,7 @@ model User {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   createdForms  Form[]
   memberships   Membership[]
+  sentInvitations Invitation[]
   refreshTokens RefreshToken[]
 
   @@map("users")
@@ -35,15 +36,18 @@ model Organization {
   updatedAt   DateTime     @updatedAt @map("updated_at")
   forms       Form[]
   memberships Membership[]
+  invitations Invitation[]
 
   @@map("organizations")
 }
 
-/// `owner` bills and can delete the organization; `admin` manages forms and
-/// members; `member` manages the forms they created.
+/// `owner` invites anyone, changes roles, removes members and can delete the
+/// organization; `admin` manages forms and invites `member`s; `member` manages
+/// forms.
 ///
-/// STORED BUT NOT ENFORCED. Nothing reads this field to make a decision yet —
-/// every member is effectively an admin. See docs/sot/07-security-and-privacy.md.
+/// ENFORCED since features/0010, in `middleware/membership.ts` — `requireRole`
+/// is the only thing that reads this field, and an organization is never left
+/// without an owner. See docs/sot/07-security-and-privacy.md.
 enum MembershipRole {
   owner
   admin
@@ -66,6 +70,36 @@ model Membership {
   @@index([userId])
   @@index([organizationId])
   @@map("memberships")
+}
+
+/// A pending offer of membership, redeemable once.
+///
+/// The link that carries it is a **bearer capability**, the same class as the
+/// signed PDF URL in features/0006: there is no email infrastructure in this
+/// service, so the inviter copies the link and delivers it themselves. Whoever
+/// holds it can spend it. That is why it expires, can be revoked before it is
+/// accepted, and is bound to the email address it was issued for.
+///
+/// `tokenHash` is a SHA-256, never the token — the same reasoning as
+/// `RefreshToken`, and a JWT would have been wrong here for the same reason it
+/// was wrong there: it could not be cancelled.
+model Invitation {
+  id              String         @id @default(uuid())
+  organizationId  String         @map("organization_id")
+  email           String
+  role            MembershipRole @default(member)
+  tokenHash       String         @unique @map("token_hash")
+  expiresAt       DateTime       @map("expires_at")
+  revokedAt       DateTime?      @map("revoked_at")
+  acceptedAt      DateTime?      @map("accepted_at")
+  invitedByUserId String?        @map("invited_by_user_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation(fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("invitations")
 }
 
 /// One row per issued refresh token. This is what makes a session revocable:

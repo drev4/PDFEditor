@@ -39,6 +39,20 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/dashboard/team',
+      name: 'members',
+      component: () => import('@/views/MembersView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      // Where an invitation link lands. Public: the invited person may not have
+      // an account yet, which is the whole reason the route exists.
+      path: '/invitations/:token',
+      name: 'accept-invitation',
+      component: () => import('@/views/AcceptInvitationView.vue'),
+      meta: { public: true }
+    },
+    {
       path: '/form/:shareId',
       name: 'public-form',
       component: () => import('@/views/PublicFormView.vue'),

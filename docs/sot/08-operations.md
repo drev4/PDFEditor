@@ -54,6 +54,9 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `RATE_LIMIT_REGISTER_WINDOW_MS` | no | `3600000` (1 hour) | |
 | `RATE_LIMIT_RESPONSES_MAX` | no | `20` | Public form submissions per window per IP |
 | `RATE_LIMIT_RESPONSES_WINDOW_MS` | no | `600000` (10 min) | |
+| `INVITATION_TTL_HOURS` | no | `72`, min `1` | How long an invitation link is valid. It is a bearer capability — there is no email service, so the inviter copies and sends it — which means anyone holding it can spend it until it expires |
+| `RATE_LIMIT_INVITATION_MAX` | no | `20` | Invitation acceptances per window per IP |
+| `RATE_LIMIT_INVITATION_WINDOW_MS` | no | `900000` (15 min) | |
 | `ENABLE_HSTS` | no | `false` | Send `Strict-Transport-Security`. **Must stay off wherever the app is reachable over plain HTTP, including local development** — a browser that sees HSTS from `localhost` forces HTTPS on `localhost` for every port afterwards, and the breakage that follows never mentions this setting. Turn on where TLS terminates |
 
 ### `re2` is a native dependency
