@@ -36,6 +36,15 @@ export default defineConfig({
                 RATE_LIMIT_LOGIN_MAX: '100000',
                 RATE_LIMIT_REGISTER_MAX: '100000',
                 RATE_LIMIT_RESPONSES_MAX: '100000',
+                // The refresh endpoint is hit by every page load that has a
+                // session, and by every expiry below.
+                RATE_LIMIT_REFRESH_MAX: '100000',
+                // Deliberately tiny. With a 15-minute token no E2E run would
+                // ever cross an expiry, and the refresh-and-retry path — the
+                // one that decides whether a short-lived token is invisible to
+                // the user or a logout every fifteen minutes — would have no
+                // coverage at all. At 3 seconds most tests cross at least one.
+                JWT_ACCESS_TTL: '3s',
             },
         },
         {

@@ -1,8 +1,8 @@
 # 0008 — A session that can be cut short
 
-**Status:** backlog
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md); S4 in [07-security-and-privacy](../docs/sot/07-security-and-privacy.md))
-**Branch:** _(filled in when it moves to "in progress")_
+**Branch:** `feature/0008-session-hardening`
 **Related:** [`07-security-and-privacy`](../docs/sot/07-security-and-privacy.md) (S4) · [`03-domain-model`](../docs/sot/03-domain-model.md) · [`04-backend-patterns`](../docs/sot/04-backend-patterns.md) · [`06-api-reference`](../docs/sot/06-api-reference.md) · [`08-operations`](../docs/sot/08-operations.md)
 
 ## Context
@@ -85,3 +85,42 @@ They are separate origins: `localhost:5173` and `localhost:3000` in development,
 > **Step 9 — verify.** `npm run test:backend`, `npm run test:integration`, `npm run test:frontend`, `npm run test:e2e`, `npx tsc --noEmit` in `backend/`, `npm run build --workspace=frontend`. Then by hand, which is where this feature actually fails: log in, wait past the access-token lifetime (set it to 60 s temporarily), and confirm the next action refreshes silently rather than bouncing to login; log out and confirm a captured refresh token is rejected; upload a PDF and download a CSV **after** a refresh has happened, because those are the two paths that bypass `request()`. Note that E2E runs against `npm run dev`, so any cookie flag depending on `Secure` needs a plan for plain HTTP in development — state it.
 >
 > **Step 10 — document.** Run `sot-sync`. [07-security-and-privacy](../docs/sot/07-security-and-privacy.md): the auth table's Session / Token storage / Revocation / Logout rows, S4's status, the "Recommended order of work" list, and — in the style `0007` set — an explicit statement of **what is still not covered**, which will at minimum include access tokens being unrevocable for their remaining lifetime. [03-domain-model](../docs/sot/03-domain-model.md): the new entity and its cascade row. [06-api-reference](../docs/sot/06-api-reference.md): the new endpoints and the new `401` semantics, after re-reading the routes (`api-contract-guard`). [04-backend-patterns](../docs/sot/04-backend-patterns.md): the CSRF guard, if it shipped. [08-operations](../docs/sot/08-operations.md): the new environment variables, and **the same-site requirement from point 2 as a deployment requirement**. [09-quality-and-testing](../docs/sot/09-quality-and-testing.md): the spec counts. Remove the session-hardening row from [`docs/BACKLOG.md`](../docs/BACKLOG.md) and file what was deferred. Close step 3 in the [build order](../docs/sot/10-saas-roadmap.md#build-order) if nothing is left in it. Set this file to `**Status:** done` and add an `## Outcome`.
+
+
+## Outcome
+
+**Done, including the cookie half.** All ten acceptance criteria hold. Verified on Node 22.22.0: backend 12 specs / 115 tests, integration 3 / 25, frontend 29 / 241, E2E 7 / 38, plus `tsc --noEmit` on the backend and the frontend build.
+
+### The design deviates from the spec, deliberately
+
+The spec said "move the session to a cookie" and warned that doing so introduces CSRF across an API that has no defence for it. Following that warning to its conclusion gives a better split than the one the spec sketched:
+
+- **Refresh token** → `httpOnly` cookie, `Path=/api/auth`, `SameSite=Lax`, `Secure`. Unreadable by page script.
+- **Access token** → a module variable in `services/api.ts`. Not `localStorage`, and **not a cookie**.
+
+Because every route except `/auth/refresh` and `/auth/logout` still authenticates with an `Authorization` header, the API stays CSRF-immune and the guard is needed on exactly two endpoints instead of every write path. The long-lived credential is still unreadable, which was the point. `localStorage` now holds no credential at all — only the `user` object, as a rendering hint.
+
+### What the code says that the spec did not know
+
+- **`useThumbnails.ts` has no `getDocument`** and **`App.vue` had dead code**: its `onMounted` was guarded on `isAuthenticated && !user`, and `isAuthenticated` is defined as `!!user` — it could never run. Replaced with a real `bootstrap()` call.
+- **Loading a PDF makes no API call.** The app opens the file locally and uploads later. The first attempt at an "expired token refreshes silently" test used a PDF load as the authenticated action and proved nothing; a request trace showed no upload at all. It now lists forms instead.
+
+### A race this change introduced, found by the E2E suite
+
+Two E2E tests failed after the first implementation. `DashboardView.handleLogout` called `authStore.logout()` without awaiting, then navigated. The router guard bootstrapped, the logout request was still in flight, the refresh cookie was still valid — so the session was **re-established** and `/login` (a `requiresGuest` route) bounced the user back to the dashboard. Clicking "log out" left you logged in.
+
+Fixed in both places: the handler awaits, and the store clears local state synchronously and marks the session settled so no bootstrap can resurrect it. The store is now correct whether or not a caller awaits — the handler fix alone would have left the trap for the next caller.
+
+### Verified, not assumed
+
+- **Replay detection**: removing the family revocation makes exactly one integration test fail (`rejects a refresh token that was already exchanged, and kills the family`) and nothing else.
+- **In a real browser**: `document.cookie` is empty, `localStorage` contains no token, a cold reload recovers the session from the cookie alone, and a refresh cookie captured before logout returns `401` when replayed after it.
+- **The whole E2E suite runs with `JWT_ACCESS_TTL: '3s'`**, set in `playwright.config.ts`. Every test crosses at least one expiry, so the refresh-and-retry path has real coverage rather than a single dedicated test. Stable across four consecutive full runs.
+
+### Deferred and filed
+
+In [`docs/BACKLOG.md`](../docs/BACKLOG.md): session listing, per-session revocation and an idle timeout; and a local-tooling gap this work hit — nothing migrates the `vuepdf_test` database locally, so the first integration run after any migration fails with `relation does not exist` and looks like a broken test. The stale "there is no migration history" section in `.claude/skills/prisma-schema-migration/SKILL.md` was corrected in passing; it had been false since `features/0001`.
+
+**Known limits, recorded in [07-security-and-privacy](../docs/sot/07-security-and-privacy.md#what-the-session-model-does-not-cover):** an access token cannot be revoked within its 15 minutes, and `SameSite=Lax` requires the SPA and API to be same-site — a deployment property nothing enforces and that development cannot reveal, since `localhost:5173` and `localhost:3000` are same-site. That requirement is now in [08-operations](../docs/sot/08-operations.md).
+
+`JWT_EXPIRES_IN` was removed rather than kept: it configured a single session token that no longer exists.

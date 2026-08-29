@@ -6,6 +6,7 @@ Source of record: `backend/prisma/schema.prisma`. Everything below was read out 
 
 ```
 User 1───* Form 1───* Field 1───* Answer *───1 Response *───1 Form
+User 1───* RefreshToken
 ```
 
 | Entity | Purpose | Notes that matter |
@@ -15,6 +16,7 @@ User 1───* Form 1───* Field 1───* Answer *───1 Response 
 | `Field` | One input placed on the PDF | `type: text \| textarea \| checkbox \| radio \| dropdown`. `position: Json` in **canvas** coordinates. `options: Json?` for radio/dropdown. `validation: Json?` = `{minLength?, maxLength?, pattern?}`. `order: Int` drives render and tab order. `deletedAt: DateTime?` — non-null means **archived**: removed from the editor and the public form, still present in the responses table and the CSV export. See [the `deletedAt` lifecycle](#the-deletedat-lifecycle). |
 | `Response` | One public submission | Stores `ipAddress` and `userAgent`. No respondent identity beyond that. `pdfUrl?` exists on the model but nothing writes it today. |
 | `Answer` | One value in one submission | `value: String` — **everything is a string**, including booleans (`String(value)`). Type meaning is reconstructed at read time. |
+| `RefreshToken` | One issued refresh token — the part of a session that can be taken away | `tokenHash` is a SHA-256 of the token, never the token; a fast hash is right **here and nowhere else** in this codebase, because the input is 32 bytes of CSPRNG output rather than a low-entropy secret. `family` ties every token descended from one login together, which is what makes replay detectable. `revokedAt` is how logout, rotation and reuse detection all take effect. Written only by `services/refresh-token.ts` ([`features/0008`](../../features/0008-session-hardening.md)). |
 
 ## Invariants
 
@@ -51,6 +53,7 @@ Nothing is currently missing that a known workload needs.
 | `Field.form` → `Form` | `Cascade` | Deleting a form deletes its fields. Correct. |
 | `Response.form` → `Form` | `Cascade` | Deleting a form deletes its responses. Correct and intended — but irreversible, with no soft delete and no export prompt. |
 | `Answer.response` → `Response` | `Cascade` | Correct. |
+| `RefreshToken.user` → `User` | `Cascade` | Deleting a user deletes their sessions. Correct and uncontroversial: this table holds no customer-produced data, only credentials that are worthless once the account is gone. |
 | **`Answer.field` → `Field`** | **`Cascade`** | Deleting a field destroys every answer ever given to it, across all past responses. Only two write paths can fire it, and one of them refuses to — see below. |
 
 That last row is not wrong on its own; it is only ever as safe as the write paths that can trigger it. There are exactly two:

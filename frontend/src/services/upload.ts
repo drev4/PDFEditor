@@ -97,10 +97,18 @@ export const uploadService = {
 
       xhr.open('POST', `${API_URL}/upload`)
 
+      // One of the two paths that do not go through `request()` in api.ts — the
+      // other is `api.download`. It reads the same in-memory access token, so a
+      // session refreshed elsewhere is picked up here; what it does not do is
+      // refresh and retry on a 401, because an upload body is a stream that
+      // cannot be replayed. The caller sees the 401.
       const token = authService.getToken()
       if (token) {
         xhr.setRequestHeader('Authorization', `Bearer ${token}`)
       }
+
+      // Cross-origin request, so the refresh cookie needs this to travel at all.
+      xhr.withCredentials = true
 
       xhr.send(formData)
     })

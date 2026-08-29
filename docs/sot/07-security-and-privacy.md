@@ -10,11 +10,13 @@ Everything below is the state of the code on **2026-08-28**, read out of the sou
 |---|---|
 | Credential | Email plus password, minimum **6 characters**, no complexity or breach check |
 | Password storage | `bcrypt`, cost factor **10** |
-| Session | JWT signed with `JWT_SECRET` (HS256), payload `{userId}`, expiry `JWT_EXPIRES_IN`, default **7 days** |
-| Token transport | `Authorization: Bearer` header |
-| Token storage | **`localStorage`** in the browser (`frontend/src/services/api.ts`) |
-| Revocation | **None.** There is no token blacklist, no `tokenVersion`, no refresh/rotation. A leaked token is valid until it expires |
-| Logout | Client-side only — deletes the token from `localStorage` |
+| Session | Two credentials. An **access token** — JWT, HS256, payload `{userId}`, lifetime `JWT_ACCESS_TTL`, default **15 minutes** — and a **refresh token**, 32 bytes of CSPRNG output stored as a SHA-256 in `refresh_tokens` with a **7-day** default lifetime |
+| Token transport | Access token in the `Authorization: Bearer` header. Refresh token in an `httpOnly`, `Secure`, `SameSite=Lax` cookie scoped to `Path=/api/auth` |
+| Token storage | Access token **in memory only** (`frontend/src/services/api.ts`), gone on reload. Refresh token in a cookie the page cannot read. **Nothing authenticating is in `localStorage`** — what remains there is the `user` object, a rendering hint that authorises nothing |
+| Revocation | **Yes, on the refresh token.** Logout, rotation and reuse detection all set `revokedAt`. An **access token is still not revocable** for its remaining lifetime — that is the price of verifying it without a database round trip, and why it is 15 minutes |
+| Rotation | Every refresh issues a new token and revokes the one presented. Presenting an already-revoked token is treated as replay and **revokes the whole family**, ending that session everywhere |
+| Logout | Server-side. `POST /api/auth/logout` revokes the family, so a captured refresh token stops working. Local state is cleared even if the request fails |
+| CSRF | `POST /api/auth/refresh` and `POST /api/auth/logout` are the only cookie-authenticated routes and carry `middleware/csrf.ts`. Everything else authenticates with a header, which cannot be set cross-site, so it is not a CSRF target |
 | Authorization | Resource ownership, checked per handler by `verifyFormOwnership` / `verifyFieldOwnership`. No roles, no organizations |
 | Lockout / throttling | Per-IP rate limits on `POST /api/auth/login` (failed attempts only), `POST /api/auth/register` and `POST /api/responses` — `middleware/rateLimit.ts`. **No account-level lockout**: a per-account limiter without an unlock path would let anyone lock a named user out by spamming their address, so it is deferred to S10 |
 | MFA / SSO | **None** |
@@ -53,7 +55,7 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 | ~~S1~~ | ~~**Uploaded PDFs are served publicly and permanently.**~~ **Resolved** ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)). `express.static` is gone. A PDF is reachable only through `GET /uploads/pdfs/:token/:filename`, where the token is an HMAC-SHA256 over the filename **and** an expiry, minted per read by `services/pdf-url.ts` and never persisted. A leaked URL now stops working on its own. Two limits worth knowing: the link is a **bearer capability** for its lifetime — anyone holding it can fetch that PDF, there is no per-viewer binding — and revocation is all-or-nothing (rotate `JWT_SECRET`, or delete the file). Per-file revocation is in [`docs/BACKLOG.md`](../BACKLOG.md). | ~~High~~ | `backend/src/services/pdf-url.ts` |
 | ~~S2~~ | ~~**No rate limiting anywhere.**~~ **Resolved** ([`features/0002`](../../features/0002-rate-limiting-on-public-write-paths.md)). The three unauthenticated write paths carry per-IP limiters. Two limits remain deliberately absent and are tracked in [`docs/BACKLOG.md`](../BACKLOG.md): a shared store (the current one is per-process, so the effective limit multiplies by replica count) and account-level lockout. | ~~High~~ | `middleware/rateLimit.ts` |
 | ~~S3~~ | ~~**Author-supplied regex executed on a public endpoint.**~~ **Resolved** ([`features/0004`](../../features/0004-safe-author-supplied-regex.md)). Patterns are compiled by RE2, which cannot backtrack, so execution is linear in input length: the case that took 155 s on a native `RegExp` now takes 0.05 ms. Patterns are also validated when stored, so an invalid one is rejected with a `400` instead of turning every later submission into a 500. | ~~High~~ | `backend/src/services/pattern-validator.ts` |
-| S4 | **JWT in `localStorage`, 7-day lifetime, not revocable.** Any XSS on the origin yields a week of full account access with no way to cut it short. The editor renders user-controlled content and loads PDF.js, which widens the XSS surface rather than narrowing it. | **High** | `frontend/src/services/api.ts` |
+| ~~S4~~ | ~~**JWT in `localStorage`, 7-day lifetime, not revocable.**~~ **Resolved** ([`features/0008`](../../features/0008-session-hardening.md)). The long-lived credential is an `httpOnly` cookie an XSS cannot read; the access token it can read is in memory and lasts 15 minutes; and logout now actually ends the session. What remains: an access token cannot be revoked within its lifetime, so the worst case is **15 minutes** of access rather than seven days. | ~~High~~ | `backend/src/services/refresh-token.ts`, `frontend/src/services/api.ts` |
 | ~~S5~~ | ~~**No security headers.**~~ **Resolved** ([`features/0007`](../../features/0007-security-headers-and-csp.md)). `helmet` sets the header set on every API response, and the SPA carries a CSP built in `frontend/vite.config.ts`. Three limits worth knowing, all deliberate: `style-src` needs `'unsafe-inline'` (measured — see below); the SPA policy is a `<meta>` element, so `frame-ancestors`, `report-uri` and `sandbox` cannot be expressed and must come from the production host; and there is no violation reporting. | ~~Medium~~ | `backend/src/app.ts`, `frontend/vite.config.ts` |
 | S6 | **Uploads are not scanned.** A file is accepted on mimetype plus a `pdf-lib` parse, then stored and served back to browsers from our own origin. | **Medium** | `middleware/upload.ts` |
 | S7 | **PII is collected from respondents with no notice, retention limit or erasure path.** Every submission stores `ipAddress` and `userAgent`, plus whatever the form author asked for — which in the target market means health, financial or employment data. | **Medium** (legal: high) | `routes/responses.ts` |
@@ -63,6 +65,32 @@ Severity is about impact on the product's ability to be sold and trusted, not CV
 | S11 | **`viewCount` is incremented by any anonymous GET**, so the only usage metric the product has is trivially forgeable — and it is the kind of number a usage-based plan would eventually meter on. | **Low** | `routes/forms.ts` |
 
 Correctly handled today, and worth not regressing: uploaded PDFs are reachable only through a signed, expiring URL, and the URL persisted in `Form.pdfUrl` is always the unsigned canonical one; ownership failures return 404 rather than 403; the public form endpoint strips `userId`; the 500 handler never leaks internal messages; user selects are explicit so `passwordHash` cannot escape; CORS is pinned to a single configured origin; the service refuses to start without `JWT_SECRET`.
+
+## The session model
+
+Two credentials, deliberately split, because they have opposite requirements.
+
+| | Access token | Refresh token |
+|---|---|---|
+| What it is | JWT, HS256, `{userId}` | 32 random bytes |
+| Lifetime | 15 minutes (`JWT_ACCESS_TTL`) | 7 days (`REFRESH_TOKEN_TTL_DAYS`) |
+| Where the browser keeps it | A module variable in `services/api.ts`. Never `localStorage`, never a cookie | `httpOnly` cookie, `Path=/api/auth` |
+| Readable by page JavaScript | Yes | **No** |
+| Revocable | **No** — verifying it must not cost a database round trip | Yes, via `revokedAt` |
+| Sent with | `Authorization: Bearer`, on every API request | The cookie, only to `/api/auth/*` |
+
+**Why the access token is not in the cookie too.** Moving everything to a cookie is the obvious reading of "use `httpOnly`", and it would have been worse. A `Bearer` header cannot be set by a cross-site request, so the entire API is CSRF-immune as it stands; the moment a cookie authenticates a write, every one of those routes becomes forgeable and needs a defence it does not have. Splitting the two keeps the long-lived credential unreadable **and** keeps the CSRF surface at exactly two endpoints, which is small enough to guard properly and to test.
+
+**Rotation and replay.** Each refresh issues a new token and revokes the one presented. If an already-revoked token is presented, it was either captured and replayed or the client retried — indistinguishable from the server — so the whole `family` is revoked. The legitimate user logs in again; the attacker gets nothing. Silently allowing it is what makes rotation decorative.
+
+**The client side has one non-obvious requirement:** the refresh-on-401 in `services/api.ts` is single-flight. Several requests failing at once would otherwise each start a refresh, and with rotation the second presents an already-exchanged token — the server reads it as replay, kills the family, and the user is logged out by the mechanism meant to keep them signed in.
+
+### What the session model does not cover
+
+- **An access token cannot be revoked within its lifetime.** Logging out, or revoking a stolen session, stops the refresh but leaves any access token already issued working for up to 15 minutes. Shortening it further trades user-visible latency for that window; making it revocable means a database read on every authenticated request. The 15 minutes is the deliberate middle.
+- **`SameSite=Lax` requires the SPA and the API to be same-site**, which is a deployment property nothing in the code enforces. Development is same-site (`localhost` on two ports), so this will look fine locally and fail in production if the two are put on unrelated domains. The requirement is in [08-operations](./08-operations.md); `SameSite=None` is not a fix, because Safari and Firefox block third-party cookies outright.
+- **No idle timeout and no session listing.** A refresh token lives 7 days regardless of use, and a user cannot see or revoke their other sessions. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+- **No account-level lockout** (S10), unchanged by this work.
 
 ## Where the headers actually are
 
@@ -96,7 +124,7 @@ Ordered by risk removed per unit of effort, not by severity alone:
 2. ~~**A regex guard** (S3)~~ — done.
 3. ~~**`helmet` plus a CSP** (S5)~~ — done. Cheaper than expected on the API and more subtle on the SPA, for the reason in **Where the headers actually are** below.
 4. ~~**Signed, expiring URLs for PDFs** (S1)~~ — done, on local disk. `services/pdf-url.ts` is the seam the move to object storage in [08-operations.md](./08-operations.md) replaces with presigned S3/R2 URLs; nothing else builds an `/uploads` path.
-5. **Token handling** (S4): shorten expiry, add refresh, and move the session to an `httpOnly` `Secure` `SameSite` cookie. This is a real change on both sides — plan it as a feature, not a patch. **This is now the next item**, and the CSP from item 3 narrows the XSS path that gives it its severity without removing the need for it.
+5. ~~**Token handling** (S4)~~ — done ([`features/0008`](../../features/0008-session-hardening.md)). See **The session model** below for what it does and does not cover.
 6. **A privacy layer** (S7, S8): a retention policy per form, an IP-collection toggle, a respondent notice on the public form, account deletion, and per-account export.
 7. **Structured logging with redaction** (S9), which is also the observability prerequisite in [08](./08-operations.md).
 

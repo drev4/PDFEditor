@@ -2,7 +2,7 @@
 
 The entity designs, the entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
 
-The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 2 are closed and step 3 has one item left, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
+The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 3 are closed; step 4 is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
 
 The division of labour with the backlog: [`docs/BACKLOG.md`](../BACKLOG.md) answers **what is missing and how much it matters**; the build order answers **what is next**. When priority and the chain disagree, the chain wins — see [the inversion](#a-known-inversion-between-this-chain-and-the-backlog) at the end for the case that already exists.
 
@@ -94,7 +94,7 @@ This is the whole build order, not only the SaaS part of it — the security and
 | 0 | ~~**Baseline Prisma migrations**~~ — done | Nothing below could safely change a schema holding customer data |
 | 1 | ~~**Stable field ids and safe bulk save**~~ — done | Was an active data-loss bug, and is the prerequisite for every integration. [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) |
 | 2 | ~~**A gate that can be trusted**~~ — done | A red E2E suite gates nothing and a CI that never generated the Prisma client verifies nothing: without this, no step below could be *shown* to work. [`features/0003`](../../features/0003-e2e-suite-green-and-independent.md), [`features/0005`](../../features/0005-working-ci-and-enforced-node-version.md) |
-| 3 | **Risk removal on the public surface** — one item left | The cheapest risk removal available, and the first questions on any security review. Closed: rate limiting ([`0002`](../../features/0002-rate-limiting-on-public-write-paths.md)), regex guard ([`0004`](../../features/0004-safe-author-supplied-regex.md)), signed PDF URLs ([`0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)), security headers and CSP ([`0007`](../../features/0007-security-headers-and-csp.md)). **Still open: session hardening (S4)** — the last **High** finding, and the one thing standing between here and step 4 |
+| 3 | ~~**Risk removal on the public surface**~~ — done | The cheapest risk removal available, and the first questions on any security review. Rate limiting ([`0002`](../../features/0002-rate-limiting-on-public-write-paths.md)), regex guard ([`0004`](../../features/0004-safe-author-supplied-regex.md)), signed PDF URLs ([`0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)), security headers and CSP ([`0007`](../../features/0007-security-headers-and-csp.md)), session hardening ([`0008`](../../features/0008-session-hardening.md)). **No High findings remain open** ([07-security](./07-security-and-privacy.md)) |
 | 4 | **`Organization` + `Membership`** with data migration, no visible behaviour change | The longest-lead schema change; do it while the data is small |
 | 5 | **Member invitations** | The first feature that makes B2B real rather than a table with one row |
 | 6 | **`Plan` + entitlements**, limits enforced, no charging yet | Validates the "limit reached" UX before money is involved |
@@ -102,7 +102,7 @@ This is the whole build order, not only the SaaS part of it — the security and
 | 8 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear. Also brings the Redis that the shared rate-limit store needs — see the inversion below |
 | 9 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
 
-Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified.
+Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are now all closed**, which makes `Organization` + `Membership` the next thing to build — and it is the longest-lead schema change in this document, so it wants doing while the data is still small.
 
 ### A known inversion between this chain and the backlog
 

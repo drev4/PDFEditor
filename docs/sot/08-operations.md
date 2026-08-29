@@ -37,7 +37,11 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 |---|---|---|---|
 | `DATABASE_URL` | yes | — | PostgreSQL connection string |
 | `JWT_SECRET` | **yes** | — | The process refuses to start without it (`app.ts`) |
-| `JWT_EXPIRES_IN` | no | `7d` | See the token-lifetime finding in [07](./07-security-and-privacy.md) |
+| `JWT_ACCESS_TTL` | no | `15m` | Access-token lifetime. An access token cannot be revoked, so this is the window in which a stolen one still works. Session length is the refresh token below |
+| `REFRESH_TOKEN_TTL_DAYS` | no | `7`, min `1` | How long a user stays signed in. Revocable, unlike the access token |
+| `COOKIE_SECURE` | no | `true` | `Secure` on the refresh cookie. Browsers treat `localhost` as trustworthy, so the safe default also works in development. Set `false` only for a non-localhost deployment on plain HTTP, which should not exist |
+| `RATE_LIMIT_REFRESH_MAX` | no | `60` | Session refreshes per window per IP |
+| `RATE_LIMIT_REFRESH_WINDOW_MS` | no | `900000` (15 min) | |
 | `PORT` | no | `3000` | |
 | `NODE_ENV` | no | — | Read but not used to change behaviour anywhere |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
@@ -171,4 +175,5 @@ Requirements that follow from what is already in the code:
 3. **Per-environment frontend builds**, because `VITE_API_URL` is compile-time.
 4. **Secrets from a secret manager**, never from a committed file. `JWT_SECRET` rotation invalidates every session, so rotation needs the refresh-token work from [07](./07-security-and-privacy.md) first.
 5. **At least two API replicas behind a load balancer** — only possible after step 1.
-6. **The host serving the SPA must send a `Content-Security-Policy` response header.** The application ships one in a `<meta>` element built by `frontend/vite.config.ts`, which covers `script-src`, `connect-src` and the rest — but a `<meta>` policy cannot express `frame-ancestors`, `report-uri` or `sandbox`, and browsers ignore those directives there. At minimum the host must add `frame-ancestors 'none'` (clickjacking) to the policy already in the page. See [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).
+6. **The SPA and the API must be same-site**, or nobody stays logged in. The refresh cookie is `SameSite=Lax`, so `app.example.com` calling `api.example.com` works (one registrable domain) and `app.example.com` calling an unrelated host does not. `SameSite=None` is **not** the fix: Safari and Firefox block third-party cookies, so it would work on the developer's Chrome and fail for real customers. Nothing in the code enforces this and development cannot reveal it — `localhost:5173` and `localhost:3000` are same-site, because ports do not affect same-site. Decide the domains before the first deploy. See [07-security-and-privacy](./07-security-and-privacy.md#what-the-session-model-does-not-cover).
+7. **The host serving the SPA must send a `Content-Security-Policy` response header.** The application ships one in a `<meta>` element built by `frontend/vite.config.ts`, which covers `script-src`, `connect-src` and the rest — but a `<meta>` policy cannot express `frame-ancestors`, `report-uri` or `sandbox`, and browsers ignore those directives there. At minimum the host must add `frame-ancestors 'none'` (clickjacking) to the policy already in the page. See [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).

@@ -15,16 +15,13 @@ import ConfirmDialog from 'primevue/confirmdialog'
 
 const authStore = useAuthStore()
 
-// Intentar cargar usuario al iniciar la app si hay token
+// Recover the session on a cold load. The router guard does this too and the
+// store deduplicates, so this only matters for the first paint.
+//
+// What was here before could never run: it was guarded on
+// `isAuthenticated && !user`, and `isAuthenticated` is defined as `!!user`.
 onMounted(async () => {
-  if (authStore.isAuthenticated && !authStore.user) {
-    try {
-      await authStore.fetchUser()
-    } catch (error) {
-      // Token expirado o inválido, será manejado por el router guard
-      console.error('Failed to fetch user on mount:', error)
-    }
-  }
+  await authStore.bootstrap()
 })
 </script>
 

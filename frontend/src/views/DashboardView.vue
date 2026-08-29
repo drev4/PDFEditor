@@ -247,8 +247,11 @@ const closeDocument = () => {
   }
 }
 
-const handleLogout = () => {
-  authStore.logout()
+const handleLogout = async () => {
+  // Awaited so the session is revoked server-side before navigating. The store
+  // clears local state synchronously either way, but the toast should not claim
+  // a logout that has not been asked for yet.
+  await authStore.logout()
   toast.add({
     severity: 'info',
     summary: 'Logged out',

@@ -138,6 +138,8 @@ RE2 is a native module, so its binary is tied to a Node ABI — see [08-operatio
 
 There is exactly one exception today, and it is the shape to copy: `GET /uploads/pdfs/:token/:filename` overrides `Cross-Origin-Resource-Policy` to `cross-origin` because the SPA is a different origin, and adds a restrictive `Content-Security-Policy` because the bytes are attacker-supplied. Both are argued in the comment.
 
+**CSRF is guarded the same way.** `middleware/csrf.ts` is applied at `POST /api/auth/refresh` and `POST /api/auth/logout` — the only two routes authenticated by a cookie — and nowhere else. Everything else authenticates with an `Authorization` header, which a cross-site request cannot set, so a guard there would suggest a threat that does not exist while breaking non-browser clients. If you add a route that reads the refresh cookie it needs the guard; if you add one that does not, it does not.
+
 **Do not add a CSP to API responses.** This process serves JSON, not documents; a policy there constrains nothing while making the security posture look better than it is. That absence is asserted in `backend/tests/security-headers.spec.ts` so it cannot be quietly "fixed". The policy that matters is on the SPA — [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).
 
 ## 10. Adding a new endpoint

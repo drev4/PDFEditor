@@ -82,6 +82,20 @@ export const registerRateLimit = createLimiter({
   message: 'Too many accounts created from this address. Please try again later.'
 })
 
+/**
+ * `POST /api/auth/refresh` — unauthenticated by definition: the only credential
+ * it takes is the cookie it is there to validate. Without a limit it is a free
+ * oracle for guessing refresh tokens, and every miss costs a database lookup.
+ * The limit is generous because a legitimate tab refreshes on a timer.
+ */
+export const refreshRateLimit = createLimiter({
+  windowEnv: 'RATE_LIMIT_REFRESH_WINDOW_MS',
+  windowDefault: 15 * MINUTE,
+  limitEnv: 'RATE_LIMIT_REFRESH_MAX',
+  limitDefault: 60,
+  message: 'Too many session refreshes from this address. Please try again in a few minutes.'
+})
+
 /** `POST /api/responses` — garbage submissions into a published form. */
 export const responseRateLimit = createLimiter({
   windowEnv: 'RATE_LIMIT_RESPONSES_WINDOW_MS',

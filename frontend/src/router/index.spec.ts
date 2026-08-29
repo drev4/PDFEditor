@@ -56,7 +56,7 @@ describe('Router', () => {
 
   it('should redirect to login when accessing protected route without auth', async () => {
     const router = createTestRouter()
-    vi.mocked(authService.isAuthenticated).mockReturnValue(false)
+    vi.mocked(authService.bootstrapSession).mockResolvedValue(false)
 
     // Add navigation guard
     router.beforeEach(async (to, from, next) => {
@@ -109,17 +109,19 @@ describe('Router', () => {
     expect(router.currentRoute.value.name).toBe('login')
   })
 
-  it('should load user if token exists', async () => {
+  it('should recover the session before deciding on a protected route', async () => {
     const router = createTestRouter()
     const authStore = useAuthStore()
-    vi.mocked(authService.isAuthenticated).mockReturnValue(true)
+    vi.mocked(authService.bootstrapSession).mockResolvedValue(true)
     authStore.fetchUser = vi.fn().mockResolvedValue({})
 
-    // Add navigation guard
+    // The guard can no longer read a token to decide: the access token is in
+    // memory and gone after a reload, the refresh token is an httpOnly cookie.
+    // It has to ask the server and await the answer.
     router.beforeEach(async (to, from, next) => {
       const authStore = useAuthStore()
 
-      if (!authStore.user && authService.isAuthenticated()) {
+      if (!authStore.user && (await authService.bootstrapSession())) {
         try {
           await authStore.fetchUser()
         } catch (error) {

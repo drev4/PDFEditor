@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
+import cookieParser from 'cookie-parser'
 import dotenv from 'dotenv'
 import path from 'path'
 import fs from 'fs'
@@ -69,6 +70,9 @@ app.use(cors({
   credentials: true
 }))
 app.use(express.json())
+// The refresh token travels in an httpOnly cookie (finding S4). Only the auth
+// routes read it; everything else authenticates with a Bearer header.
+app.use(cookieParser())
 
 // Uploaded PDFs. This used to be `express.static('/uploads')`, which made every
 // PDF any customer had ever uploaded fetchable forever by anyone holding the URL

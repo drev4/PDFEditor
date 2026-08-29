@@ -23,13 +23,21 @@ Nothing gets added to this file without opening the route file first — see the
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/auth/register` | — | `{email, password (min 6), name?}` | `201 {user, token}` · `400` if the email exists or validation fails · `429` when rate limited |
-| POST | `/auth/login` | — | `{email, password}` | `200 {user, token}` · `401 Invalid credentials` · `429` when rate limited |
+| POST | `/auth/register` | — | `{email, password (min 6), name?}` | `201 {user, token}` + `Set-Cookie: refresh_token` · `400` if the email exists or validation fails · `429` when rate limited |
+| POST | `/auth/login` | — | `{email, password}` | `200 {user, token}` + `Set-Cookie: refresh_token` · `401 Invalid credentials` · `429` when rate limited |
+| POST | `/auth/refresh` | refresh cookie | — | `200 {token}` + a rotated `Set-Cookie` · `401` · `403` cross-site · `429` when rate limited |
+| POST | `/auth/logout` | refresh cookie | — | `204` · `403` cross-site |
 | GET | `/auth/me` | Bearer | — | `200 {user}` · `401` · `404` if the user no longer exists |
 
-`token` is a JWT signed with `JWT_SECRET`, payload `{userId}`, expiry `JWT_EXPIRES_IN` (default `7d`). `user` never includes `passwordHash` — every select is explicit.
+`token` is the **access token**: a JWT signed with `JWT_SECRET`, payload `{userId}`, lifetime `JWT_ACCESS_TTL` (default **15m**). The **refresh token** is never in a response body — it is only ever a `Set-Cookie` (`httpOnly`, `Secure`, `SameSite=Lax`, `Path=/api/auth`). `user` never includes `passwordHash` — every select is explicit.
 
-Both `POST` endpoints are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; register counts every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
+**`POST /auth/refresh` returns one `401` for every failure** — unknown token, expired token, replayed token — with the same body. That is deliberate: distinguishing them would turn the endpoint into an oracle for probing whether a captured token was ever valid. A replay additionally revokes the whole token family server-side, so the session ends everywhere ([07-security](./07-security-and-privacy.md#the-session-model)).
+
+**`POST /auth/logout` is not behind `authenticate`.** Logging out has to work when the access token has already expired, which is exactly when a user reaches for it. The cookie is the credential.
+
+Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "Cross-site request rejected"}` to a cross-site `Origin` or `Sec-Fetch-Site: cross-site`. No other route needs it — see [04-backend-patterns §9](./04-backend-patterns.md).
+
+`/auth/register`, `/auth/login` and `/auth/refresh` are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; the others count every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
 
 ## Forms — `routes/forms.ts`
 
@@ -143,7 +151,7 @@ Stores `ipAddress` and `userAgent` from the request. Returns `201 {success, resp
 
 ## The 429 response
 
-`POST /auth/login`, `POST /auth/register` and `POST /responses` answer with `429` once their per-IP limit is exceeded. The body uses the same shape as every other error in this API, which matters because `frontend/src/services/api.ts` parses the body as JSON before it inspects the status:
+`POST /auth/login`, `POST /auth/register`, `POST /auth/refresh` and `POST /responses` answer with `429` once their per-IP limit is exceeded. The body uses the same shape as every other error in this API, which matters because `frontend/src/services/api.ts` parses the body as JSON before it inspects the status:
 
 ```ts
 // 429

@@ -56,11 +56,14 @@ describe('Auth Store', () => {
         expect(store.loading).toBe(false)
     })
 
-    it('logout clears user state', () => {
+    it('logout revokes on the server and clears user state', async () => {
         const store = useAuthStore()
         store.user = { id: '1', email: 'test@example.com', name: 'Test', createdAt: '2023-01-01' }
+        vi.mocked(authService.logout).mockResolvedValue(undefined)
 
-        store.logout()
+        // Awaited now: logout performs a server-side revocation, and the caller
+        // navigates away once it resolves.
+        await store.logout()
 
         expect(authService.logout).toHaveBeenCalled()
         expect(store.user).toBeNull()
