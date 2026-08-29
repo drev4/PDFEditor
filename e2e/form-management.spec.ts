@@ -11,9 +11,11 @@ test.describe('Form Management', () => {
   });
 
   test('should display empty state when no forms exist', async ({ page }) => {
-    // New user should see welcome screen
-    await expect(page.locator('text=/welcome/i').first()).toBeVisible();
-    await expect(page.locator('text=/upload|drag.*drop/i').first()).toBeVisible();
+    // The empty state is a dropzone, not a greeting: the design canvas has no
+    // "welcome back" hero, and the assertion that looked for one was checking
+    // decoration rather than the thing a new user actually needs to find.
+    await expect(page.locator('text=Start a form').first()).toBeVisible();
+    await expect(page.locator('text=/upload|drop a pdf/i').first()).toBeVisible();
   });
 
   test('should have access to upload functionality', async ({ page }) => {
