@@ -1,161 +1,158 @@
 <template>
-  <div class="forms-management-view min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6 md:p-8">
-    <div class="max-w-7xl mx-auto">
-      <!-- Fluid Header -->
-      <header class="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-        <div class="flex items-start gap-4">
-          <Button 
-            icon="pi pi-arrow-left" 
-            text 
-            rounded 
-            @click="router.push('/dashboard')"
-            class="text-gray-600 hover:text-blue-600 mt-1"
-          />
-          <div>
-            <h1 class="text-3xl font-black text-gray-900 tracking-tight">My Forms</h1>
-            <p class="text-gray-500 text-sm mt-1">
-              Manage your professional PDF forms and view results.
-            </p>
-          </div>
+  <AppShell>
+    <div class="forms-management-view flex flex-col flex-grow min-h-0 overflow-y-auto">
+      <!-- Page header -->
+      <header class="flex items-center gap-4 px-gutter pt-[26px] pb-5">
+        <div class="flex-grow min-w-0">
+          <h1 class="text-title">Forms</h1>
+          <p class="mt-0.5 text-body text-muted">Upload a PDF, place the fields, share the link.</p>
         </div>
 
-        <div class="flex items-center gap-3 sm:self-center pl-14 sm:pl-0">
-          <Button 
-            icon="pi pi-plus" 
-            label="New" 
-            severity="primary"
-            class="shadow-lg shadow-blue-500/20 px-6"
+        <div class="flex items-center gap-2.5">
+          <button
+            type="button"
+            class="flex items-center justify-center w-control h-control rounded-control border border-line text-muted hover:text-ink hover:bg-surface-sunken transition-colors"
+            :disabled="formsStore.loading"
+            aria-label="Refresh"
+            @click="formsStore.fetchForms()"
+          >
+            <i class="pi pi-refresh text-[13px]" :class="{ 'pi-spin': formsStore.loading }" />
+          </button>
+
+          <!-- The one accent action on this screen. -->
+          <button
+            type="button"
+            class="flex items-center gap-1.5 h-control px-3.5 rounded-control bg-accent hover:bg-accent-pressed text-white text-row font-medium transition-colors"
             @click="router.push('/dashboard')"
-          />
-          <Button 
-            icon="pi pi-refresh" 
-            severity="secondary" 
-            text 
-            rounded
-            :loading="formsStore.loading"
-            @click="formsStore.fetchForms"
-          />
+          >
+            <i class="pi pi-plus text-[12px]" />
+            <span>New form</span>
+          </button>
         </div>
       </header>
 
-      <!-- Loading State -->
-      <div v-if="formsStore.loading && !formsStore.forms.length" class="flex flex-col items-center justify-center py-20">
-        <ProgressSpinner />
-        <p class="mt-4 text-gray-500 font-medium tracking-wide">Loading your forms...</p>
-      </div>
-
-      <!-- Empty State -->
-      <div v-else-if="!formsStore.forms.length" class="bg-white/80 backdrop-blur-md rounded-2xl p-16 text-center shadow-xl border border-white">
-        <div class="inline-flex items-center justify-center w-20 h-20 bg-blue-50 rounded-full mb-6 text-blue-500">
-          <i class="pi pi-inbox text-5xl"></i>
+      <!-- Filters -->
+      <div class="flex items-center gap-5 px-gutter border-b border-line">
+        <div class="flex items-center gap-1">
+          <button
+            v-for="tab in tabs"
+            :key="tab.value"
+            type="button"
+            class="h-[38px] px-3 flex items-center text-row transition-colors"
+            :class="activeTab === tab.value
+              ? 'border-b-[1.5px] border-ink font-medium text-ink'
+              : 'text-muted hover:text-ink'"
+            @click="activeTab = tab.value"
+          >
+            {{ tab.label }}
+          </button>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-2">No forms found</h2>
-        <p class="text-gray-600 max-w-sm mx-auto mb-8">
-          You haven't created any forms yet. Upload a PDF in the dashboard to get started!
-        </p>
-        <Button 
-          label="Go to Dashboard" 
-          icon="pi pi-home" 
-          @click="router.push('/dashboard')" 
-          outlined
-        />
+        <div class="flex-grow" />
+        <span class="num text-meta text-faint">
+          {{ visibleForms.length }} {{ visibleForms.length === 1 ? 'form' : 'forms' }}
+        </span>
       </div>
 
-      <!-- Forms Grid -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
-        <div 
-          v-for="(form, index) in formsStore.forms" 
-          :key="form.id"
-          class="group bg-white/70 backdrop-blur-sm rounded-2xl border border-white shadow-sm hover:shadow-2xl transition-all duration-500 flex flex-col overflow-hidden animate-slide-up"
-          :style="{ animationDelay: `${index * 0.1}s` }"
+      <!-- Loading -->
+      <div v-if="formsStore.loading && !formsStore.forms.length" class="flex flex-col items-center py-20">
+        <ProgressSpinner style="width: 30px; height: 30px" strokeWidth="4" />
+        <p class="mt-4 text-body text-muted">Loading your forms</p>
+      </div>
+
+      <template v-else>
+        <!-- Table header -->
+        <div
+          v-if="visibleForms.length"
+          class="grid gap-4 px-gutter py-2.5 border-b border-line-soft forms-row"
         >
-          <!-- Form Preview / Icon Area -->
-          <div class="h-48 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center relative overflow-hidden group-hover:from-blue-500/15 group-hover:to-indigo-500/15 transition-all duration-700">
-            <!-- Background Decorative Shape -->
-            <div class="absolute -bottom-4 -right-4 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl group-hover:bg-blue-500/10 transition-colors"></div>
-            
-            <i class="pi pi-file-pdf text-7xl text-blue-600/30 group-hover:text-blue-600/50 group-hover:scale-110 transition-all duration-500 ease-out"></i>
-            
-            <!-- Status Badge -->
-            <div 
-              class="absolute top-5 right-5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider shadow-sm border border-white/50"
-              :class="getStatusClass(form.status)"
-            >
-              {{ form.status }}
-            </div>
-          </div>
+          <span class="col-label">Form</span>
+          <span class="col-label">Status</span>
+          <span class="col-label text-right">Responses</span>
+          <span class="col-label">Updated</span>
+          <span />
+        </div>
 
-          <!-- Content -->
-          <div class="p-8 flex-1 flex flex-col">
-            <h3 class="text-xl font-bold text-gray-900 mb-2 truncate group-hover:text-blue-600 transition-colors" :title="form.title">
-              {{ form.title }}
-            </h3>
-            <p class="text-gray-500 text-sm line-clamp-2 mb-6 flex-1 leading-relaxed">
-              {{ form.description || 'Manage and view responses for this professional PDF form.' }}
-            </p>
-
-            <!-- Stats -->
-            <div class="flex items-center gap-6 py-5 border-y border-gray-100/80 mb-6">
-              <div class="flex flex-col gap-1">
-                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Views</span>
-                <div class="flex items-center gap-2">
-                  <i class="pi pi-eye text-blue-500 text-sm"></i>
-                  <span class="font-bold text-gray-800">{{ form.viewCount || 0 }}</span>
-                </div>
+        <!-- Rows -->
+        <div v-if="visibleForms.length" class="flex flex-col">
+          <div
+            v-for="form in visibleForms"
+            :key="form.id"
+            class="grid gap-4 items-center px-gutter py-3 border-b border-line-soft hover:bg-surface-subtle transition-colors forms-row"
+            data-testid="form-row"
+          >
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div
+                class="flex items-center justify-center w-[30px] h-[30px] rounded-input border border-line text-muted flex-shrink-0"
+              >
+                <i class="pi pi-file text-[13px]" />
               </div>
-              <div class="flex flex-col gap-1">
-                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Responses</span>
-                <div class="flex items-center gap-2">
-                  <i class="pi pi-check-circle text-green-500 text-sm"></i>
-                  <span class="font-bold text-gray-800">{{ form._count?.responses || 0 }}</span>
+              <div class="min-w-0">
+                <button
+                  type="button"
+                  class="block w-full text-left text-row font-medium truncate hover:text-accent transition-colors"
+                  :title="form.title"
+                  @click="handleEdit(form)"
+                >
+                  {{ form.title }}
+                </button>
+                <div class="text-mono text-faint mt-px truncate">
+                  <span class="num">{{ form._count?.fields ?? 0 }}</span> fields ·
+                  <span class="num">{{ form.viewCount || 0 }}</span> views
                 </div>
               </div>
             </div>
 
-            <!-- Actions -->
-            <div class="grid grid-cols-2 gap-3">
-              <Button 
-                label="Edit Fields" 
-                icon="pi pi-pencil" 
-                size="small" 
-                outlined 
-                class="hover:bg-blue-50 transition-colors"
-                @click="handleEdit(form)"
-              />
-              <Button 
-                label="Responses" 
-                icon="pi pi-chart-bar" 
-                size="small" 
-                severity="success" 
-                outlined 
-                class="hover:bg-green-50 transition-colors"
-                @click="viewResponses(form.id)"
-              />
-              <Button 
-                label="Share" 
-                icon="pi pi-share-alt" 
-                size="small" 
-                severity="info" 
-                outlined 
-                class="hover:bg-cyan-50 transition-colors"
-                @click="handleShare(form)"
-              />
-              <Button 
-                label="Delete" 
-                icon="pi pi-trash" 
-                size="small" 
-                severity="danger" 
-                outlined 
-                class="hover:bg-red-50 transition-colors"
-                @click="handleDelete(form)"
-              />
+            <div>
+              <StatusPill :status="form.status" />
+            </div>
+
+            <span class="num text-meta text-right" :class="{ 'text-disabled': !form._count?.responses }">
+              {{ form._count?.responses || '—' }}
+            </span>
+
+            <span class="text-meta text-muted">{{ relativeTime(form.updatedAt) }}</span>
+
+            <div class="flex items-center justify-center">
+              <button
+                type="button"
+                class="flex items-center justify-center w-7 h-7 rounded-input text-faint hover:text-ink hover:bg-surface-sunken transition-colors"
+                :aria-label="`Actions for ${form.title}`"
+                @click="openMenu($event, form)"
+              >
+                <i class="pi pi-ellipsis-h text-[13px]" />
+              </button>
             </div>
           </div>
+        </div>
+
+        <!-- Empty -->
+        <div v-else class="px-gutter py-16 text-center">
+          <h2 class="text-section">{{ emptyTitle }}</h2>
+          <p class="mt-1.5 text-body text-muted max-w-[380px] mx-auto">
+            {{ emptyBody }}
+          </p>
+        </div>
+      </template>
+
+      <div class="flex-grow" />
+
+      <!-- Dropzone -->
+      <div class="px-gutter py-6">
+        <div
+          class="flex items-center justify-center gap-2.5 h-[84px] rounded-card border border-dashed border-line-strong bg-surface-subtle"
+        >
+          <i class="pi pi-cloud-upload text-faint text-[15px]" />
+          <span class="text-body text-muted">
+            Drop a PDF on the
+            <RouterLink to="/dashboard">editor</RouterLink>, or
+            <RouterLink to="/dashboard">browse</RouterLink>. Existing PDF forms keep their fields.
+          </span>
         </div>
       </div>
     </div>
 
-    <!-- Share Modal -->
+    <Menu ref="menu" :model="menuItems" :popup="true" />
+
     <ShareFormModal
       v-model:visible="showShareModal"
       :form="selectedForm"
@@ -164,24 +161,25 @@
     />
 
     <ConfirmDialog />
-    <Toast position="top-right" />
-  </div>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
-import Button from 'primevue/button'
+import Menu from 'primevue/menu'
 import ProgressSpinner from 'primevue/progressspinner'
 import ConfirmDialog from 'primevue/confirmdialog'
-import Toast from 'primevue/toast'
+import AppShell from '@/layouts/AppShell.vue'
+import StatusPill from '@/components/ui/StatusPill.vue'
 import ShareFormModal from '@/components/forms/ShareFormModal.vue'
 import { useFormsStore } from '@/stores/forms.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
-import { type Form } from '@/services/forms'
+import { relativeTime } from '@/utils/formatDate'
+import { type Form, type FormStatus } from '@/services/forms'
 
 const router = useRouter()
 const toast = useToast()
@@ -193,17 +191,51 @@ const formManagement = useFormManagement()
 const showShareModal = ref(false)
 const selectedForm = ref<Form | null>(null)
 
+type Tab = 'all' | FormStatus
+const tabs: { value: Tab; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'published', label: 'Published' },
+  { value: 'draft', label: 'Drafts' },
+  { value: 'closed', label: 'Closed' },
+]
+const activeTab = ref<Tab>('all')
+
+const visibleForms = computed(() =>
+  activeTab.value === 'all'
+    ? formsStore.forms
+    : formsStore.forms.filter(f => f.status === activeTab.value)
+)
+
+const emptyTitle = computed(() =>
+  formsStore.forms.length ? 'Nothing in this view' : 'No forms yet'
+)
+const emptyBody = computed(() =>
+  formsStore.forms.length
+    ? 'No form has this status. Try another filter.'
+    : 'Upload a PDF in the editor to turn it into a form.'
+)
+
+// The row's overflow menu. Held as a ref so the actions know which form was
+// clicked; PrimeVue's Menu is a single popup instance, not one per row.
+const menu = ref<InstanceType<typeof Menu> | null>(null)
+const menuForm = ref<Form | null>(null)
+
+const menuItems = computed(() => [
+  { label: 'Edit fields', icon: 'pi pi-pencil', command: () => menuForm.value && handleEdit(menuForm.value) },
+  { label: 'Responses', icon: 'pi pi-list', command: () => menuForm.value && viewResponses(menuForm.value.id) },
+  { label: 'Share', icon: 'pi pi-share-alt', command: () => menuForm.value && handleShare(menuForm.value) },
+  { separator: true },
+  { label: 'Delete', icon: 'pi pi-trash', command: () => menuForm.value && handleDelete(menuForm.value) },
+])
+
+function openMenu(event: Event, form: Form) {
+  menuForm.value = form
+  menu.value?.toggle(event)
+}
+
 onMounted(() => {
   formsStore.fetchForms()
 })
-
-function getStatusClass(status: string) {
-  switch (status) {
-    case 'published': return 'bg-green-100 text-green-700'
-    case 'closed': return 'bg-red-100 text-red-700'
-    default: return 'bg-gray-100 text-gray-700'
-  }
-}
 
 function viewResponses(id: string) {
   router.push({ name: 'form-responses', params: { id } })
@@ -231,7 +263,7 @@ async function handleEdit(form: Form) {
 
     await documentStore.loadPDF(file)
     await formManagement.loadForm(form.id)
-    
+
     router.push('/dashboard')
     toast.add({ severity: 'success', summary: 'Loaded', detail: 'Form loaded for editing', life: 3000 })
   } catch (err: any) {
@@ -281,11 +313,9 @@ function handleDelete(form: Form) {
 </script>
 
 <style scoped>
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-clamp: 2;
-  overflow: hidden;
+/* The Main artboard's column widths. A grid rather than a <table> because the
+   first column has to be able to shrink and truncate. */
+.forms-row {
+  grid-template-columns: minmax(0, 1fr) 116px 116px 132px 40px;
 }
 </style>
