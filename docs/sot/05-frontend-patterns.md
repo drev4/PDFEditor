@@ -176,9 +176,29 @@ The editor's menu button opens the **application's** navigation, not the rail: f
 Nobody should read the canvas as a description of the product. What is drawn and not built:
 
 - **The organization switcher** in the sidebar. No endpoint returns an organization's name — `frontend/src/services/organization.ts` can list members and invitations and nothing else — so there is nothing to render.
-- **The plan card** in the sidebar and the `Plans` / `LimitReached` artboards. Plans do not exist; they are step 7 of the [build order](./10-saas-roadmap.md#build-order).
+- **The prices, and every purchase action.** The `Plans` artboard draws €0 / €12 / €39, a *Change plan* control, an *Upgrade to Pro* card on `LimitReached`, and a saved card with a billing history. None of it is built: there is no billing (step 8), and [`docs/BACKLOG.md`](../BACKLOG.md) records that the prices themselves are not a decision anyone has taken. Where the canvas draws a purchase, the app says paid plans are not available yet.
+- **The `API keys` tab** on the Settings artboard. Step 10 of the build order.
 - **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
+
+### Plan and usage
+
+**Built** ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)). The sidebar plan card, the **Plan & usage** section on Settings, and the `LimitReached` screen are real, driven by `GET /api/organizations/entitlements`.
+
+| | |
+|---|---|
+| `stores/plan.store.ts` | The plan and the usage. A store rather than a composable: the sidebar shows it on every signed-in screen, so it must outlive any one component |
+| `services/plan.ts` | One service for the endpoint. `null` in a limit means **unlimited**, matching the backend |
+| `components/plan/UsageMeter.vue` | One "used / limit" row with a bar. Shared by the card, the Settings section and the dialog |
+| `components/plan/PlanCard.vue` | The sidebar card. Renders **nothing** until the plan has loaded |
+| `components/plan/LimitReachedDialog.vue` | What a `402` from publishing looks like |
+
+Four things about it are load-bearing:
+
+- **`AppShell.vue` is the only fetcher.** It wraps every signed-in screen, so the plan is loaded once there and every other screen reads the store. A failure is swallowed and the card simply does not draw — an error toast about the plan, on a screen someone opened to do something else, is noise they cannot act on.
+- **Nothing renders a placeholder number.** The card draws only when `plan` is set, and `responsesFraction` is `null` rather than `0` when the limit is unlimited. This is the same rule `NotBuiltYet.vue` exists for, and it matters more here: an invented usage figure is the number someone checks before deciding whether they can publish.
+- **A `402` is caught by status, never by message.** `useAsyncAction` rethrows, so `FormsManagementView.vue` catches `ApiError` and branches on `error.status === 402` into the `LimitReached` dialog. Parsing the sentence would couple the screen to backend copy. The other two publish call sites — `FormsList.vue` and `FormSavePanel.vue` (the editor) — do not have the dialog; they show the server's own sentence as a **warning**, not an error, because nothing failed and nothing was lost.
+- **Publishing and unpublishing call `planStore.refresh()`.** Both move a number the sidebar shows, and a card showing yesterday's usage is worse than no card. `refresh` skips the loading flag and swallows failures, because it runs after an action that already succeeded.
 
 ### Editor edits are held, then saved explicitly
 

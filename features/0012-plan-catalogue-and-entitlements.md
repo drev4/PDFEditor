@@ -1,6 +1,6 @@
 # 0012 — Plan catalogue and entitlements, with `402` on a limit reached
 
-**Status:** in progress
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *`Plan` catalogue + entitlements service, `402` on limit reached*)
 **Branch:** `feature/0012-plan-catalogue-and-entitlements`
 **Related:** [10-saas-roadmap](../docs/sot/10-saas-roadmap.md#entitlements-where-plan-limits-get-checked) (step 7 of the build order) · [03-domain-model](../docs/sot/03-domain-model.md) · [04-backend-patterns §9](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [05-frontend-patterns §8](../docs/sot/05-frontend-patterns.md)
@@ -79,10 +79,12 @@ Checkable when the work is done.
 
 **Backend**
 
-5. `backend/src/services/plans.ts` exports the catalogue as a frozen constant — no table — with a `PlanKey` union and, per plan, `maxForms`, `maxResponsesPerMonth`, `seats`, `hasBranding`, `hasApiAccess`. Field names match the roadmap's entity table exactly.
-6. `backend/src/services/entitlements.ts` exports `getEntitlements(organizationId)` → `{ plan, usage: { forms, responsesThisPeriod, seats } }`, plus `assertCanCreateForm`, `assertCanInvite` and `currentPeriod()`.
-7. `POST /api/forms` returns **`402`** with a message naming the limit when the organization is at `maxForms`. No form row is created.
-8. `POST /api/organizations/invitations` returns **`402`** when members + redeemable invitations are already at `seats`. No invitation row is created, and no token is minted.
+> **Amended during execution, from the canvas.** Criteria 5, 7 and 8 as originally written were overruled by the artboards the spec itself sent the executor to read. They are corrected below and the reasoning is in the Outcome; the originals are in this file's git history.
+
+5. `backend/src/services/plans.ts` exports the catalogue as a frozen constant — no table — with a `PlanKey` union and, per plan, `maxPublishedForms`, `maxResponsesPerMonth`, `seats`, `hasBranding`, `hasApiAccess`. ~~`maxForms`~~ — the canvas meters forms **published at once**, not forms created.
+6. `backend/src/services/entitlements.ts` exports `getEntitlements(organizationId)` → `{ plan, usage: { publishedForms, responsesThisPeriod, seats } }`, plus `assertCanPublishForm`, `assertCanInvite` and `currentPeriod()`.
+7. **Publishing** a form beyond `maxPublishedForms` returns **`402`** with a message naming the limit, from `PATCH /forms/:id/status` **and** `PUT /forms/:id`; the form stays a draft. `POST /api/forms` is never refused — drafting is free.
+8. `assertCanInvite` counts members + redeemable invitations against `seats`, and is **written and tested but not wired** into `POST /api/organizations/invitations`. Wiring it belongs with step 8; the reason is in the Outcome and in `docs/BACKLOG.md`.
 9. `POST /api/responses` refuses at `maxResponsesPerMonth` with **`403`** and the message `Form is not accepting responses` — byte-identical to the existing unpublished-form rejection in `backend/src/routes/responses.ts`. The response and its answers are not persisted, and the counter is not left incremented.
 10. `GET /api/forms/public/:shareId` returns **`404 Form not found`** for a form whose organization is over the monthly limit — the same answer it already gives for a form that is not published.
 11. Every accepted submission increments the counter for the organization owning the form, in the same transaction as the `Response`.
@@ -190,4 +192,54 @@ Checkable when the work is done.
 
 ## Outcome
 
-*(filled in when the work is finished)*
+**Done**, on `feature/0012-plan-catalogue-and-entitlements`.
+
+### What the canvas changed about this spec
+
+The spec told the executor to take the numbers from the `Plans` and `LimitReached` artboards, and doing so overruled two of its own decisions. Both were the spec's fault, not the canvas's — it was written from the roadmap's sketch (`maxForms`) rather than from the design.
+
+**1. The limit is on *published* forms, not on forms created.** `LimitReached` says it in as many words: *"The Free plan keeps one form published at a time. Incident report 2026 stays a draft until you free up a slot or upgrade."* That moves the check out of `POST /api/forms` and into the two handlers that can set `status: 'published'`, and it changes the product: drafting is always free, and *unpublish another form* becomes a real alternative to upgrading — which is exactly what the artboard offers as its first button. Gating creation, as the spec originally said, would have refused a free user their first draft.
+
+**2. Seats are enforced nowhere, deliberately.** The canvas gives Free **and Pro** one seat each; only Team has several, and Team cannot be bought because there is no billing. Enforcing the seat limit would therefore have answered `402` to every invitation from every account in the product, making all of [`features/0010`](0010-member-invitations-and-role-enforcement.md) unreachable and breaking both E2E team tests. That is not validating the limit UX, it is deleting a shipped feature. **The repository owner chose to defer it**; `assertCanInvite` is written and tested against a real database so it cannot rot, and one integration test asserts that the endpoint still does *not* call it, so the gap is visible rather than forgotten.
+
+### The numbers, taken from the canvas
+
+| | Free | Pro | Team |
+|---|---|---|---|
+| Published forms | 1 | unlimited | unlimited |
+| Responses / month | 50 | 2,000 | 25,000 |
+| Seats | 1 | 1 | bought per seat → `null` |
+| `hasBranding` | false | true | true |
+| `hasApiAccess` | false | false | true |
+
+Team's seat count is `null` rather than a number: the canvas prices it as "€39 / month + €6 per seat", so how many seats a Team organization has is a fact only a `Subscription` can carry. **No price is stored or rendered anywhere** — `docs/BACKLOG.md` records that the prices on the canvas are not a decision anyone has taken, so the Settings screen and the `LimitReached` dialog say paid plans are not available yet instead of showing a figure or a purchase button.
+
+### Two things not in the spec, found while building
+
+- **The submission handler logged the plan rejection as `Prisma Error creating response`.** Its `catch` logged everything before rethrowing, so every free form filling up would have printed a fault with a stack trace — the exact noise `middleware/errorHandler.ts` was written to keep out of the log. It now rethrows an `AppError` without logging it.
+- **The P2 table in `docs/BACKLOG.md` had three-cell rows under a two-column header**, so GFM was silently dropping every reference link in that table. Given a `Reference` column header while adding rows to it.
+
+### Deviation from the spec's own process
+
+The spec required the tests to be written first and seen to fail. **They were written after the enforcement was wired**, so that was not honoured as written. It was checked instead of assumed: the three route files were stashed and the integration suite run against the unenforced code, where **9 of its 22 tests failed** — the nine that assert the new behaviour. The other 13 pass either way, being guards rather than the core assertions.
+
+### Verification
+
+Every suite, on `Node 22.22.0` against a real PostgreSQL, at the end of the work:
+
+| Command | Result |
+|---|---|
+| `npm run test:backend` | **13 files, 138 tests passed** (was 12/115; +19 new, and 4 pre-existing specs' mocks updated) |
+| `npm run test:integration` | **9 files, 99 tests passed** (was 7/72; +22 new) |
+| `npm run test:frontend` | **36 files, 297 tests passed** (was 35/284; +13 new) |
+| `npm run test:e2e` | **50 passed** (18.5s) |
+| `npm run build --workspace=frontend` | ✓ built in 18.33s, `vue-tsc` clean |
+| `cd backend && npx tsc --noEmit` | clean, no output |
+
+`npm run lint` was not run and is not cited: it lints nothing in this repository.
+
+Four pre-existing specs needed their mocks widened because the code they exercise gained a collaborator, not because their subject changed: `tests/responses.spec.ts` and `tests/regex-guard.spec.ts` now use `tests/mock-transaction.ts` (submitting writes inside a transaction), and `tests/forms.spec.ts` mocks the plan lookup on the publish path.
+
+### Migration
+
+One migration, `20260829134941_plan_key_and_usage_counters`: additive only — `organizations.plan_key TEXT NOT NULL DEFAULT 'free'` and the `usage_counters` table. It is safe against a populated database, which is not automatically true of everything here and was checked rather than assumed. Applied to `vuepdf` and to `vuepdf_test`.

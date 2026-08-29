@@ -39,7 +39,7 @@ Nothing gets added to this file without opening the route file first — see the
 
 **`POST /auth/logout` is not behind `authenticate`.** Logging out has to work when the access token has already expired, which is exactly when a user reaches for it. The cookie is the credential.
 
-Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "Cross-site request rejected"}` to a cross-site `Origin` or `Sec-Fetch-Site: cross-site`. No other route needs it — see [04-backend-patterns §9](./04-backend-patterns.md).
+Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "Cross-site request rejected"}` to a cross-site `Origin` or `Sec-Fetch-Site: cross-site`. No other route needs it — see [04-backend-patterns §11](./04-backend-patterns.md).
 
 `/auth/register`, `/auth/login` and `/auth/refresh` are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; the others count every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
 
@@ -47,6 +47,7 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
+| GET | `/organizations/entitlements` | Bearer, any member | — | `200 {plan: {key, name, maxPublishedForms, maxResponsesPerMonth, seats}, usage: {publishedForms, responsesThisPeriod, seats}}` · `404` if the caller is in no organization |
 | GET | `/organizations/members` | Bearer, any member | — | `200 {members: [{id, email, name, role, joinedAt}]}` · `404` if the caller is in no organization |
 | PATCH | `/organizations/members/:userId` | Bearer, **owner** | `{role}` | `200 {member}` · `400` if it would leave no owner · `403` wrong role · `404` not a member of this organization |
 | DELETE | `/organizations/members/:userId` | Bearer, **owner** | — | `204` · `400` if it would leave no owner · `403` · `404` |
@@ -54,6 +55,10 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 | POST | `/organizations/invitations` | Bearer, **owner/admin** | `{email, role}` | `201 {invitation: {id, email, role, expiresAt, link}}` · `400` already a member · `403` (an `admin` may only invite `member`) |
 | DELETE | `/organizations/invitations/:id` | Bearer, **owner/admin** | — | `204` · `404` |
 | POST | `/organizations/invitations/accept` | — | `{token, password?, name?}` | `200 {organizationId}` when signed in · `201 {user, token, organizationId}` for a new account · `400` invalid/expired/revoked/used or missing password · `401` the account exists, sign in first · `409` signed in as a different address · `429` |
+
+**`/organizations/entitlements` is readable by any member, not just an owner.** The sidebar plan card and the plan screen are visible to everyone in the organization, and a member who cannot see why publishing was refused has no way to understand the product. It carries no organization id and no billing identifier. `null` in any limit means **unlimited** — the same representation the backend catalogue uses, because `Infinity` does not survive JSON and a sentinel like `-1` invites a comparison that accidentally works.
+
+**`POST /organizations/invitations` does not check the seat limit yet.** `assertCanInvite` exists and is tested, and is deliberately not wired: the design gives Free and Pro one seat each, only Team has more, and Team cannot be bought because there is no billing. Enforcing it today would answer `402` to every invitation from every account. See [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) and the row in [`docs/BACKLOG.md`](../BACKLOG.md).
 
 **`link` is returned exactly once.** The server stores only a SHA-256 of the token and cannot reproduce it, and **nothing emails it** — the inviter copies the link and delivers it themselves. A client that discards this value has created an invitation nobody can accept.
 
@@ -68,16 +73,18 @@ The role rules and the `404` / `403` split are in [07-security-and-privacy](./07
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/forms` | Bearer | The caller's forms, with `_count.fields` (live fields only) and `_count.responses` |
-| POST | `/forms` | Bearer | `{title, description?, pdfUrl?}`. Generates `shareId` with `nanoid(12)` |
+| POST | `/forms` | Bearer | `{title, description?, pdfUrl?}`. Generates `shareId` with `nanoid(12)`. **Never refused by a plan limit** — drafting is free |
 | GET | `/forms/:id` | Bearer + ownership | Includes ordered **live** `fields` (`deletedAt: null`). **Side effect:** if `pdfUrl` is set and the form has never had a field — archived ones count — it extracts them from the PDF on disk and persists them before responding (`syncFieldsFromPDF`, best-effort) |
-| PUT | `/forms/:id` | Bearer + ownership | Partial `{title?, description?, status?, pdfUrl?, settings?}` |
-| PATCH | `/forms/:id/status` | Bearer + ownership | `{status: 'draft' \| 'published' \| 'closed'}` |
+| PUT | `/forms/:id` | Bearer + ownership | Partial `{title?, description?, status?, pdfUrl?, settings?}`. **`402`** when `status: 'published'` would exceed the plan's published-form limit |
+| PATCH | `/forms/:id/status` | Bearer + ownership | `{status: 'draft' \| 'published' \| 'closed'}`. **`402`** when publishing would exceed the plan's limit |
 | DELETE | `/forms/:id` | Bearer + ownership | **Cascades to fields and every response.** Irreversible, no soft delete, no export prompt |
-| GET | `/forms/public/:shareId` | — | Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`** |
+| GET | `/forms/public/:shareId` | — | Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`**. Answers `404` — not `402` — when the owning organization has spent the month's responses, so the form is unavailable before anyone fills it in |
 | GET | `/forms/:id/responses` | Bearer + ownership | Query `limit`, `offset`. Returns `{responses, fields, pagination: {total, limit, offset}}`. `fields` includes **archived** fields, so an answer to a removed question keeps a labelled column |
 | GET | `/forms/:id/responses/export` | Bearer + ownership | CSV download, `Content-Disposition: attachment`, UTF-8 BOM, built by `csv-exporter.ts`. Columns include **archived** fields, under their original label |
 
 Ownership is `verifyFormOwnership` (`middleware/formOwnership.ts`): **404, not 403**, when the form exists but belongs to another user, so the API does not confirm the existence of other people's resources.
+
+**Publishing is metered, creating is not.** The plan limits how many forms are published *at once*, so unpublishing frees a slot immediately, and the form being published is excluded from its own count — re-saving an already-published form is never refused. Both write paths that can set `status` carry the check; see [04-backend-patterns §10](./04-backend-patterns.md).
 
 ## Fields — `routes/form-fields.ts`
 
@@ -168,8 +175,11 @@ Validation, in order, before anything is persisted:
 3. Every `required` field is present and non-empty — otherwise `400` with the missing field **labels**.
 4. Each value matches its field type: `checkbox` must be a boolean; `radio` and `dropdown` must be one of `options`; `text` and `textarea` must be strings satisfying `minLength`, `maxLength` and `pattern` — otherwise `400` keyed by field **name**.
 5. Answers whose `fieldId` does not belong to the form are dropped silently, with a `console.warn`.
+6. The month's allowance is claimed, **inside the transaction that writes the response** — otherwise `403 Form is not accepting responses`, byte-identical to step 2.
 
 Stores `ipAddress` and `userAgent` from the request. Returns `201 {success, responseId, message}`.
+
+**The plan rejection is deliberately indistinguishable from a closed form, and it is never a `402`.** A respondent is not the customer: a `402` would be meaningless to them and would publish the customer's billing state to anyone holding the share link. The claim is an atomic upsert-and-compare on `UsageCounter`, so a rejection rolls back the increment and the response together and two concurrent submissions cannot both pass at the last slot.
 
 `pattern` is author-supplied and executed server-side here, but it is compiled by RE2, which cannot backtrack — execution is linear in input length, and a pattern that will not compile is ignored rather than throwing. A value that already failed `minLength`/`maxLength` is never handed to the regex.
 
@@ -225,8 +235,8 @@ TTL is configuration — [08-operations](./08-operations.md#configuration).
 500  { error: "Internal server error" }               never leaks the underlying message
 ```
 
-`402 Payment Required` is reserved for plan-limit rejections and is not yet emitted anywhere — see [10-saas-roadmap.md](./10-saas-roadmap.md).
+`402 Payment Required` means a **plan limit**, and `403` means a **permission failure**. They are never collapsed, so a client can show "upgrade your plan" versus "you do not have access" without parsing a message string. Today `402` is emitted by `PUT /forms/:id` and `PATCH /forms/:id/status` only ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)); it is never sent to an unauthenticated caller.
 
 ## Not implemented
 
-No public/machine API, no API keys, no webhooks, no pagination beyond `/forms/:id/responses`, no bulk response deletion, no account deletion, no data export beyond per-form CSV. The last two are GDPR obligations, tracked in [07-security-and-privacy.md](./07-security-and-privacy.md).
+No public/machine API, no API keys, no webhooks, no billing or plan-change endpoint, no endpoint returning an organization's name, no pagination beyond `/forms/:id/responses`, no bulk response deletion, no account deletion, no data export beyond per-form CSV. The last two are GDPR obligations, tracked in [07-security-and-privacy.md](./07-security-and-privacy.md).

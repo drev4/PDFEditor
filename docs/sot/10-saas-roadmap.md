@@ -2,7 +2,7 @@
 
 The entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. The `Organization`/`Membership` design is now **built** ([`features/0009`](../../features/0009-organizations-own-resources.md)) and its section says so; reality lives in [03-domain-model](./03-domain-model.md). Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
 
-The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 6 are closed; step 7 (`Plan` + entitlements) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
+The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 7 are closed; step 8 (Stripe + `Subscription`) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
 
 The division of labour with the backlog: [`docs/BACKLOG.md`](../BACKLOG.md) answers **what is missing and how much it matters**; the build order answers **what is next**. When priority and the chain disagree, the chain wins — see [the inversion](#a-known-inversion-between-this-chain-and-the-backlog) at the end for the case that already exists.
 
@@ -12,7 +12,7 @@ Business rationale is in [01-product-and-market.md](./01-product-and-market.md).
 
 ~~Target design.~~ **Built** ([`features/0009`](../../features/0009-organizations-own-resources.md)). `Organization`, `Membership` and `Form.organizationId` exist; every authorization check resolves a membership. The reality is described in [03-domain-model](./03-domain-model.md) and [04-backend-patterns §9](./04-backend-patterns.md) — this section is kept for the reasoning behind the shape, which is still the reasoning that governs what comes next.
 
-Roles are enforced and invitations exist too ([`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md)). What is **not** built, from here down: plans, entitlements, billing, the public API and white-labeling.
+Roles are enforced and invitations exist too ([`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md)), and plans and entitlements are built ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)). What is **not** built, from here down: billing, the public API and white-labeling.
 
 The shape:
 
@@ -32,7 +32,7 @@ This is worth doing before there is revenue, not after, and the reason is specif
 |---|---|---|
 | `Organization` | `id, name, slug, createdAt` | `slug` for URLs and future white-labeling |
 | `Membership` | `organizationId, userId, role` | `role: owner \| admin \| member`. Unique on `(organizationId, userId)` |
-| `Plan` | `key, maxForms, maxResponsesPerMonth, hasBranding, hasApiAccess, seats` | Start as a **constant in code**, not a table. Move to a table only when a customer needs custom limits |
+| `Plan` | `key, name, maxPublishedForms, maxResponsesPerMonth, seats, hasBranding, hasApiAccess` | **Built** as a frozen constant in `backend/src/services/plans.ts`, not a table — move to a table only when a customer needs custom limits. Note the field is `maxPublishedForms`, not `maxForms`: the design canvas meters how many forms are *published at once*, so drafting is always free and unpublishing frees a slot. `Organization.planKey` says which entry applies until `Subscription` exists |
 | `Subscription` | `organizationId, planKey, stripeCustomerId, stripeSubscriptionId, status, currentPeriodEnd` | The **only** entity that knows Stripe exists |
 
 Role semantics, minimum viable: `owner` bills and can delete the organization; `admin` manages forms and members; `member` manages the forms they created.
@@ -55,6 +55,8 @@ This needs a real migration history, which now exists — see [08-operations.md]
 
 ## Entitlements: where plan limits get checked
 
+~~Target design.~~ **Built** ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)) — `backend/src/services/entitlements.ts`, described in [04-backend-patterns §10](./04-backend-patterns.md). The design below is what was built, plus one thing this section did not anticipate: **a `402` must never reach a respondent**, so the two public paths refuse with the answers a closed form already gets. The section is kept for the reasoning.
+
 Follow the pattern already established for ownership in [04-backend-patterns.md](./04-backend-patterns.md): an explicit, composable call inside the handler. **Not** a blanket middleware, because each resource has a different limit and a middleware cannot know which one applies without re-deriving the route.
 
 ```ts
@@ -73,6 +75,8 @@ Two rules:
 - **Nothing in `routes/forms.ts` imports anything from the billing provider.** Domain routes ask the entitlements service a question about limits; only `SubscriptionService` knows Stripe exists.
 
 Response-per-month limits need a usage counter that does not require counting rows on every request. Design it as a monthly aggregate updated on write, and treat it as the same measurement the invoice will be based on — a metering number that disagrees with the invoice is worse than no number.
+
+That is now `UsageCounter` ([03-domain-model](./03-domain-model.md)). Two things it settled: it counts **submissions accepted in the period**, so deleting a form does not refund the month; and it is claimed by an atomic upsert-and-compare inside the submission's transaction, because check-then-write lets two concurrent submissions past the last slot.
 
 ## Public API and integrations
 
@@ -104,12 +108,12 @@ This is the whole build order, not only the SaaS part of it — the security and
 | 4 | ~~**`Organization` + `Membership`** with data migration, no visible behaviour change~~ — done | The longest-lead schema change; done while the data was small. [`features/0009`](../../features/0009-organizations-own-resources.md) |
 | 5 | ~~**Member invitations**~~ — done | The first feature that makes B2B real rather than a table with one row. Shipped with role enforcement, because neither is safe alone. [`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md) |
 | 6 | ~~**Adopt the design system** across the product~~ — done | The reason for putting it before step 7 held: the canvas already contained the **Plan & usage** and **Plan limit reached** screens, so step 7 builds them once, in a system that now exists. What shipped — and the three things on the canvas deliberately left unbuilt — is in [05-frontend-patterns §8](./05-frontend-patterns.md). [`features/0011`](../../features/0011-adopt-the-design-system.md) |
-| 7 | **`Plan` + entitlements**, limits enforced, no charging yet | Validates the "limit reached" UX before money is involved |
+| 7 | ~~**`Plan` + entitlements**, limits enforced, no charging yet~~ — done | Validated the "limit reached" UX before money is involved, and it paid off immediately: the canvas meters *published* forms rather than created ones, which is a different check in a different handler than this table assumed. [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) |
 | 8 | **Stripe + `Subscription`** | Actual revenue |
 | 9 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear. Also brings the Redis that the shared rate-limit store needs — see the inversion below |
 | 10 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
 
-Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so are steps 4, 5 and 6. Next is `Plan` + entitlements — and the two screens it needs are already designed in a system the app now speaks.
+Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so are steps 4, 5, 6 and 7. Next is Stripe and `Subscription` — the limits, the `402`, the meter and the screens exist and are in use, so the only new thing is the payment. Two checks are already written and waiting for it: the seat limit (`assertCanInvite`) and `Plan.hasBranding`, neither of which can mean anything until a plan can be bought.
 
 ### Parallel track — the landing page
 
