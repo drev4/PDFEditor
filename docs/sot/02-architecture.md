@@ -105,6 +105,32 @@ Field coordinates are stored in **canvas space** (`{x, y, width, height, page}`)
 
 Nothing enforces that these agree. No shared constant, no test, no type. Changing the editor's render scale silently misplaces every embedded AcroForm field in the exported PDF, and the failure is invisible until someone opens the PDF in Acrobat. This is the highest-value untested seam in the codebase — see [09-quality-and-testing.md](./09-quality-and-testing.md).
 
+## The landing page — an open decision, `[NOT IMPLEMENTED]`
+
+There is no marketing site. The design exists ([05-frontend-patterns §8](./05-frontend-patterns.md)); the technology has not been chosen, and **that is the decision, not a detail of it**. Left open, it gets made by whoever opens an editor first.
+
+What makes it a real choice rather than "put it in the SPA": the landing has requirements the application does not.
+
+| Requirement | Why the SPA does not satisfy it |
+|---|---|
+| Indexable by search engines | `frontend/` is a client-rendered Vite SPA. A crawler gets an empty `<div id="app">` and whatever it chooses to execute |
+| Fast on a cold first visit | The current build ships a 400 kB entry chunk plus an 880 kB PDF.js chunk. A first-time visitor who has never heard of the product should not pay for the editor |
+| Reachable without an API | The SPA's first paint is fine, but the app assumes a backend. A landing must be servable when the API is down — it is what a prospect sees |
+| Its own release cadence | Copy and prices change on a marketing rhythm, not a product one. Coupling them means a typo fix rebuilds and redeploys the application |
+
+The options, with the honest cost of each:
+
+| Option | For | Against |
+|---|---|---|
+| **Static HTML/CSS**, built from the artboard | The artboard already *is* HTML. Nothing to learn, nothing to run, deployable to any static host, indexable and instant | Duplicates the design tokens by hand. No component reuse with the app |
+| **Astro** | Ships zero JS by default, can import Vue components if the app's ever want sharing, first-class content collections for a blog later | A second framework and a second build in the repo, for a page that may stay one page |
+| **Nuxt** | One framework with the app; SSR gives indexability | Much heavier than the problem. Would pull the SPA toward a migration nobody has asked for |
+| **A route in the existing SPA** | Zero new infrastructure | Fails every row of the table above. It is the option that looks cheapest and costs the most |
+
+**A recommendation, not a decision:** static HTML, because the design canvas already produces exactly that, and because a landing page is the one artefact whose requirements are best met by having no runtime at all. The tokens duplicated by hand are eight colours and a type scale — cheaper than a second build system. Revisit if a blog or a docs site appears, which is the point Astro starts paying for itself.
+
+Whatever is chosen, two things follow from the rest of this document: the landing needs its own **CSP header** from whatever host serves it ([08-operations](./08-operations.md)), and if it shares a registrable domain with the app then the session cookie's `SameSite=Lax` keeps working ([07-security-and-privacy](./07-security-and-privacy.md)).
+
 ## Where this architecture breaks next
 
 In the order the load will actually hit it:
