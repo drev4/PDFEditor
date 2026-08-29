@@ -1,10 +1,10 @@
 <template>
-  <div class="pdf-viewer-container h-full flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+  <div class="pdf-viewer-container h-full flex flex-col bg-surface-sunken">
     <!-- No PDF Loaded State -->
     <div v-if="!documentStore.activeDocument" class="flex items-center justify-center h-full">
       <div class="text-center">
-        <i class="pi pi-file-pdf text-6xl text-gray-400 mb-4"></i>
-        <p class="text-gray-600 text-lg">No PDF loaded</p>
+        <i class="pi pi-file-pdf text-6xl text-faint mb-4"></i>
+        <p class="text-muted text-lg">No PDF loaded</p>
       </div>
     </div>
 
@@ -482,7 +482,7 @@ onUnmounted(async () => {
 <style scoped>
 .pdf-viewer-container {
   position: relative;
-  background: linear-gradient(to bottom, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(to bottom, #fbfbfc 0%, #f4f5f7 100%);
 }
 
 .pdf-canvas-wrapper {
@@ -547,14 +547,14 @@ canvas {
 
 .image-preview-container {
   position: absolute;
-  border: 2px dashed #3b82f6;
+  border: 2px dashed #3554d1;
   z-index: 10;
   user-select: none;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .image-preview-container:hover {
-  border-color: #2563eb;
+  border-color: #3554d1;
 }
 
 .image-preview {
@@ -574,7 +574,7 @@ canvas {
   position: absolute;
   width: 12px;
   height: 12px;
-  background: #3b82f6;
+  background: #3554d1;
   border: 2px solid white;
   border-radius: 50%;
   z-index: 11;
@@ -582,7 +582,7 @@ canvas {
 }
 
 .resize-handle:hover {
-  background: #2563eb;
+  background: #3554d1;
   transform: scale(1.2);
 }
 
@@ -614,7 +614,7 @@ canvas {
   position: absolute;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.2);
-  border: 2px dashed #6366f1;
+  border: 1px dashed #7a90e2;
   border-radius: 4px;
   z-index: 10;
   cursor: move;
@@ -639,6 +639,6 @@ canvas {
 }
 
 .text-preview-input::placeholder {
-  color: #9ca3af;
+  color: #9ba1ac;
 }
 </style>

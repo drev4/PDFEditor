@@ -152,15 +152,15 @@ onUnmounted(() => {
   justify-content: center;
   padding: 8px;
   cursor: move;
-  color: #6b7280;
-  border-bottom: 1px solid #e5e7eb;
+  color: #6a6f7b;
+  border-bottom: 1px solid #e7e8ec;
   margin-bottom: 4px;
   transition: all 0.2s ease;
 }
 
 .toolbar-handle:hover {
-  color: #3b82f6;
-  background: #f3f4f6;
+  color: #3554d1;
+  background: #f4f5f7;
   border-radius: 6px;
 }
 
@@ -179,7 +179,7 @@ onUnmounted(() => {
   background: transparent;
   border-radius: 8px;
   cursor: pointer;
-  color: #4b5563;
+  color: #6a6f7b;
   font-size: 14px;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -189,13 +189,13 @@ onUnmounted(() => {
 }
 
 .toolbar-tools button:hover {
-  background: #f3f4f6;
-  color: #3b82f6;
+  background: #f4f5f7;
+  color: #3554d1;
 }
 
 .toolbar-tools button.active {
-  background: #dbeafe;
-  color: #2563eb;
+  background: #eef1fd;
+  color: #3554d1;
   font-weight: 500;
 }
 
@@ -220,21 +220,21 @@ onUnmounted(() => {
   padding: 8px 10px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #9ca3af;
+  color: #9ba1ac;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #e7e8ec;
   margin-top: 4px;
 }
 
 .collapsed-separator {
   padding: 4px;
   margin: 4px 8px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #e7e8ec;
 }
 
 .field-tools button.active {
-  background: #dbeafe;
-  color: #2563eb;
+  background: #eef1fd;
+  color: #3554d1;
 }
 </style>

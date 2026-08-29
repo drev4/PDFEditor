@@ -1,10 +1,10 @@
 <template>
   <div class="documents-list">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">
+      <h3 class="text-sm font-bold text-ink uppercase tracking-wide">
         Documents
       </h3>
-      <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-semibold">
+      <span class="text-xs bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
         {{ documentStore.documents.length }}
       </span>
     </div>
@@ -16,22 +16,22 @@
         :class="[
           'group p-4 rounded-xl cursor-pointer transition-all duration-200',
           doc.id === documentStore.activeDocumentId
-            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg scale-105'
-            : 'bg-gray-50 hover:bg-gray-100 hover:shadow-md'
+            ? 'bg-accent-soft border border-accent'
+            : 'bg-surface-subtle hover:bg-surface-sunken hover:shadow-md'
         ]"
       >
         <div class="flex items-start gap-3">
           <div :class="[
             'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
             doc.id === documentStore.activeDocumentId
-              ? 'bg-white/20'
-              : 'bg-red-100'
+              ? 'bg-surface'
+              : 'bg-danger-soft'
           ]">
             <i :class="[
               'pi pi-file-pdf text-xl',
               doc.id === documentStore.activeDocumentId
                 ? 'text-white'
-                : 'text-red-500'
+                : 'text-danger'
             ]"></i>
           </div>
           <div class="flex-1 min-w-0">
@@ -39,15 +39,15 @@
               'text-sm font-semibold truncate',
               doc.id === documentStore.activeDocumentId
                 ? 'text-white'
-                : 'text-gray-900'
+                : 'text-ink'
             ]">
               {{ doc.name }}
             </p>
             <p :class="[
               'text-xs mt-1',
               doc.id === documentStore.activeDocumentId
-                ? 'text-blue-100'
-                : 'text-gray-500'
+                ? 'text-accent'
+                : 'text-muted'
             ]">
               {{ doc.numPages }} pages
             </p>
@@ -92,11 +92,11 @@ const documentStore = useDocumentStore()
 }
 
 .documents-list::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #d8dae1;
   border-radius: 3px;
 }
 
 .documents-list::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #9ba1ac;
 }
 </style>

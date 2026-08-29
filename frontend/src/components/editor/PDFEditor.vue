@@ -1,19 +1,19 @@
 <template>
-  <div class="pdf-editor bg-white/80 backdrop-blur-lg border-l border-gray-200/50 shadow-xl">
+  <div class="pdf-editor bg-surface border-l border-line">
     <!-- Header -->
-    <div class="editor-header sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 border-b border-blue-700">
+    <div class="editor-header sticky top-0 bg-surface px-4 py-3 border-b border-line">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+        <div class="w-7 h-7 bg-surface-sunken rounded-input flex items-center justify-center">
           <i class="pi pi-sliders-h text-white text-lg"></i>
         </div>
         <div>
           <h3 class="text-lg font-bold text-white">Editor Tools</h3>
-          <p class="text-xs text-blue-100">Customize your PDF</p>
+          <p class="text-xs text-accent">Customize your PDF</p>
         </div>
       </div>
     </div>
 
-    <div v-if="!documentStore.activeDocument" class="p-6 text-center text-gray-500">
+    <div v-if="!documentStore.activeDocument" class="p-6 text-center text-muted">
       <i class="pi pi-info-circle text-4xl mb-2 block"></i>
       <p class="text-sm">No PDF loaded</p>
     </div>
@@ -25,8 +25,8 @@
       <!-- Search Section -->
       <div class="tool-card">
         <div class="tool-header">
-          <div class="tool-icon bg-blue-100">
-            <i class="pi pi-search text-blue-600"></i>
+          <div class="tool-icon bg-accent-soft">
+            <i class="pi pi-search text-accent"></i>
           </div>
           <h4 class="tool-title">Search Text</h4>
         </div>
@@ -56,7 +56,7 @@
             />
           </div>
           <div v-if="searchStore.searchMatches.length > 0" class="search-results">
-            <span class="text-sm font-semibold text-gray-700">
+            <span class="text-sm font-semibold text-ink">
               {{ searchStore.currentMatchIndex + 1 }} / {{ searchStore.searchMatches.length }} matches
             </span>
             <div class="flex gap-1">
@@ -82,8 +82,8 @@
       <!-- Add Text Section -->
       <div class="tool-card">
         <div class="tool-header">
-          <div class="tool-icon bg-indigo-100">
-            <i class="pi pi-font text-indigo-600"></i>
+          <div class="tool-icon bg-accent-soft">
+            <i class="pi pi-font text-accent"></i>
           </div>
           <h4 class="tool-title">Add Text</h4>
         </div>
@@ -119,8 +119,8 @@
       <!-- Add Image Section -->
       <div class="tool-card">
         <div class="tool-header">
-          <div class="tool-icon bg-purple-100">
-            <i class="pi pi-image text-purple-600"></i>
+          <div class="tool-icon bg-accent-soft">
+            <i class="pi pi-image text-accent"></i>
           </div>
           <h4 class="tool-title">Add Image</h4>
         </div>
@@ -136,21 +136,21 @@
             class="w-full image-upload-btn"
             severity="secondary"
           />
-          <p class="text-xs text-gray-500 mt-2">Max size: 5MB</p>
+          <p class="text-xs text-muted mt-2">Max size: 5MB</p>
         </div>
       </div>
 
       <!-- Grid Settings -->
       <div class="tool-card">
         <div class="tool-header">
-          <div class="tool-icon bg-teal-100">
-            <i class="pi pi-th-large text-teal-600"></i>
+          <div class="tool-icon bg-accent-soft">
+            <i class="pi pi-th-large text-accent"></i>
           </div>
           <h4 class="tool-title">Grid Settings</h4>
         </div>
         <div class="tool-body">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-medium text-gray-700">Show Grid</span>
+            <span class="text-sm font-medium text-ink">Show Grid</span>
             <Button
               :icon="drawingStore.gridEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'"
               @click="drawingStore.toggleGrid()"
@@ -160,7 +160,7 @@
             />
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-sm font-medium text-gray-700">Snap to Grid</span>
+            <span class="text-sm font-medium text-ink">Snap to Grid</span>
             <Button
               :icon="drawingStore.snapToGrid ? 'pi pi-lock' : 'pi pi-lock-open'"
               @click="drawingStore.toggleSnapToGrid()"
@@ -175,8 +175,8 @@
       <!-- Page Operations -->
       <div class="tool-card">
         <div class="tool-header">
-          <div class="tool-icon bg-orange-100">
-            <i class="pi pi-file text-orange-600"></i>
+          <div class="tool-icon bg-limit-soft">
+            <i class="pi pi-file text-limit"></i>
           </div>
           <h4 class="tool-title">Page Operations</h4>
         </div>
@@ -204,12 +204,12 @@
       <!-- Edit History -->
       <div class="tool-card">
         <div class="tool-header">
-          <div class="tool-icon bg-gray-100">
-            <i class="pi pi-history text-gray-600"></i>
+          <div class="tool-icon bg-surface-sunken">
+            <i class="pi pi-history text-muted"></i>
           </div>
           <div class="flex-1">
             <h4 class="tool-title">Edit History</h4>
-            <p class="text-xs text-gray-500">{{ editorStore.editHistory.length }} changes</p>
+            <p class="text-xs text-muted">{{ editorStore.editHistory.length }} changes</p>
           </div>
         </div>
         <div class="tool-body">
@@ -228,8 +228,8 @@
       <!-- Export Section -->
       <div class="tool-card export-card">
         <div class="tool-header">
-          <div class="tool-icon bg-green-100">
-            <i class="pi pi-download text-green-600"></i>
+          <div class="tool-icon bg-published-soft">
+            <i class="pi pi-download text-published"></i>
           </div>
           <h4 class="tool-title">Export PDF</h4>
         </div>
@@ -553,7 +553,7 @@ const clearSearch = () => {
   border-radius: 16px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e7e8ec;
   transition: all 0.2s ease;
 }
 
@@ -563,8 +563,8 @@ const clearSearch = () => {
 }
 
 .export-card {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border-color: #bbf7d0;
+  background: linear-gradient(135deg, #e8f4ee 0%, #e8f4ee 100%);
+  border-color: #e8f4ee;
 }
 
 .tool-header {
@@ -588,7 +588,7 @@ const clearSearch = () => {
 .tool-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: #191b21;
   margin: 0;
 }
 
@@ -603,19 +603,19 @@ const clearSearch = () => {
   justify-content: space-between;
   margin-top: 12px;
   padding: 10px 12px;
-  background: #f8fafc;
+  background: #fbfbfc;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e7e8ec;
 }
 
 .search-input {
   border-radius: 8px;
-  border: 1.5px solid #e2e8f0;
+  border: 1.5px solid #e7e8ec;
   transition: all 0.2s ease;
 }
 
 .search-input:focus {
-  border-color: #3b82f6;
+  border-color: #3554d1;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -624,14 +624,14 @@ const clearSearch = () => {
   align-items: center;
   justify-content: center;
   padding: 4px;
-  border: 1.5px solid #e2e8f0;
+  border: 1.5px solid #e7e8ec;
   border-radius: 8px;
   background: white;
   transition: all 0.2s ease;
 }
 
 .color-picker-wrapper:hover {
-  border-color: #cbd5e1;
+  border-color: #d8dae1;
 }
 
 .image-upload-btn {
@@ -658,11 +658,11 @@ const clearSearch = () => {
 }
 
 .editor-content::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #d8dae1;
   border-radius: 3px;
 }
 
 .editor-content::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #9ba1ac;
 }
 </style>

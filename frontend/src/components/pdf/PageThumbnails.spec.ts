@@ -112,7 +112,7 @@ describe('PageThumbnails', () => {
     await new Promise(resolve => setTimeout(resolve, 50))
 
     const thumbnails = wrapper.findAll('.thumbnail-card')
-    expect(thumbnails[1].classes()).toContain('ring-blue-600')
+    expect(thumbnails[1].classes()).toContain('ring-accent')
   })
 
   it('navega a página al hacer clic en thumbnail', async () => {

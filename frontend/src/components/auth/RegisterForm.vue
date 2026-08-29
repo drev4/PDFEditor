@@ -1,14 +1,14 @@
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <div>
-      <h2 class="text-2xl font-bold text-gray-800 mb-2">Create Account</h2>
-      <p class="text-gray-600 text-sm">Start editing PDFs professionally</p>
+      <h2 class="text-2xl font-bold text-ink mb-2">Create Account</h2>
+      <p class="text-muted text-sm">Start editing PDFs professionally</p>
     </div>
 
     <!-- Name Field (Optional) -->
     <div class="space-y-2">
-      <label for="name" class="block text-sm font-medium text-gray-700">
-        Full Name <span class="text-gray-400">(optional)</span>
+      <label for="name" class="block text-sm font-medium text-ink">
+        Full Name <span class="text-faint">(optional)</span>
       </label>
       <InputText
         id="name"
@@ -23,7 +23,7 @@
 
     <!-- Email Field -->
     <div class="space-y-2">
-      <label for="email" class="block text-sm font-medium text-gray-700">
+      <label for="email" class="block text-sm font-medium text-ink">
         Email Address
       </label>
       <InputText
@@ -37,12 +37,12 @@
         autocomplete="email"
         data-testid="register-email-input"
       />
-      <small v-if="errors.email" class="text-red-500">{{ errors.email }}</small>
+      <small v-if="errors.email" class="text-danger">{{ errors.email }}</small>
     </div>
 
     <!-- Password Field -->
     <div class="space-y-2">
-      <label for="password" class="block text-sm font-medium text-gray-700">
+      <label for="password" class="block text-sm font-medium text-ink">
         Password
       </label>
       <Password
@@ -60,17 +60,17 @@
         data-testid="register-password-input"
       >
         <template #footer>
-          <p class="text-xs text-gray-600 mt-2">
+          <p class="text-xs text-muted mt-2">
             Password must be at least 6 characters long
           </p>
         </template>
       </Password>
-      <small v-if="errors.password" class="text-red-500">{{ errors.password }}</small>
+      <small v-if="errors.password" class="text-danger">{{ errors.password }}</small>
     </div>
 
     <!-- Confirm Password Field -->
     <div class="space-y-2">
-      <label for="confirmPassword" class="block text-sm font-medium text-gray-700">
+      <label for="confirmPassword" class="block text-sm font-medium text-ink">
         Confirm Password
       </label>
       <Password
@@ -87,7 +87,7 @@
         inputId="register-confirm-password-input"
         data-testid="register-confirm-password-input"
       />
-      <small v-if="errors.confirmPassword" class="text-red-500">{{ errors.confirmPassword }}</small>
+      <small v-if="errors.confirmPassword" class="text-danger">{{ errors.confirmPassword }}</small>
     </div>
 
     <!-- Error General -->

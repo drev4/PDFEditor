@@ -3,13 +3,13 @@
     <!-- Form Info Card -->
     <div v-if="!formFieldsStore.currentFormId" class="tool-card info-card">
       <div class="tool-header">
-        <div class="tool-icon bg-yellow-100">
-          <i class="pi pi-info-circle text-yellow-600"></i>
+        <div class="tool-icon bg-limit-soft">
+          <i class="pi pi-info-circle text-limit"></i>
         </div>
         <h4 class="tool-title">Save Form</h4>
       </div>
       <div class="tool-body">
-        <p class="text-sm text-gray-600 mb-4">
+        <p class="text-sm text-muted mb-4">
           Save this PDF form to the cloud to access it later and share with others.
         </p>
 
@@ -48,7 +48,7 @@
           />
         </div>
 
-        <p class="text-xs text-gray-500">
+        <p class="text-xs text-muted">
           <i class="pi pi-info-circle"></i>
           Upload PDF alone or save complete form with fields
         </p>
@@ -58,12 +58,12 @@
     <!-- Already Saved Card -->
     <div v-else class="tool-card success-card">
       <div class="tool-header">
-        <div class="tool-icon bg-green-100">
-          <i class="pi pi-check-circle text-green-600"></i>
+        <div class="tool-icon bg-published-soft">
+          <i class="pi pi-check-circle text-published"></i>
         </div>
         <div class="flex-1">
           <h4 class="tool-title">Form Saved</h4>
-          <p class="text-xs text-gray-500">ID: {{ formFieldsStore.currentFormId }}</p>
+          <p class="text-xs text-muted">ID: {{ formFieldsStore.currentFormId }}</p>
         </div>
         <Button
           icon="pi pi-times"
@@ -77,9 +77,9 @@
       </div>
       <div class="tool-body space-y-2">
         <div v-if="currentForm" class="info-box">
-          <p class="text-sm font-semibold text-gray-800">{{ currentForm.title }}</p>
-          <p v-if="currentForm.description" class="text-xs text-gray-600">{{ currentForm.description }}</p>
-          <p class="text-xs text-gray-500 mt-2">
+          <p class="text-sm font-semibold text-ink">{{ currentForm.title }}</p>
+          <p v-if="currentForm.description" class="text-xs text-muted">{{ currentForm.description }}</p>
+          <p class="text-xs text-muted mt-2">
             {{ currentForm.fields?.length || 0 }} fields • {{ currentForm.status }}
           </p>
         </div>
@@ -115,17 +115,17 @@
           v-if="!currentForm?.pdfUrl"
         />
 
-        <p v-if="!currentForm?.pdfUrl" class="text-xs text-amber-600 flex items-center gap-1">
+        <p v-if="!currentForm?.pdfUrl" class="text-xs text-limit flex items-center gap-1">
           <i class="pi pi-info-circle"></i>
           Upload PDF first to enable sharing
         </p>
 
-        <div v-else class="info-box bg-blue-50 border-blue-200">
+        <div v-else class="info-box bg-accent-soft border-accent">
           <div class="flex items-start gap-2">
-            <i class="pi pi-file-pdf text-blue-600 mt-0.5"></i>
+            <i class="pi pi-file-pdf text-accent mt-0.5"></i>
             <div class="flex-1 min-w-0">
-              <p class="text-xs font-medium text-blue-900">PDF Uploaded</p>
-              <p class="text-xs text-blue-700 truncate">{{ getPDFFilename(currentForm.pdfUrl) }}</p>
+              <p class="text-xs font-medium text-accent">PDF Uploaded</p>
+              <p class="text-xs text-accent truncate">{{ getPDFFilename(currentForm.pdfUrl) }}</p>
             </div>
           </div>
         </div>
@@ -422,18 +422,18 @@ async function handleUnpublish(formId: string) {
   border-radius: 16px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e7e8ec;
   transition: all 0.2s ease;
 }
 
 .info-card {
-  background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
-  border-color: #fde68a;
+  background: linear-gradient(135deg, #fbf2e0 0%, #fbf2e0 100%);
+  border-color: #fbf2e0;
 }
 
 .success-card {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border-color: #bbf7d0;
+  background: linear-gradient(135deg, #e8f4ee 0%, #e8f4ee 100%);
+  border-color: #e8f4ee;
 }
 
 .tool-header {
@@ -457,7 +457,7 @@ async function handleUnpublish(formId: string) {
 .tool-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: #191b21;
   margin: 0;
 }
 
@@ -468,8 +468,8 @@ async function handleUnpublish(formId: string) {
 
 .info-box {
   padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: #fbfbfc;
+  border: 1px solid #e7e8ec;
   border-radius: 8px;
 }
 

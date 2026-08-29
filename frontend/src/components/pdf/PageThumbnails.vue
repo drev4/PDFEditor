@@ -2,10 +2,10 @@
   <div class="page-thumbnails-container">
     <div class="thumbnails-header">
       <div class="flex items-center justify-between">
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">
+        <h3 class="text-sm font-bold text-ink uppercase tracking-wide">
           Pages
         </h3>
-        <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full font-semibold">
+        <span class="text-xs bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
           {{ documentStore.activeDocument?.numPages || 0 }}
         </span>
       </div>
@@ -15,7 +15,7 @@
       <!-- Loading State -->
       <div v-if="!pdfDoc" class="text-center py-8">
         <ProgressSpinner style="width: 40px; height: 40px" />
-        <p class="text-sm text-gray-500 mt-2">Loading pages...</p>
+        <p class="text-sm text-muted mt-2">Loading pages...</p>
       </div>
 
       <!-- Thumbnails Grid -->
@@ -32,10 +32,10 @@
         :class="[
           'thumbnail-card group cursor-move transition-all duration-200',
           pageNum === currentPage
-            ? 'ring-2 ring-blue-600 bg-blue-50'
-            : 'hover:ring-2 hover:ring-gray-300 bg-white',
+            ? 'ring-2 ring-accent bg-accent-soft'
+            : 'hover:ring-2 hover:ring-line bg-white',
           draggedPage === pageNum ? 'opacity-50' : '',
-          dropTargetPage === pageNum ? 'ring-2 ring-green-500' : ''
+          dropTargetPage === pageNum ? 'ring-2 ring-published' : ''
         ]"
       >
         <!-- Page Number Badge -->
@@ -43,8 +43,8 @@
           <span :class="[
             'text-xs font-bold px-2 py-1 rounded-full shadow-sm',
             pageNum === currentPage
-              ? 'bg-blue-600 text-white'
-              : 'bg-white text-gray-700'
+              ? 'bg-accent text-white'
+              : 'bg-white text-ink'
           ]">
             {{ pageNum }}
           </span>
@@ -59,8 +59,8 @@
             class="thumbnail-image"
           />
           <div v-else class="thumbnail-placeholder">
-            <i class="pi pi-image text-3xl text-gray-400"></i>
-            <p class="text-xs text-gray-500 mt-2">Loading...</p>
+            <i class="pi pi-image text-3xl text-faint"></i>
+            <p class="text-xs text-muted mt-2">Loading...</p>
           </div>
         </div>
 
@@ -68,8 +68,8 @@
         <div :class="[
           'thumbnail-info',
           pageNum === currentPage
-            ? 'bg-blue-600 text-white'
-            : 'bg-gray-50 text-gray-700 group-hover:bg-gray-100'
+            ? 'bg-accent text-white'
+            : 'bg-surface-subtle text-ink group-hover:bg-surface-sunken'
         ]">
           <span class="text-xs font-medium">Page {{ pageNum }}</span>
         </div>
@@ -285,7 +285,7 @@ onMounted(() => {
 .thumbnail-image-container {
   width: 100%;
   aspect-ratio: 8.5 / 11; /* Standard letter size ratio */
-  background: #f8fafc;
+  background: #fbfbfc;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -323,11 +323,11 @@ onMounted(() => {
 }
 
 .thumbnails-content::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #d8dae1;
   border-radius: 3px;
 }
 
 .thumbnails-content::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #9ba1ac;
 }
 </style>

@@ -206,13 +206,13 @@ const previousMatch = () => {
   display: flex;
   align-items: center;
   padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e7e8ec;
   gap: 1rem;
 }
 
 .search-icon {
   font-size: 1.25rem;
-  color: #6b7280;
+  color: #6a6f7b;
   flex-shrink: 0;
 }
 
@@ -221,21 +221,21 @@ const previousMatch = () => {
   border: none;
   outline: none;
   font-size: 1.125rem;
-  color: #111827;
+  color: #191b21;
   background: transparent;
 }
 
 .spotlight-input::placeholder {
-  color: #9ca3af;
+  color: #9ba1ac;
 }
 
 .clear-button {
-  background: #f3f4f6;
+  background: #f4f5f7;
   border: none;
   border-radius: 6px;
   padding: 0.5rem;
   cursor: pointer;
-  color: #6b7280;
+  color: #6a6f7b;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -243,13 +243,13 @@ const previousMatch = () => {
 }
 
 .clear-button:hover {
-  background: #e5e7eb;
-  color: #374151;
+  background: #e7e8ec;
+  color: #191b21;
 }
 
 .search-results {
   padding: 1rem 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e7e8ec;
 }
 
 .results-header {
@@ -260,7 +260,7 @@ const previousMatch = () => {
 
 .results-count {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: #6a6f7b;
 }
 
 .results-navigation {
@@ -269,12 +269,12 @@ const previousMatch = () => {
 }
 
 .nav-button {
-  background: #f3f4f6;
+  background: #f4f5f7;
   border: none;
   border-radius: 6px;
   padding: 0.5rem;
   cursor: pointer;
-  color: #374151;
+  color: #191b21;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -284,8 +284,8 @@ const previousMatch = () => {
 }
 
 .nav-button:hover:not(:disabled) {
-  background: #e5e7eb;
-  color: #111827;
+  background: #e7e8ec;
+  color: #191b21;
 }
 
 .nav-button:disabled {
@@ -299,7 +299,7 @@ const previousMatch = () => {
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  color: #6b7280;
+  color: #6a6f7b;
   font-size: 0.875rem;
 }
 
@@ -309,7 +309,7 @@ const previousMatch = () => {
 
 .spotlight-footer {
   padding: 1rem 1.5rem;
-  background: #f9fafb;
+  background: #fbfbfc;
   display: flex;
   justify-content: flex-end;
 }
@@ -318,13 +318,13 @@ const previousMatch = () => {
   display: flex;
   gap: 1rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: #6a6f7b;
   align-items: center;
 }
 
 kbd {
   background: white;
-  border: 1px solid #d1d5db;
+  border: 1px solid #d8dae1;
   border-radius: 4px;
   padding: 0.25rem 0.5rem;
   font-family: monospace;

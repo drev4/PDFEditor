@@ -209,7 +209,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
 
 .field-preview {
   position: absolute;
-  border: 2px dashed #3b82f6;
+  border: 2px dashed #3554d1;
   background: rgba(59, 130, 246, 0.2);
   border-radius: 4px;
   display: flex;
@@ -217,7 +217,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   justify-content: center;
   gap: 8px;
   font-size: 12px;
-  color: #1e40af;
+  color: #2a45b8;
   pointer-events: none;
   opacity: 0.8;
 }
@@ -228,15 +228,15 @@ const handleOverlayClick = async (e: MouseEvent) => {
 
 .field-preview.preview-checkbox,
 .field-preview.preview-radio {
-  border-color: #10b981;
+  border-color: #12704f;
   background: rgba(16, 185, 129, 0.2);
-  color: #065f46;
+  color: #12704f;
 }
 
 .field-preview.preview-dropdown {
-  border-color: #f59e0b;
+  border-color: #8a5c0a;
   background: rgba(245, 158, 11, 0.2);
-  color: #92400e;
+  color: #8a5c0a;
 }
 
 .adding-indicator {
@@ -244,7 +244,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  background: #1e40af;
+  background: #2a45b8;
   color: white;
   padding: 8px 16px;
   border-radius: 8px;
