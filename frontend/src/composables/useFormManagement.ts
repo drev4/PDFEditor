@@ -60,6 +60,46 @@ export function useFormManagement() {
   }
 
   /**
+   * The open document as a `File`, ready to upload.
+   *
+   * Prefers the in-memory buffer over the originally picked file, because the
+   * buffer is what the editor's tools have been writing to — using
+   * `document.file` would upload the version before any edit.
+   */
+  function fileFromActiveDocument(): File | null {
+    const doc = documentStore.activeDocument
+    if (!doc?.arrayBuffer) return doc?.file ?? null
+    return new File([doc.arrayBuffer], doc.name || 'document.pdf', { type: 'application/pdf' })
+  }
+
+  /**
+   * Make sure the open document exists in the database, fields or not.
+   *
+   * A PDF that has been opened but never given a field has no form row at all,
+   * so closing the editor threw it away silently. Saving it with no fields is a
+   * perfectly reasonable thing to want — the document is the work.
+   */
+  async function saveDocumentToDatabase() {
+    if (!documentStore.activeDocument) return null
+
+    if (!formFieldsStore.currentFormId) {
+      const form = await createFormForCurrentDocument()
+      documentStore.markSaved()
+      return form
+    }
+
+    if (formFieldsStore.fields.length > 0) {
+      await formFieldsStore.saveAllFields()
+    }
+
+    if (documentStore.hasUnsavedEdits) {
+      await persistEditedDocument()
+    }
+
+    return formsStore.currentForm
+  }
+
+  /**
    * Crea un formulario nuevo para el documento actual
    * @param title - Título del formulario (opcional)
    * @param pdfFile - Archivo PDF a subir (opcional)
@@ -73,11 +113,18 @@ export function useFormManagement() {
     try {
       isInitializing.value = true
 
-      // Upload PDF if provided
+      // Upload the PDF. If the caller did not hand one over, the open
+      // document's own bytes are the PDF — and they have to go up, because a
+      // form row with a null `pdfUrl` is a broken form: the dashboard lists it,
+      // and opening it fails with "This form has no PDF". That is exactly what
+      // happened when a field was placed on a freshly opened document, which
+      // auto-creates the form through `autoInitializeForm`.
+      const file = pdfFile ?? fileFromActiveDocument()
+
       let pdfUrl: string | undefined = undefined
       let extractedFieldsCount = 0
-      if (pdfFile) {
-        const uploadResult = await uploadPDF(pdfFile)
+      if (file) {
+        const uploadResult = await uploadPDF(file)
         pdfUrl = uploadResult.url
         extractedFieldsCount = uploadResult.extractedFieldsCount
       }
@@ -216,9 +263,8 @@ export function useFormManagement() {
     const formId = formFieldsStore.currentFormId
     if (!formId) return
 
-    const file = new File([document.arrayBuffer], document.name || 'document.pdf', {
-      type: 'application/pdf'
-    })
+    const file = fileFromActiveDocument()
+    if (!file) return
 
     const { url } = await uploadPDF(file)
     await formsStore.updateForm(formId, { pdfUrl: url })
@@ -237,6 +283,7 @@ export function useFormManagement() {
     autoInitializeForm,
     uploadPDF,
     uploadPDFForCurrentForm,
-    persistEditedDocument
+    persistEditedDocument,
+    saveDocumentToDatabase
   }
 }

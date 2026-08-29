@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
+import path from 'node:path';
 import { registerNewUser, type TestUser } from './helpers';
+
+const FIXTURE_PDF = path.join(process.cwd(), 'backend', 'test-fixtures', 'valid.pdf');
 
 test.describe('Form Management', () => {
   let user: TestUser;
@@ -130,6 +133,57 @@ test.describe('The shell', () => {
 
     await expect(rail.getByText('Fields', { exact: true })).toBeVisible();
     await expect(rail.getByText('Pages', { exact: true }).first()).toBeVisible();
+  });
+
+  // From inside a form the only way out used to be the back link: the menu
+  // button opened the editor's own rail, not the application's navigation.
+  test('the editor menu opens the dashboard navigation', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+
+    await page.locator('[data-testid="editor-menu-button"]').click();
+
+    const drawer = page.locator('.p-drawer');
+    await expect(drawer.getByRole('link', { name: 'Members' })).toBeVisible();
+    await expect(drawer.getByRole('link', { name: 'Settings' })).toBeVisible();
+
+    await drawer.getByRole('link', { name: 'Members' }).click();
+    await expect(page).toHaveURL(/\/dashboard\/team/);
+  });
+
+  // The download button was at the bottom of a side panel, past the search box.
+  test('offers the download from the editor top bar once a document is open', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+    await expect(page.locator('[data-testid="download-pdf-button"]')).toHaveCount(0);
+
+    await page.locator('input[type="file"]').first().setInputFiles(FIXTURE_PDF);
+
+    await expect(page.locator('[data-testid="download-pdf-button"]')).toBeVisible({ timeout: 30000 });
+  });
+
+  // Leaving with an unsaved document offered two answers - lose it, or stay.
+  // The third is the one people want, and it was a browser confirm() besides.
+  test('offers to save an unsaved document on the way out', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+    await page.locator('input[type="file"]').first().setInputFiles(FIXTURE_PDF);
+    await expect(page.locator('.pdf-viewer-container')).toBeVisible({ timeout: 30000 });
+
+    await page.locator('[data-testid="back-to-forms"]').click();
+
+    const dialog = page.locator('[data-testid="unsaved-changes-dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('[data-testid="unsaved-save"]')).toBeVisible();
+    await expect(dialog.locator('[data-testid="unsaved-discard"]')).toBeVisible();
+
+    // Staying really stays.
+    await dialog.locator('[data-testid="unsaved-cancel"]').click();
+    await expect(page).toHaveURL(/\/dashboard\/editor/);
+
+    // Saving stores the document with no fields at all, and then leaves.
+    await page.locator('[data-testid="back-to-forms"]').click();
+    await dialog.locator('[data-testid="unsaved-save"]').click();
+
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30000 });
+    await expect(page.locator('[data-testid="form-row"]')).toHaveCount(1);
   });
 
   // "New form" went straight to the editor, which still held whatever document

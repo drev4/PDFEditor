@@ -12,7 +12,7 @@
             v-model="searchQuery"
             type="text"
             class="spotlight-input"
-            placeholder="Buscar en el documento..."
+            placeholder="Search in the document..."
             @click.stop="handleContainerClick"
             @keydown.escape="close"
             @keydown.enter="performSearch"

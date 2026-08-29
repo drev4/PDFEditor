@@ -26,26 +26,54 @@
       </button>
     </div>
 
+    <!-- Separator -->
+    <div class="toolbar-separator" v-show="!isCollapsed">
+      <span>Fields</span>
+    </div>
+    <div class="toolbar-separator collapsed-separator" v-show="isCollapsed"></div>
+
+    <!--
+      The same field types the editor rail offers, and the same store state
+      behind them: `fieldTypeToAdd` is what both read, so arming a type here
+      lights it up there and cancelling in either place cancels once.
+    -->
+    <div class="toolbar-tools field-tools">
+      <button
+        v-for="tool in fieldTools"
+        :key="tool.id"
+        :class="{ 'active': formFieldsStore.fieldTypeToAdd === tool.fieldType }"
+        :title="tool.label"
+        @click="selectFieldTool(tool)"
+      >
+        <i :class="tool.icon"></i>
+        <span v-show="!isCollapsed">{{ tool.label }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { useToolbarDrag } from '@/composables/useToolbarDrag'
-import { useFormFieldsStore } from '@/stores/formFields.store'
+import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
 
 const formFieldsStore = useFormFieldsStore()
 
 // Tool definitions
 const tools = [
-  { id: 'search', label: 'Buscar', icon: 'pi pi-search', group: 'general' },
-  { id: 'text', label: 'Texto', icon: 'pi pi-pencil', group: 'general' },
-  { id: 'image', label: 'Imagen', icon: 'pi pi-image', group: 'general' }
+  { id: 'search', label: 'Search', icon: 'pi pi-search', group: 'general' },
+  { id: 'text', label: 'Text', icon: 'pi pi-pencil', group: 'general' },
+  { id: 'image', label: 'Image', icon: 'pi pi-image', group: 'general' }
 ]
 
-// Field types are not here any more: they are in the editor rail, which is
-// always visible. This toolbar collapses on mouseout, and a control that hides
-// itself is a poor place for the primary action of the screen.
+// The same five types as the editor rail, named the same way.
+const fieldTools = [
+  { id: 'field-text', label: 'Text field', icon: 'pi pi-pencil', fieldType: 'text' as FieldType },
+  { id: 'field-textarea', label: 'Paragraph', icon: 'pi pi-align-left', fieldType: 'textarea' as FieldType },
+  { id: 'field-checkbox', label: 'Checkbox', icon: 'pi pi-check-square', fieldType: 'checkbox' as FieldType },
+  { id: 'field-radio', label: 'Radio group', icon: 'pi pi-circle', fieldType: 'radio' as FieldType },
+  { id: 'field-dropdown', label: 'Dropdown', icon: 'pi pi-chevron-down', fieldType: 'dropdown' as FieldType }
+]
 
 // State
 const toolbarRef = ref<HTMLElement | null>(null)
@@ -77,6 +105,17 @@ const scheduleCollapse = () => {
 const emit = defineEmits<{
   'select-tool': [toolId: string]
 }>()
+
+// Clicking an armed type again disarms it, matching the rail.
+const selectFieldTool = (tool: { id: string; fieldType: FieldType }) => {
+  activeTool.value = tool.id
+  if (formFieldsStore.fieldTypeToAdd === tool.fieldType) {
+    formFieldsStore.cancelAddingField()
+    return
+  }
+  formFieldsStore.startAddingField(tool.fieldType)
+  emit('select-tool', tool.id)
+}
 
 // Tool selection
 const selectTool = (toolId: string) => {

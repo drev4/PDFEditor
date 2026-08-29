@@ -85,41 +85,18 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import Toast from 'primevue/toast'
 import { useToast } from 'primevue/usetoast'
 import { useAuthStore } from '@/stores/auth.store'
 import BrandMark from '@/components/ui/BrandMark.vue'
+import { useAppNav } from '@/composables/useAppNav'
 
 const authStore = useAuthStore()
-const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-/**
- * The four destinations the canvas draws, in its order.
- *
- * `Responses` and `Settings` lead to screens that say what is not built rather
- * than to nothing — the navigation is the shape of the product, and leaving
- * holes in it makes the app harder to read than admitting the gap. Neither
- * renders invented data; see NotBuiltYet.vue.
- *
- * The editor is deliberately absent: it is where a form opens, not a place you
- * navigate to on its own.
- */
-const navItems = [
-  { to: '/dashboard', label: 'Forms', icon: 'pi pi-file', match: '/dashboard' },
-  { to: '/dashboard/responses', label: 'Responses', icon: 'pi pi-inbox', match: '/dashboard/responses' },
-  { to: '/dashboard/team', label: 'Members', icon: 'pi pi-users', match: '/dashboard/team' },
-  { to: '/dashboard/settings', label: 'Settings', icon: 'pi pi-cog', match: '/dashboard/settings' },
-]
-
-// `Forms` owns both /dashboard and /dashboard/forms, and must not also light up
-// for every other screen underneath /dashboard.
-const isActive = (item: { match: string }) =>
-  item.match === '/dashboard'
-    ? route.path === '/dashboard' || route.path.startsWith('/dashboard/forms')
-    : route.path.startsWith(item.match)
+const { navItems, isActive } = useAppNav()
 
 const email = computed(() => authStore.user?.email ?? '')
 

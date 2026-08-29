@@ -165,7 +165,11 @@ Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as 
 | `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
 | `/dashboard/editor` | `EditorView` | none — its own top bar and left rail |
 
-`AppShell.vue` is the 232px sidebar and is where the four nav destinations live. The **editor has no app sidebar**, as the `Editor` artboard draws it: one document, and the chrome gets out of the way. Its left rail is **one fixed rail** — the field types, then the page thumbnails, as the `Editor` artboard draws it (`components/editor/EditorRail.vue`). It replaced two overlapping things: a tabbed rail (Documents / Forms / Pages) and a floating toolbar that auto-collapsed on mouseout and *also* offered the field types. Two places to add a field, one of which hid itself, is why the rail has no disclosure of its own; it collapses into a drawer only below `lg`, where it cannot sit beside the document.
+`AppShell.vue` is the 232px sidebar and is where the four nav destinations live. The **editor has no app sidebar**, as the `Editor` artboard draws it: one document, and the chrome gets out of the way. Its left rail is **one fixed rail** — the field types, then the page thumbnails, as the `Editor` artboard draws it (`components/editor/EditorRail.vue`). It replaced a tabbed rail (Documents / Forms / Pages), and it has no disclosure of its own; it collapses into a drawer only below `lg`, where it cannot sit beside the document.
+
+The floating toolbar keeps the field types too. Both read and write the same `fieldTypeToAdd` in the store, so arming a type in one lights it up in the other and cancelling in either cancels once — which is what makes two entry points defensible rather than two sources of truth.
+
+The editor's menu button opens the **application's** navigation, not the rail: from inside a form there was otherwise no way to reach anything else without going through the back link. Both it and the dashboard sidebar read `composables/useAppNav.ts`, because a navigation that disagrees with itself depending on where it was opened is worse than one that is merely incomplete.
 
 ### What the canvas has that the app does not
 
@@ -186,7 +190,11 @@ Because the edits are held, three things have to exist together and are easy to 
 
 - `Save all` saves the fields **first**, then the document bytes. The field save embeds the AcroForm into the PDF on the server; uploading the browser's copy afterwards is the only order that does not overwrite it.
 - The editor says the edits are unsaved, next to the button that saves them.
-- `EditorView.vue` guards both exits — `beforeunload` for closing the tab, `onBeforeRouteLeave` for navigating away.
+- `EditorView.vue` guards both exits — `beforeunload` for closing the tab, `onBeforeRouteLeave` for **every** in-app navigation, whichever control started it.
+
+The in-app guard is `UnsavedChangesDialog.vue`, in the product's own styling rather than a `window.confirm`. That matters less than what it offers: the browser dialog had two answers, *lose the work* or *stay*, and the one people want is **Save and leave**, which is the accent action.
+
+It also covers a second way to lose work that is not an edit at all. A PDF that has been opened but never given a field has **no form row**, so closing the editor discarded the document itself. `saveDocumentToDatabase()` stores it with no fields — the document is the work — and `createFormForCurrentDocument` now uploads the open document's bytes whenever a form is created. Without that, `autoInitializeForm` produced a form with a null `pdfUrl`: listed on the dashboard, and failing to open with *"This form has no PDF"*.
 
 `persistEditedDocument` uploads through the existing `POST /api/upload` and repoints the form with `PATCH /api/forms/:id`; no new endpoint, because those two already do this. It does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
@@ -194,7 +202,14 @@ Because the edits are held, three things have to exist together and are easy to 
 
 Field positions are stored **once**, in canvas pixels at the base scale with the page upright, because that is what the backend embeds against (`pdf-processor.ts`). Rotating the view must never change what is stored — only where the field is drawn.
 
-Two faults lived here. pdf.js already renders a rotated page (`getViewport({ scale, rotation })`), and `PDFViewer.vue` **also** applied a CSS `rotate()` to the wrapper: at 90° the page displayed at 180°, and the field overlay sat nowhere near it. The CSS rotation is gone. Second, nothing mapped field geometry through the rotation at all.
+**Four** faults lived here, and the first fix only removed two of them:
+
+1. pdf.js already renders a rotated page (`getViewport({ scale, rotation })`) and `PDFViewer.vue` **also** applied a CSS `rotate()` to the wrapper, so 90° displayed as 180°.
+2. Nothing mapped field geometry through the rotation at all.
+3. Removing that CSS binding broke the overlay in a new way. The canvas size reached it as `:canvas-width="canvasRef?.width"`, and **`canvas.width` is a plain DOM property — assigning it tells Vue nothing.** The `:style` binding on `rotation` had been forcing a re-render on every turn and hiding that. `PDFViewer.vue` now keeps a reactive `canvasSize`, and anything needing the canvas size reads it.
+4. `canvas { max-width: 100%; height: auto }` means the canvas is usually *drawn* smaller than the pixels it holds — and always is once the page is turned a quarter, because the rotated canvas is wider than the column. `canvasSize.displayScale` carries that ratio, measured with a `ResizeObserver`, and the overlays multiply by it.
+
+The lesson worth keeping: **a DOM property is not reactive state.** Two of these four were the same mistake, one of them introduced by fixing the other.
 
 `utils/pdfCoordinates.ts` now holds three functions with tests, including the round trip that is the property that matters:
 

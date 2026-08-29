@@ -62,11 +62,18 @@
             ></div>
 
             <!-- Form Fields Overlay -->
-            <slot name="fields-overlay" :width="canvasRef?.width" :height="canvasRef?.height" :scale="scale">
+            <slot
+              name="fields-overlay"
+              :width="canvasSize.width"
+              :height="canvasSize.height"
+              :display-scale="canvasSize.displayScale"
+              :scale="scale"
+            >
               <FormFieldsOverlay
                 v-if="canvasRef && !readOnly"
-                :canvas-width="canvasRef?.width || 0"
-                :canvas-height="canvasRef?.height || 0"
+                :canvas-width="canvasSize.width"
+                :canvas-height="canvasSize.height"
+                :display-scale="canvasSize.displayScale"
               />
             </slot>
 
@@ -115,7 +122,7 @@
                 @input="handleTextInput"
                 @mousedown.stop
                 @click.stop
-                placeholder="Escribe aquí..."
+                placeholder="Type here..."
                 :style="{
                   fontSize: `${editorStore.textPreview.fontSize}px`,
                   color: editorStore.textPreview.color,
@@ -168,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onBeforeUnmount, nextTick, shallowRef } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { useDocumentStore } from '@/stores/document.store'
 import { useDrawingStore } from '@/stores/drawing.store'
@@ -368,10 +375,57 @@ const performSpotlightSearch = async () => {
   }
 }
 
+/**
+ * The rendered canvas size, held reactively.
+ *
+ * `canvasRef.value.width` is a plain DOM property: assigning it does not tell
+ * Vue anything, so bindings that read it never update on their own. It happened
+ * to work while the wrapper had a `:style` binding on `rotation` forcing a
+ * re-render on every turn - and the field overlay silently stopped following
+ * the page the moment that binding was removed. Anything downstream that needs
+ * the canvas size reads this instead.
+ */
+const canvasSize = ref({ width: 0, height: 0, displayScale: 1 })
+
+/**
+ * `canvas { max-width: 100%; height: auto }` means the canvas is often *drawn*
+ * smaller than the pixels it holds — and always is once the page is turned a
+ * quarter, because the rotated canvas is wider than the column. Field positions
+ * are computed in canvas pixels, so without this ratio they drift further from
+ * the page the narrower the window gets.
+ */
+const measureCanvas = () => {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  canvasSize.value = {
+    width: canvas.width,
+    height: canvas.height,
+    displayScale: canvas.width ? (canvas.clientWidth || canvas.width) / canvas.width : 1
+  }
+}
+
+let canvasObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  // The CSS box changes without any render happening — resizing the window is
+  // enough — so this has to be observed rather than sampled after a draw.
+  if (typeof ResizeObserver !== 'undefined') {
+    canvasObserver = new ResizeObserver(measureCanvas)
+    if (canvasRef.value) canvasObserver.observe(canvasRef.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  canvasObserver?.disconnect()
+  canvasObserver = null
+})
+
 // Render page with all overlays
 const renderPageWithOverlays = async () => {
   const result = await renderPage()
   if (result) {
+    measureCanvas()
+    if (canvasObserver && canvasRef.value) canvasObserver.observe(canvasRef.value)
     // Draw grid after rendering page
     drawGrid()
     // Render text layer for text selection

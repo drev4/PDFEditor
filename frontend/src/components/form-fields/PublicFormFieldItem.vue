@@ -89,6 +89,7 @@ const props = defineProps<{
   rotation?: number
   pageWidth?: number
   pageHeight?: number
+  displayScale?: number
 }>()
 
 defineEmits<{
@@ -99,7 +100,7 @@ defineEmits<{
 const BASE_SCALE = props.baseScale || 1.5
 
 const fieldStyle = computed(() => {
-  const scaleFactor = props.scale / BASE_SCALE
+  const scaleFactor = (props.scale / BASE_SCALE) * (props.displayScale ?? 1)
   const { x, y, width, height } = props.field.position
 
   // The page's upright size in stored units, which rotation is measured

@@ -84,12 +84,13 @@
 
         <div class="h-full w-full">
           <PDFViewer :read-only="true">
-            <template #fields-overlay="{ scale, width, height }">
+            <template #fields-overlay="{ scale, width, height, displayScale }">
               <PublicFormFieldsOverlay
                 :fields="fields"
                 :scale="scale"
                 :canvas-width="width"
                 :canvas-height="height"
+                :display-scale="displayScale"
                 :validation-errors="validationErrors"
                 @field-change="handleFieldChange"
               />

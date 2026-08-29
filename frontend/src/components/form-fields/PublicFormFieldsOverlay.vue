@@ -11,6 +11,7 @@
       :rotation="rotation"
       :page-width="pageSize.pageWidth"
       :page-height="pageSize.pageHeight"
+      :display-scale="displayScale"
     />
   </div>
 </template>
@@ -28,6 +29,7 @@ const props = defineProps<{
   scale: number
   canvasWidth?: number
   canvasHeight?: number
+  displayScale?: number
   validationErrors?: Record<string, string>
 }>()
 

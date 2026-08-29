@@ -1,79 +1,69 @@
 <template>
   <div class="page-thumbnails-container">
-    <div class="thumbnails-header">
-      <div class="flex items-center justify-between">
-        <h3 class="text-body font-bold text-ink uppercase tracking-wide">
-          Pages
-        </h3>
-        <span class="text-meta bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
-          {{ documentStore.activeDocument?.numPages || 0 }}
-        </span>
-      </div>
-    </div>
-
+    <!--
+      No header here. The editor rail already labels this section and shows the
+      page count; a second "Pages" heading inside it was the same thing said
+      twice, in two different sizes.
+    -->
     <div class="thumbnails-content">
-      <!-- Loading State -->
-      <div v-if="!pdfDoc" class="text-center py-8">
-        <ProgressSpinner style="width: 40px; height: 40px" />
-        <p class="text-body text-muted mt-2">Loading pages...</p>
+      <!--
+        Nothing at all until there is a document. This used to show a spinner
+        with "Loading pages..." whenever `pdfDoc` was absent, which is also the
+        state of an editor with no document open — so an empty editor claimed to
+        be loading something, forever.
+      -->
+      <p v-if="!pdfDoc && !totalPages" class="px-2.5 py-3 text-mono text-faint">
+        Open a PDF to see its pages.
+      </p>
+
+      <div v-else-if="!pdfDoc" class="px-2.5 py-3 flex items-center gap-2 text-mono text-faint">
+        <i class="pi pi-spin pi-spinner text-[11px]" />
+        <span>Rendering pages</span>
       </div>
 
-      <!-- Thumbnails Grid -->
-      <div v-else class="thumbnails-grid space-y-3">
-      <div
-        v-for="pageNum in pageOrder"
-        :key="`page-${pageNum}`"
-        draggable="true"
-        @dragstart="onDragStart($event, pageNum)"
-        @dragover.prevent="onDragOver($event, pageNum)"
-        @drop="onDrop($event, pageNum)"
-        @dragend="onDragEnd"
-        @click="goToPage(pageNum)"
-        :class="[
-          'thumbnail-card group cursor-move transition-all duration-200',
-          pageNum === currentPage
-            ? 'ring-2 ring-accent bg-accent-soft'
-            : 'hover:ring-2 hover:ring-line bg-white',
-          draggedPage === pageNum ? 'opacity-50' : '',
-          dropTargetPage === pageNum ? 'ring-2 ring-published' : ''
-        ]"
-      >
-        <!-- Page Number Badge -->
-        <div class="absolute top-2 right-2 z-10">
-          <span :class="[
-            'text-meta font-bold px-2 py-1 rounded-full shadow-sm',
-            pageNum === currentPage
-              ? 'bg-accent text-white'
-              : 'bg-white text-ink'
-          ]">
-            {{ pageNum }}
-          </span>
-        </div>
+      <!-- Two columns, as the Editor artboard lays them out. -->
+      <div v-else class="grid grid-cols-2 gap-2.5 px-2.5">
+        <div
+          v-for="pageNum in pageOrder"
+          :key="`page-${pageNum}`"
+          draggable="true"
+          @dragstart="onDragStart($event, pageNum)"
+          @dragover.prevent="onDragOver($event, pageNum)"
+          @drop="onDrop($event, pageNum)"
+          @dragend="onDragEnd"
+          @click="goToPage(pageNum)"
+          :class="[
+            'thumbnail-card cursor-pointer',
+            pageNum === currentPage ? 'ring-2 ring-accent' : '',
+            draggedPage === pageNum ? 'opacity-50' : '',
+            dropTargetPage === pageNum ? 'ring-2 ring-published' : ''
+          ]"
+          :data-testid="`page-thumbnail-${pageNum}`"
+        >
+          <div
+            class="h-[78px] rounded-chip border bg-surface overflow-hidden flex items-center justify-center"
+            :class="pageNum === currentPage ? 'border-accent' : 'border-line'"
+          >
+            <img
+              v-if="thumbnails.get(pageNum)"
+              :src="thumbnails.get(pageNum)"
+              :alt="`Page ${pageNum}`"
+              class="max-h-full max-w-full object-contain"
+            />
+            <!-- A single dim glyph, not a second spinner: at two columns this
+                 grid can hold dozens of them at once. -->
+            <i v-else class="pi pi-file text-faint text-[13px]" />
+          </div>
 
-        <!-- Thumbnail Image -->
-        <div class="thumbnail-image-container">
-          <img
-            v-if="thumbnails.get(pageNum)"
-            :src="thumbnails.get(pageNum)"
-            :alt="`Page ${pageNum}`"
-            class="thumbnail-image"
-          />
-          <div v-else class="thumbnail-placeholder">
-            <i class="pi pi-image text-title text-faint"></i>
-            <p class="text-meta text-muted mt-2">Loading...</p>
+          <!-- The number goes under the page, in mono, like every other number
+               in the product. -->
+          <div
+            class="num mt-1.5 text-center text-tiny"
+            :class="pageNum === currentPage ? 'text-accent' : 'text-faint'"
+          >
+            {{ pageNum }}
           </div>
         </div>
-
-        <!-- Page Info -->
-        <div :class="[
-          'thumbnail-info',
-          pageNum === currentPage
-            ? 'bg-accent text-white'
-            : 'bg-surface-subtle text-ink group-hover:bg-surface-sunken'
-        ]">
-          <span class="text-meta font-medium">Page {{ pageNum }}</span>
-        </div>
-      </div>
       </div>
     </div>
   </div>
@@ -81,7 +71,6 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue'
-import ProgressSpinner from 'primevue/progressspinner'
 import { useDocumentStore } from '@/stores/document.store'
 import { useThumbnails } from '@/composables/useThumbnails'
 

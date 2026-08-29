@@ -10,8 +10,8 @@
         text
         rounded
         size="small"
-        class="lg:hidden"
         aria-label="Menu"
+        data-testid="editor-menu-button"
         @click="mobileMenuVisible = true"
       />
 
@@ -34,6 +34,20 @@
         <i class="pi pi-arrow-left text-[12px]" />
         <span>Forms</span>
       </RouterLink>
+
+      <!-- The one action that gets the work out of the product. It was at the
+           bottom of a side panel; this is where the Editor artboard puts the
+           document-level actions. -->
+      <button
+        v-if="documentStore.activeDocument"
+        type="button"
+        class="flex items-center gap-1.5 h-control-xs px-3 rounded-control border border-line text-body font-medium text-ink hover:bg-surface-sunken transition-colors"
+        data-testid="download-pdf-button"
+        @click="downloadPDF"
+      >
+        <i class="pi pi-download text-[13px]" />
+        <span class="hidden sm:inline">Download</span>
+      </button>
 
       <FileUploader v-if="!documentStore.activeDocument" />
       <button
@@ -68,17 +82,36 @@
     </header>
 
     <!-- Mobile rail -->
-    <!-- Below `lg` the rail cannot sit beside the document, so it moves into a
-         drawer. That is the only reason it is ever collapsed. -->
-    <Drawer v-model:visible="mobileMenuVisible" header="Document" class="w-80">
+    <!--
+      The menu button opens the application's navigation — the same four
+      destinations as the dashboard sidebar, from a single definition. It used
+      to open the editor's own rail, so from inside a form there was no way to
+      get anywhere else without going through the back link first.
+
+      Below `lg` the rail cannot sit beside the document either, so it rides
+      along underneath. That is the only reason it is ever collapsed.
+    -->
+    <Drawer v-model:visible="mobileMenuVisible" header="Menu" class="w-80">
       <div class="flex flex-col h-full">
+        <nav class="flex flex-col gap-0.5 pb-4 border-b border-line">
+          <RouterLink
+            v-for="item in navItems"
+            :key="item.to"
+            :to="item.to"
+            class="flex items-center gap-2.5 h-nav px-2.5 rounded-input text-row text-muted hover:bg-surface-sunken transition-colors"
+            @click="mobileMenuVisible = false"
+          >
+            <i :class="item.icon" class="text-[15px]" />
+            <span>{{ item.label }}</span>
+          </RouterLink>
+        </nav>
+
         <EditorRail
-          class="flex flex-1 w-full border-r-0"
+          class="flex flex-1 lg:hidden w-full border-r-0"
           :pdf-doc="pdfViewerRef?.pdfDoc || null"
-          @click="mobileMenuVisible = false"
         />
 
-        <div class="p-4 border-t border-line">
+        <div class="pt-4 border-t border-line">
           <Button
             label="Log out"
             icon="pi pi-sign-out"
@@ -150,13 +183,23 @@
       </div>
     </div>
 
+    <UnsavedChangesDialog
+      :visible="leaveDialog.visible"
+      :title="leaveDialogCopy.title"
+      :message="leaveDialogCopy.message"
+      :saving="leaveDialog.saving"
+      @save="handleLeaveSave"
+      @discard="handleLeaveDiscard"
+      @cancel="handleLeaveCancel"
+    />
+
     <Toast position="top-right" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import { RouterLink, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { RouterLink, useRouter, onBeforeRouteLeave, type RouteLocationRaw } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
@@ -166,18 +209,25 @@ import { useAuthStore } from '@/stores/auth.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useFormsStore } from '@/stores/forms.store'
+import { useFormManagement } from '@/composables/useFormManagement'
 import { useFieldsErrorHandler } from '@/composables/useFieldsErrorHandler'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PDFEditor from '@/components/editor/PDFEditor.vue'
 import EditorRail from '@/components/editor/EditorRail.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import BrandMark from '@/components/ui/BrandMark.vue'
+import UnsavedChangesDialog from '@/components/ui/UnsavedChangesDialog.vue'
+import { useAppNav } from '@/composables/useAppNav'
+import { useDownloadPDF } from '@/composables/useDownloadPDF'
 import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 
 const authStore = useAuthStore()
 const documentStore = useDocumentStore()
 const formFieldsStore = useFormFieldsStore()
 const formsStore = useFormsStore()
+const formManagement = useFormManagement()
+const { navItems } = useAppNav()
+const { downloadPDF } = useDownloadPDF()
 const router = useRouter()
 const toast = useToast()
 const pdfViewerRef = ref<InstanceType<typeof PDFViewer> | null>(null)
@@ -188,31 +238,104 @@ const mobileMenuVisible = ref(false)
 useFieldsErrorHandler()
 
 /**
- * Edits made with the text and image tools live in the browser until `Save all`.
- * That is deliberate — an experiment should not become a fact on the server —
- * but it means closing the tab throws them away, so the browser has to ask.
+ * There are two different ways to lose work here, and both have to be caught.
  *
- * Only registered while there is something to lose: an unconditional handler
- * would prompt on every navigation away from an untouched document.
+ *  - Edits from the text and image tools live in the browser until `Save all`.
+ *  - A PDF that has been opened but never given a field has no form row at
+ *    all, so closing the editor throws the whole document away. Saving it with
+ *    no fields is a perfectly reasonable thing to want, and used to be
+ *    impossible.
  */
-const warnOnUnsavedEdits = (event: BeforeUnloadEvent) => {
-  if (!documentStore.hasUnsavedEdits) return
+const hasUnsavedWork = computed(
+  () => !!documentStore.activeDocument && (documentStore.hasUnsavedEdits || !formFieldsStore.currentFormId)
+)
+
+const leaveDialog = ref<{ visible: boolean; saving: boolean; to: RouteLocationRaw | null }>({
+  visible: false,
+  saving: false,
+  to: null
+})
+
+const leaveDialogCopy = computed(() => {
+  if (!formFieldsStore.currentFormId) {
+    return {
+      title: 'This document is not saved',
+      message:
+        'It has not been stored yet, so leaving now discards it. Saving keeps the PDF — it does not need any fields.'
+    }
+  }
+  return {
+    title: 'You have unsaved changes',
+    message:
+      'The text and images you added are only in this browser. Leaving now discards them.'
+  }
+})
+
+// The browser's own prompt, for closing the tab. It cannot be styled and cannot
+// offer to save; it is the last resort, not the main path.
+const warnOnUnload = (event: BeforeUnloadEvent) => {
+  if (!hasUnsavedWork.value) return
   event.preventDefault()
-  // Browsers show their own wording; a non-empty value is what triggers it.
   event.returnValue = ''
 }
 
-onMounted(() => window.addEventListener('beforeunload', warnOnUnsavedEdits))
-onBeforeUnmount(() => window.removeEventListener('beforeunload', warnOnUnsavedEdits))
+onMounted(() => window.addEventListener('beforeunload', warnOnUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnOnUnload))
 
-// Leaving the editor by router link loses the same work, and the browser
-// cannot help with that one.
-onBeforeRouteLeave(() => {
-  if (!documentStore.hasUnsavedEdits) return true
-  return window.confirm(
-    'The text and images you added have not been saved. Leave the editor and lose them?'
-  )
+/**
+ * Every in-app navigation out of the editor, whichever control started it —
+ * the sidebar, the back link, the browser's back button.
+ *
+ * `leaveConfirmed` is what lets the second pass through go: the guard runs
+ * again after the dialog resolves, and without it the dialog would reopen for
+ * the navigation it just approved.
+ */
+const leaveConfirmed = ref(false)
+
+onBeforeRouteLeave((to) => {
+  if (leaveConfirmed.value || !hasUnsavedWork.value) return true
+
+  leaveDialog.value = { visible: true, saving: false, to: to.fullPath }
+  return false
 })
+
+const proceed = () => {
+  const to = leaveDialog.value.to
+  leaveConfirmed.value = true
+  leaveDialog.value = { visible: false, saving: false, to: null }
+  if (to) router.push(to)
+}
+
+const handleLeaveSave = async () => {
+  leaveDialog.value.saving = true
+  try {
+    await formManagement.saveDocumentToDatabase()
+    await formsStore.fetchForms()
+    proceed()
+  } catch (err) {
+    leaveDialog.value.saving = false
+    toast.add({
+      severity: 'error',
+      summary: 'Could not save',
+      detail: err instanceof Error ? err.message : 'The document was not saved, so you are still here.',
+      life: 6000
+    })
+  }
+}
+
+const handleLeaveDiscard = () => {
+  // The document is being abandoned, so it must not be waiting in the store for
+  // whatever screen comes next.
+  documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
+  formFieldsStore.clearFields()
+  formFieldsStore.setCurrentForm(null)
+  documentStore.markSaved()
+  proceed()
+}
+
+const handleLeaveCancel = () => {
+  leaveDialog.value = { visible: false, saving: false, to: null }
+}
 
 onMounted(() => {
   formsStore.fetchForms()

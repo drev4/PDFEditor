@@ -8,7 +8,7 @@
           v-model="localText"
           @input="$emit('update-text', localText)"
           class="text-input"
-          placeholder="Escribe aquí..."
+          placeholder="Type here..."
         />
       </div>
 
@@ -63,7 +63,7 @@
         size="small"
       />
       <Button
-        label="Cancelar"
+        label="Cancel"
         icon="pi pi-times"
         @click="$emit('cancel')"
         severity="danger"

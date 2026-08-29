@@ -30,15 +30,15 @@
       }"
     >
       <i :class="getFieldIcon(formFieldsStore.fieldTypeToAdd!)"></i>
-      <span>Click para colocar</span>
+      <span>Click to place</span>
     </div>
 
     <!-- Adding mode indicator -->
     <div v-if="formFieldsStore.isAddingField" class="adding-indicator">
-      <span>Agregando: {{ getFieldTypeLabel(formFieldsStore.fieldTypeToAdd!) }}</span>
+      <span>Placing: {{ getFieldTypeLabel(formFieldsStore.fieldTypeToAdd!) }}</span>
       <button @click.stop="formFieldsStore.cancelAddingField()">
         <i class="pi pi-times"></i>
-        Cancelar
+        Cancel
       </button>
     </div>
   </div>
@@ -56,6 +56,7 @@ import FormFieldItem from './FormFieldItem.vue'
 const props = defineProps<{
   canvasWidth: number
   canvasHeight: number
+  displayScale?: number
 }>()
 
 const formFieldsStore = useFormFieldsStore()
@@ -76,10 +77,17 @@ const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
  * stored coordinate.
  */
 const BASE_SCALE = 1.5
-const scaleFactor = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)
 
+/** Stored units -> canvas pixels. */
+const renderScale = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)
+
+/** Stored units -> pixels on screen, which is what the overlay is laid out in. */
+const scaleFactor = computed(() => renderScale.value * (props.displayScale ?? 1))
+
+// Derived from the canvas's own pixels, not its displayed box: this is the
+// page's size in stored units and must not move when the window is resized.
 const pageSize = computed(() =>
-  unrotatedPageSize(props.canvasWidth, props.canvasHeight, rotation.value, scaleFactor.value)
+  unrotatedPageSize(props.canvasWidth, props.canvasHeight, rotation.value, renderScale.value)
 )
 
 const currentPageFields = computed(() => {
@@ -117,11 +125,11 @@ const getFieldIcon = (type: FieldType) => {
 
 const getFieldTypeLabel = (type: FieldType) => {
   const labels: Record<FieldType, string> = {
-    text: 'Campo de texto',
-    textarea: 'Área de texto',
-    checkbox: 'Casilla',
-    radio: 'Opción múltiple',
-    dropdown: 'Lista desplegable'
+    text: 'Text field',
+    textarea: 'Paragraph',
+    checkbox: 'Checkbox',
+    radio: 'Radio group',
+    dropdown: 'Dropdown'
   }
   return labels[type]
 }
@@ -197,7 +205,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
       height: size.height,
       page: currentPage.value
     },
-    options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Opción 1', 'Opción 2'] : undefined
+    options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Option 1', 'Option 2'] : undefined
   })
 
   // Auto-initialize form if needed and save to server

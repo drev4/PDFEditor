@@ -260,10 +260,11 @@ import { useEditorStore } from '@/stores/editor.store'
 import { useDrawingStore } from '@/stores/drawing.store'
 import { useSearchStore } from '@/stores/search.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
-import { embedFieldsInPDF, type EmbedField } from '@/utils/pdfFieldEmbedder'
+import { useDownloadPDF } from '@/composables/useDownloadPDF'
 import FormSavePanel from '@/components/forms/FormSavePanel.vue'
 
 const documentStore = useDocumentStore()
+const { downloadPDF } = useDownloadPDF()
 const editorStore = useEditorStore()
 const drawingStore = useDrawingStore()
 const searchStore = useSearchStore()
@@ -463,57 +464,6 @@ const undoEdit = () => {
 
   documentStore.activeDocument.arrayBuffer = restoredArrayBuffer
   documentStore.triggerPDFReload()
-}
-
-const downloadPDF = async () => {
-  if (!documentStore.activeDocument?.arrayBuffer) return
-
-  try {
-    // Load PDF and handle page reordering if needed
-    let pdfDoc: PDFDocument
-
-    if (documentStore.activeDocument.pageOrder && documentStore.activeDocument.pageOrder.length > 0) {
-      const originalPdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
-      pdfDoc = await PDFDocument.create()
-
-      // Copy pages in the new order
-      for (const pageNum of documentStore.activeDocument.pageOrder) {
-        const [copiedPage] = await pdfDoc.copyPages(originalPdfDoc, [pageNum - 1])
-        pdfDoc.addPage(copiedPage)
-      }
-    } else {
-      pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
-    }
-
-    // Add form fields if any exist
-    if (formFieldsStore.fields.length > 0) {
-      const scale = documentStore.activeDocument.scale || 1.5
-
-      const fields: EmbedField[] = formFieldsStore.fields.map(field => ({
-        type: field.type,
-        name: field.name,
-        label: field.label,
-        required: field.required,
-        border: field.border,
-        position: field.position,
-        options: field.options
-      }))
-
-      await embedFieldsInPDF(pdfDoc, fields, scale)
-    }
-
-    // Save and download
-    const pdfBytes = await pdfDoc.save()
-    const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `edited_${documentStore.activeDocument.name}`
-    link.click()
-    URL.revokeObjectURL(url)
-  } catch (error) {
-    console.error('Error downloading PDF:', error)
-  }
 }
 
 const performSearch = () => {
