@@ -1,129 +1,113 @@
+/* Self-hosted. A <link> to fonts.googleapis.com would be blocked twice by the
+   SPA's own CSP (`style-src 'self' 'unsafe-inline'` and `font-src 'self'
+   data:`, built in vite.config.ts) and would fail silently into the fallback
+   font. See features/0011 and features/0007. */
+@import '@fontsource/instrument-sans/latin-400.css';
+@import '@fontsource/instrument-sans/latin-500.css';
+@import '@fontsource/instrument-sans/latin-600.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-#app {
-  width: 100%;
-  height: 100vh;
-}
-
-/* Custom Animations */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
+@layer base {
+  :root {
+    font-family: theme('fontFamily.sans');
+    line-height: 1.5;
+    font-weight: 400;
+    color: theme('colors.ink');
+    -webkit-font-smoothing: antialiased;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0);
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: theme('colors.surface.DEFAULT');
+    font-size: 14px;
   }
-  50% {
-    transform: translateY(-10px);
+
+  #app {
+    width: 100%;
+    height: 100vh;
+  }
+
+  a {
+    color: theme('colors.accent.DEFAULT');
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: theme('colors.accent.pressed');
   }
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
+@layer components {
+  /* Counts, dates, ids and coordinates. They line up in a column and are never
+     mistaken for prose — one of the three rules the canvas states. */
+  .num {
+    font-family: theme('fontFamily.mono');
+    font-variant-numeric: tabular-nums;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+
+  /* The uppercase column label above a table or a properties field. */
+  .col-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: theme('colors.faint');
+  }
+
+  /* Status pill — `Published`, `Draft`, `Closed`, `Invited`, `Active`. The dot
+     carries the colour; the pill background stays quiet. */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 21px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .pill-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 }
 
-@keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out;
-}
-
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
-.animate-slide-up {
-  animation: slideUp 0.4s ease-out forwards;
-}
-
-.animate-scale-in {
-  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.shimmer {
-  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite linear;
-}
-
-/* Page Transitions */
+/* Page transitions, kept from before — the only motion in the system. */
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity 0.2s ease;
 }
 
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
+.page-enter-from,
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
 }
 
-/* Smooth scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: theme('colors.surface.sunken');
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: theme('colors.line.strong');
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: theme('colors.faint');
 }

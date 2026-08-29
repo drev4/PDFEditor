@@ -5,7 +5,7 @@ import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import Tooltip from 'primevue/tooltip'
-import Aura from '@primevue/themes/aura'
+import { VuePDFPreset } from './theme'
 import router from './router'
 import './style.css'
 import 'primeicons/primeicons.css'
@@ -20,7 +20,7 @@ app.use(pinia)
 app.use(router)
 app.use(PrimeVue, {
   theme: {
-    preset: Aura,
+    preset: VuePDFPreset,
     options: {
       darkModeSelector: '.dark-mode',
     }
