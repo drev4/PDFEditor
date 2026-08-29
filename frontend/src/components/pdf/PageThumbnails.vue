@@ -2,10 +2,10 @@
   <div class="page-thumbnails-container">
     <div class="thumbnails-header">
       <div class="flex items-center justify-between">
-        <h3 class="text-sm font-bold text-ink uppercase tracking-wide">
+        <h3 class="text-body font-bold text-ink uppercase tracking-wide">
           Pages
         </h3>
-        <span class="text-xs bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
+        <span class="text-meta bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
           {{ documentStore.activeDocument?.numPages || 0 }}
         </span>
       </div>
@@ -15,7 +15,7 @@
       <!-- Loading State -->
       <div v-if="!pdfDoc" class="text-center py-8">
         <ProgressSpinner style="width: 40px; height: 40px" />
-        <p class="text-sm text-muted mt-2">Loading pages...</p>
+        <p class="text-body text-muted mt-2">Loading pages...</p>
       </div>
 
       <!-- Thumbnails Grid -->
@@ -41,7 +41,7 @@
         <!-- Page Number Badge -->
         <div class="absolute top-2 right-2 z-10">
           <span :class="[
-            'text-xs font-bold px-2 py-1 rounded-full shadow-sm',
+            'text-meta font-bold px-2 py-1 rounded-full shadow-sm',
             pageNum === currentPage
               ? 'bg-accent text-white'
               : 'bg-white text-ink'
@@ -59,8 +59,8 @@
             class="thumbnail-image"
           />
           <div v-else class="thumbnail-placeholder">
-            <i class="pi pi-image text-3xl text-faint"></i>
-            <p class="text-xs text-muted mt-2">Loading...</p>
+            <i class="pi pi-image text-title text-faint"></i>
+            <p class="text-meta text-muted mt-2">Loading...</p>
           </div>
         </div>
 
@@ -71,7 +71,7 @@
             ? 'bg-accent text-white'
             : 'bg-surface-subtle text-ink group-hover:bg-surface-sunken'
         ]">
-          <span class="text-xs font-medium">Page {{ pageNum }}</span>
+          <span class="text-meta font-medium">Page {{ pageNum }}</span>
         </div>
       </div>
       </div>

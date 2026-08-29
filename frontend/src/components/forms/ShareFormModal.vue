@@ -11,14 +11,14 @@
       <div class="flex items-center justify-between p-4 rounded-lg bg-surface-subtle">
         <div class="flex items-center gap-3">
           <i
-            class="pi text-2xl"
+            class="pi text-title"
             :class="form.status === 'published' ? 'pi-globe text-published' : 'pi-lock text-faint'"
           ></i>
           <div>
             <p class="font-semibold text-ink">
               {{ form.status === 'published' ? 'Published' : 'Draft' }}
             </p>
-            <p class="text-sm text-muted">
+            <p class="text-body text-muted">
               {{ form.status === 'published' ? 'Anyone with the link can respond' : 'Form is not accepting responses' }}
             </p>
           </div>
@@ -35,22 +35,22 @@
         <div class="p-4 rounded-lg bg-accent-soft border border-accent">
           <div class="flex items-center gap-2 mb-1">
             <i class="pi pi-eye text-accent"></i>
-            <span class="text-sm font-medium text-accent">Views</span>
+            <span class="text-body font-medium text-accent">Views</span>
           </div>
-          <p class="text-2xl font-bold text-accent">{{ form.viewCount || 0 }}</p>
+          <p class="text-title font-bold text-accent">{{ form.viewCount || 0 }}</p>
         </div>
         <div class="p-4 rounded-lg bg-published-soft border border-published">
           <div class="flex items-center gap-2 mb-1">
             <i class="pi pi-check-circle text-published"></i>
-            <span class="text-sm font-medium text-published">Responses</span>
+            <span class="text-body font-medium text-published">Responses</span>
           </div>
-          <p class="text-2xl font-bold text-published">{{ form._count?.responses || 0 }}</p>
+          <p class="text-title font-bold text-published">{{ form._count?.responses || 0 }}</p>
         </div>
       </div>
 
       <!-- Share Link -->
       <div v-if="form.status === 'published'">
-        <label class="block text-sm font-medium text-ink mb-2">Share Link</label>
+        <label class="block text-body font-medium text-ink mb-2">Share Link</label>
         <div class="flex gap-2">
           <InputText
             :value="shareUrl"
@@ -66,7 +66,7 @@
             severity="secondary"
           />
         </div>
-        <p class="text-xs text-muted mt-2">
+        <p class="text-meta text-muted mt-2">
           Share this link with people you want to collect responses from
         </p>
       </div>

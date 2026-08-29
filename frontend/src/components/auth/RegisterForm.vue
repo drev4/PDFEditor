@@ -1,13 +1,13 @@
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <div>
-      <h2 class="text-2xl font-bold text-ink mb-2">Create Account</h2>
-      <p class="text-muted text-sm">Start editing PDFs professionally</p>
+      <h2 class="text-title font-bold text-ink mb-2">Create Account</h2>
+      <p class="text-muted text-body">Start editing PDFs professionally</p>
     </div>
 
     <!-- Name Field (Optional) -->
     <div class="space-y-2">
-      <label for="name" class="block text-sm font-medium text-ink">
+      <label for="name" class="block text-body font-medium text-ink">
         Full Name <span class="text-faint">(optional)</span>
       </label>
       <InputText
@@ -23,7 +23,7 @@
 
     <!-- Email Field -->
     <div class="space-y-2">
-      <label for="email" class="block text-sm font-medium text-ink">
+      <label for="email" class="block text-body font-medium text-ink">
         Email Address
       </label>
       <InputText
@@ -42,7 +42,7 @@
 
     <!-- Password Field -->
     <div class="space-y-2">
-      <label for="password" class="block text-sm font-medium text-ink">
+      <label for="password" class="block text-body font-medium text-ink">
         Password
       </label>
       <Password
@@ -60,7 +60,7 @@
         data-testid="register-password-input"
       >
         <template #footer>
-          <p class="text-xs text-muted mt-2">
+          <p class="text-meta text-muted mt-2">
             Password must be at least 6 characters long
           </p>
         </template>
@@ -70,7 +70,7 @@
 
     <!-- Confirm Password Field -->
     <div class="space-y-2">
-      <label for="confirmPassword" class="block text-sm font-medium text-ink">
+      <label for="confirmPassword" class="block text-body font-medium text-ink">
         Confirm Password
       </label>
       <Password

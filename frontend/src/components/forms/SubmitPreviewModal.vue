@@ -9,15 +9,15 @@
     :breakpoints="{ '1199px': '75vw', '575px': '90vw' }"
   >
     <div class="preview-content py-2">
-      <p class="text-sm text-muted mb-6">
+      <p class="text-body text-muted mb-6">
         Please review your answers below before submitting. You won't be able to change them after submission.
       </p>
 
       <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
         <div v-for="field in fields" :key="field.id" class="field-preview-item pb-3 border-b border-line last:border-b-0">
-          <h4 class="text-sm font-semibold text-ink mb-1 flex items-center">
+          <h4 class="text-body font-semibold text-ink mb-1 flex items-center">
             {{ field.label }}
-            <span v-if="field.required" class="text-danger ml-1 italic font-normal text-xs">(Required)</span>
+            <span v-if="field.required" class="text-danger ml-1 italic font-normal text-meta">(Required)</span>
           </h4>
           
           <div class="answer-box">

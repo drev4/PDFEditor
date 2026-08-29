@@ -2,7 +2,7 @@
   <div class="field-properties-panel font-sans" v-if="formFieldsStore.selectedField">
     <div class="panel-header bg-surface border-b border-line px-4 h-11 flex items-center">
       <div class="flex flex-col gap-1">
-        <h3 class="text-xs font-black text-faint uppercase tracking-widest">Field Settings</h3>
+        <h3 class="text-meta font-semibold text-faint uppercase tracking-widest">Field Settings</h3>
         <!-- Save Status Indicator -->
         <div class="save-status flex items-center gap-2" v-if="saveStatus !== 'idle'">
           <i v-if="saveStatus === 'saving'" class="pi pi-spin pi-spinner text-accent text-[10px]"></i>
@@ -12,42 +12,42 @@
         </div>
       </div>
       <button class="close-btn p-2 hover:bg-surface-sunken rounded-xl transition-colors text-faint" @click="formFieldsStore.selectField(null)">
-        <i class="pi pi-times text-xs"></i>
+        <i class="pi pi-times text-meta"></i>
       </button>
     </div>
 
     <div class="panel-content p-6 space-y-8">
       <!-- Field Type Indicator -->
       <div class="form-group">
-        <label class="text-[10px] font-black text-faint uppercase tracking-widest mb-3 block">Component Type</label>
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-3 block">Component Type</label>
         <div class="field-type-badge flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all shadow-sm" :class="getTypeBadgeClass(formFieldsStore.selectedField.type)">
-          <i :class="getFieldIcon(formFieldsStore.selectedField.type)" class="text-lg"></i>
-          <span class="text-sm font-bold">{{ getFieldTypeLabel(formFieldsStore.selectedField.type) }}</span>
+          <i :class="getFieldIcon(formFieldsStore.selectedField.type)" class="text-section"></i>
+          <span class="text-body font-semibold">{{ getFieldTypeLabel(formFieldsStore.selectedField.type) }}</span>
         </div>
       </div>
 
       <!-- General Settings Section -->
       <div class="space-y-6 pt-2">
         <div class="form-group">
-          <label for="field-name" class="text-[10px] font-black text-faint uppercase tracking-widest mb-2 block">System Identifier (ID)</label>
+          <label for="field-name" class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-2 block">System Identifier (ID)</label>
           <input
             id="field-name"
             type="text"
             v-model="fieldName"
             placeholder="Field ID..."
-            class="w-full bg-surface-subtle border border-line-strong rounded-xl px-4 py-2.5 text-sm font-medium focus:border-accent focus:shadow-focus outline-none transition-all"
+            class="w-full bg-surface-subtle border border-line-strong rounded-xl px-4 py-2.5 text-body font-medium focus:border-accent focus:shadow-focus outline-none transition-all"
             @input="updateField"
           />
         </div>
 
         <div class="form-group">
-          <label for="field-label" class="text-[10px] font-black text-faint uppercase tracking-widest mb-2 block">Public Label</label>
+          <label for="field-label" class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-2 block">Public Label</label>
           <input
             id="field-label"
             type="text"
             v-model="fieldLabel"
             placeholder="Visual heading..."
-            class="w-full bg-surface-subtle border border-line-strong rounded-xl px-4 py-2.5 text-sm font-medium focus:border-accent focus:shadow-focus outline-none transition-all"
+            class="w-full bg-surface-subtle border border-line-strong rounded-xl px-4 py-2.5 text-body font-medium focus:border-accent focus:shadow-focus outline-none transition-all"
             @input="updateField"
           />
         </div>
@@ -62,7 +62,7 @@
             class="w-5 h-5 rounded-lg border-line-strong text-accent focus:shadow-focus"
             @change="updateField"
           />
-          <span class="text-sm font-bold text-ink group-hover:text-accent transition-colors">Mandatory Field</span>
+          <span class="text-body font-bold text-ink group-hover:text-accent transition-colors">Mandatory Field</span>
         </label>
 
         <label class="flex items-center gap-3 p-4 bg-surface-subtle rounded-card border border-line hover:border-accent transition-colors cursor-pointer group">
@@ -72,13 +72,13 @@
             class="w-5 h-5 rounded-lg border-line-strong text-accent focus:shadow-focus"
             @change="updateField"
           />
-          <span class="text-sm font-bold text-ink group-hover:text-accent transition-colors">Visible Border</span>
+          <span class="text-body font-bold text-ink group-hover:text-accent transition-colors">Visible Border</span>
         </label>
       </div>
 
       <!-- Dynamic Options -->
       <div class="form-group pt-4 border-t border-line" v-if="hasOptions">
-        <label class="text-[10px] font-black text-faint uppercase tracking-widest mb-4 block">Selectable Options</label>
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-4 block">Selectable Options</label>
         <div class="space-y-3 mb-4">
           <div
             v-for="(option, index) in fieldOptions"
@@ -90,37 +90,37 @@
               v-model="fieldOptions[index]"
               @input="updateField"
               placeholder="Enter value..."
-              class="flex-1 bg-white border border-line rounded-xl px-4 py-2 text-sm focus:border-accent focus:shadow-focus outline-none transition-all"
+              class="flex-1 bg-white border border-line rounded-xl px-4 py-2 text-body focus:border-accent focus:shadow-focus outline-none transition-all"
             />
             <button class="p-2 text-faint hover:text-danger hover:bg-danger-soft rounded-xl transition-all" @click="removeOption(index)">
-              <i class="pi pi-trash text-sm"></i>
+              <i class="pi pi-trash text-body"></i>
             </button>
           </div>
         </div>
-        <button @click="addOption" class="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-line hover:border-accent hover:bg-accent-soft rounded-2xl text-muted hover:text-accent transition-all font-bold text-xs">
-          <i class="pi pi-plus-circle text-sm"></i>
+        <button @click="addOption" class="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-line hover:border-accent hover:bg-accent-soft rounded-2xl text-muted hover:text-accent transition-all font-bold text-meta">
+          <i class="pi pi-plus-circle text-body"></i>
           ADD NEW OPTION
         </button>
       </div>
 
       <!-- Geometry Info -->
       <div class="form-group pt-6 border-t border-line">
-        <label class="text-[10px] font-black text-faint uppercase tracking-widest mb-3 block">Spatial Coordinates</label>
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-3 block">Spatial Coordinates</label>
         <div class="grid grid-cols-2 gap-3 p-4 bg-ink rounded-2xl shadow-inner">
           <div class="flex flex-col">
-             <span class="text-[9px] font-black text-muted uppercase tracking-widest">X-Pos</span>
+             <span class="text-[9px] font-semibold text-muted uppercase tracking-widest">X-Pos</span>
              <span class="text-white font-mono font-bold">{{ Math.round(formFieldsStore.selectedField.position.x) }}px</span>
           </div>
           <div class="flex flex-col">
-             <span class="text-[9px] font-black text-muted uppercase tracking-widest">Y-Pos</span>
+             <span class="text-[9px] font-semibold text-muted uppercase tracking-widest">Y-Pos</span>
              <span class="text-white font-mono font-bold">{{ Math.round(formFieldsStore.selectedField.position.y) }}px</span>
           </div>
           <div class="flex flex-col">
-             <span class="text-[9px] font-black text-muted uppercase tracking-widest">Width</span>
+             <span class="text-[9px] font-semibold text-muted uppercase tracking-widest">Width</span>
              <span class="text-white font-mono font-bold">{{ Math.round(formFieldsStore.selectedField.position.width) }}px</span>
           </div>
           <div class="flex flex-col">
-             <span class="text-[9px] font-black text-muted uppercase tracking-widest">Height</span>
+             <span class="text-[9px] font-semibold text-muted uppercase tracking-widest">Height</span>
              <span class="text-white font-mono font-bold">{{ Math.round(formFieldsStore.selectedField.position.height) }}px</span>
           </div>
         </div>
@@ -128,7 +128,7 @@
 
       <!-- Danger Zone -->
       <div class="pt-10">
-        <button @click="deleteField" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-black text-xs border border-danger group">
+        <button @click="deleteField" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-semibold text-meta border border-danger group">
           <i class="pi pi-trash group-hover:scale-110 transition-transform"></i>
           ARCHIVE FIELD
         </button>
@@ -139,21 +139,21 @@
   <!-- Empty State / Selection Hint -->
   <div class="field-properties-panel font-sans" v-else>
     <div class="panel-header bg-surface border-b border-line px-4 h-11 flex items-center">
-      <h3 class="text-xs font-black text-faint uppercase tracking-widest">Configuration</h3>
+      <h3 class="text-meta font-semibold text-faint uppercase tracking-widest">Configuration</h3>
     </div>
 
     <div class="panel-content p-8 flex flex-col items-center justify-center text-center h-full">
       <div class="w-20 h-20 bg-surface-sunken rounded-3xl flex items-center justify-center mb-6 text-faint">
-        <i class="pi pi-sliders-h text-3xl"></i>
+        <i class="pi pi-sliders-h text-title"></i>
       </div>
-      <h4 class="text-lg font-black text-ink mb-2">Editor Ready</h4>
-      <p class="text-sm text-faint leading-relaxed mb-8">
+      <h4 class="text-section font-semibold text-ink mb-2">Editor Ready</h4>
+      <p class="text-body text-faint leading-relaxed mb-8">
         Select any field on the document to adjust its properties and validation rules.
       </p>
 
       <!-- Active fields list -->
       <div class="w-full space-y-3" v-if="formFieldsStore.fields.length > 0">
-        <label class="text-[10px] font-black text-faint uppercase tracking-widest mb-4 block text-left">Active Layers</label>
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-4 block text-left">Active Layers</label>
         <div
           v-for="field in formFieldsStore.fields"
           :key="field.id"
@@ -161,9 +161,9 @@
           @click="formFieldsStore.selectField(field.id)"
         >
           <div class="w-8 h-8 rounded-lg flex items-center justify-center text-faint group-hover:text-accent transition-colors" :class="getTypeIconBg(field.type)">
-             <i :class="getFieldIcon(field.type)" class="text-sm"></i>
+             <i :class="getFieldIcon(field.type)" class="text-body"></i>
           </div>
-          <span class="text-sm font-bold text-muted truncate flex-1 text-left">{{ field.label || field.name }}</span>
+          <span class="text-body font-bold text-muted truncate flex-1 text-left">{{ field.label || field.name }}</span>
           <i class="pi pi-chevron-right text-[10px] text-faint group-hover:translate-x-1 transition-transform"></i>
         </div>
       </div>

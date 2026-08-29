@@ -2,10 +2,10 @@
   <div class="forms-list">
     <!-- Header -->
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-ink uppercase tracking-wide">
+      <h3 class="text-body font-bold text-ink uppercase tracking-wide">
         My Forms
       </h3>
-      <span class="text-xs bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
+      <span class="text-meta bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
         {{ forms.length }}
       </span>
     </div>
@@ -17,8 +17,8 @@
 
     <!-- Error State -->
     <div v-else-if="error" class="text-center py-8">
-      <i class="pi pi-exclamation-circle text-danger text-4xl mb-3"></i>
-      <p class="text-sm text-danger">{{ error }}</p>
+      <i class="pi pi-exclamation-circle text-danger text-display mb-3"></i>
+      <p class="text-body text-danger">{{ error }}</p>
       <Button
         label="Retry"
         @click="loadForms"
@@ -30,9 +30,9 @@
 
     <!-- Empty State -->
     <div v-else-if="forms.length === 0" class="text-center py-12">
-      <i class="pi pi-inbox text-faint text-5xl mb-4"></i>
-      <p class="text-sm text-muted mb-2">No forms yet</p>
-      <p class="text-xs text-muted">Create a form from your PDF document</p>
+      <i class="pi pi-inbox text-faint text-display mb-4"></i>
+      <p class="text-body text-muted mb-2">No forms yet</p>
+      <p class="text-meta text-muted">Create a form from your PDF document</p>
     </div>
 
     <!-- Forms List -->
@@ -45,19 +45,19 @@
         <!-- Form Header -->
         <div class="flex items-start gap-3 mb-3">
           <div class="w-10 h-10 rounded-lg bg-accent-soft flex items-center justify-center flex-shrink-0">
-            <i class="pi pi-file text-accent text-xl"></i>
+            <i class="pi pi-file text-accent text-section"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold text-ink truncate">
+            <p class="text-body font-semibold text-ink truncate">
               {{ form.title }}
             </p>
-            <p v-if="form.description" class="text-xs text-muted truncate mt-0.5">
+            <p v-if="form.description" class="text-meta text-muted truncate mt-0.5">
               {{ form.description }}
             </p>
           </div>
           <!-- Status Badge -->
           <div
-            class="px-2 py-1 rounded-full text-xs font-medium flex-shrink-0"
+            class="px-2 py-1 rounded-full text-meta font-medium flex-shrink-0"
             :class="statusClass(form.status)"
           >
             {{ form.status }}
@@ -66,11 +66,11 @@
 
         <!-- Stats -->
         <div class="grid grid-cols-2 gap-2 mb-3">
-          <div class="flex items-center gap-2 text-xs text-muted">
+          <div class="flex items-center gap-2 text-meta text-muted">
             <i class="pi pi-eye text-faint"></i>
             <span>{{ form.viewCount || 0 }} views</span>
           </div>
-          <div class="flex items-center gap-2 text-xs text-muted">
+          <div class="flex items-center gap-2 text-meta text-muted">
             <i class="pi pi-check-circle text-faint"></i>
             <span>{{ form._count?.responses || 0 }} responses</span>
           </div>

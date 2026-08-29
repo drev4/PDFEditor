@@ -3,8 +3,8 @@
     <!-- No PDF Loaded State -->
     <div v-if="!documentStore.activeDocument" class="flex items-center justify-center h-full">
       <div class="text-center">
-        <i class="pi pi-file-pdf text-6xl text-faint mb-4"></i>
-        <p class="text-muted text-lg">No PDF loaded</p>
+        <i class="pi pi-file-pdf text-display text-faint mb-4"></i>
+        <p class="text-muted text-section">No PDF loaded</p>
       </div>
     </div>
 

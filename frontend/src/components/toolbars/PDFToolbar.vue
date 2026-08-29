@@ -13,7 +13,7 @@
           :severity="currentPage <= 1 ? 'secondary' : 'info'"
         />
         <div class="px-4 py-1.5 bg-white rounded-lg border border-line shadow-sm min-w-[100px] text-center">
-          <span class="text-xs font-black text-ink tracking-tighter">
+          <span class="text-meta font-semibold text-ink tracking-tighter">
             PAGE {{ currentPage }} / {{ numPages }}
           </span>
         </div>
@@ -42,7 +42,7 @@
           severity="secondary"
         />
         <div class="px-3 py-1.5 bg-white rounded-lg border border-line shadow-sm min-w-[65px] text-center">
-          <span class="text-[10px] font-black text-ink">{{ Math.round(scale * 100) }}%</span>
+          <span class="text-[10px] font-semibold text-ink">{{ Math.round(scale * 100) }}%</span>
         </div>
         <Button
           icon="pi pi-plus"

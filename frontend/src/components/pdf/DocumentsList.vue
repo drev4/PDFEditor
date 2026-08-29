@@ -1,10 +1,10 @@
 <template>
   <div class="documents-list">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-ink uppercase tracking-wide">
+      <h3 class="text-body font-bold text-ink uppercase tracking-wide">
         Documents
       </h3>
-      <span class="text-xs bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
+      <span class="text-meta bg-accent-soft text-accent px-2 py-1 rounded-full font-semibold">
         {{ documentStore.documents.length }}
       </span>
     </div>
@@ -28,7 +28,7 @@
               : 'bg-danger-soft'
           ]">
             <i :class="[
-              'pi pi-file-pdf text-xl',
+              'pi pi-file-pdf text-section',
               doc.id === documentStore.activeDocumentId
                 ? 'text-white'
                 : 'text-danger'
@@ -36,7 +36,7 @@
           </div>
           <div class="flex-1 min-w-0">
             <p :class="[
-              'text-sm font-semibold truncate',
+              'text-body font-semibold truncate',
               doc.id === documentStore.activeDocumentId
                 ? 'text-white'
                 : 'text-ink'
@@ -44,7 +44,7 @@
               {{ doc.name }}
             </p>
             <p :class="[
-              'text-xs mt-1',
+              'text-meta mt-1',
               doc.id === documentStore.activeDocumentId
                 ? 'text-accent'
                 : 'text-muted'

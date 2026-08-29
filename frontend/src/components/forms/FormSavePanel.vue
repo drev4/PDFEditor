@@ -9,7 +9,7 @@
         <h4 class="tool-title">Save Form</h4>
       </div>
       <div class="tool-body">
-        <p class="text-sm text-muted mb-4">
+        <p class="text-body text-muted mb-4">
           Save this PDF form to the cloud to access it later and share with others.
         </p>
 
@@ -48,7 +48,7 @@
           />
         </div>
 
-        <p class="text-xs text-muted">
+        <p class="text-meta text-muted">
           <i class="pi pi-info-circle"></i>
           Upload PDF alone or save complete form with fields
         </p>
@@ -63,7 +63,7 @@
         </div>
         <div class="flex-1">
           <h4 class="tool-title">Form Saved</h4>
-          <p class="text-xs text-muted">ID: {{ formFieldsStore.currentFormId }}</p>
+          <p class="text-meta text-muted">ID: {{ formFieldsStore.currentFormId }}</p>
         </div>
         <Button
           icon="pi pi-times"
@@ -77,9 +77,9 @@
       </div>
       <div class="tool-body space-y-2">
         <div v-if="currentForm" class="info-box">
-          <p class="text-sm font-semibold text-ink">{{ currentForm.title }}</p>
-          <p v-if="currentForm.description" class="text-xs text-muted">{{ currentForm.description }}</p>
-          <p class="text-xs text-muted mt-2">
+          <p class="text-body font-semibold text-ink">{{ currentForm.title }}</p>
+          <p v-if="currentForm.description" class="text-meta text-muted">{{ currentForm.description }}</p>
+          <p class="text-meta text-muted mt-2">
             {{ currentForm.fields?.length || 0 }} fields • {{ currentForm.status }}
           </p>
         </div>
@@ -115,7 +115,7 @@
           v-if="!currentForm?.pdfUrl"
         />
 
-        <p v-if="!currentForm?.pdfUrl" class="text-xs text-limit flex items-center gap-1">
+        <p v-if="!currentForm?.pdfUrl" class="text-meta text-limit flex items-center gap-1">
           <i class="pi pi-info-circle"></i>
           Upload PDF first to enable sharing
         </p>
@@ -124,8 +124,8 @@
           <div class="flex items-start gap-2">
             <i class="pi pi-file-pdf text-accent mt-0.5"></i>
             <div class="flex-1 min-w-0">
-              <p class="text-xs font-medium text-accent">PDF Uploaded</p>
-              <p class="text-xs text-accent truncate">{{ getPDFFilename(currentForm.pdfUrl) }}</p>
+              <p class="text-meta font-medium text-accent">PDF Uploaded</p>
+              <p class="text-meta text-accent truncate">{{ getPDFFilename(currentForm.pdfUrl) }}</p>
             </div>
           </div>
         </div>

@@ -1,13 +1,13 @@
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <div>
-      <h2 class="text-2xl font-bold text-ink mb-2">Welcome Back</h2>
-      <p class="text-muted text-sm">Sign in to continue to your workspace</p>
+      <h2 class="text-title font-bold text-ink mb-2">Welcome Back</h2>
+      <p class="text-muted text-body">Sign in to continue to your workspace</p>
     </div>
 
     <!-- Email Field -->
     <div class="space-y-2">
-      <label for="email" class="block text-sm font-medium text-ink">
+      <label for="email" class="block text-body font-medium text-ink">
         Email Address
       </label>
       <InputText
@@ -26,7 +26,7 @@
 
     <!-- Password Field -->
     <div class="space-y-2">
-      <label for="password" class="block text-sm font-medium text-ink">
+      <label for="password" class="block text-body font-medium text-ink">
         Password
       </label>
       <Password

@@ -4,18 +4,18 @@
     <div class="editor-header sticky top-0 bg-surface px-4 py-3 border-b border-line">
       <div class="flex items-center gap-3">
         <div class="w-7 h-7 bg-surface-sunken rounded-input flex items-center justify-center">
-          <i class="pi pi-sliders-h text-white text-lg"></i>
+          <i class="pi pi-sliders-h text-white text-section"></i>
         </div>
         <div>
-          <h3 class="text-lg font-bold text-white">Editor Tools</h3>
-          <p class="text-xs text-accent">Customize your PDF</p>
+          <h3 class="text-section font-bold text-white">Editor Tools</h3>
+          <p class="text-meta text-accent">Customize your PDF</p>
         </div>
       </div>
     </div>
 
     <div v-if="!documentStore.activeDocument" class="p-6 text-center text-muted">
-      <i class="pi pi-info-circle text-4xl mb-2 block"></i>
-      <p class="text-sm">No PDF loaded</p>
+      <i class="pi pi-info-circle text-display mb-2 block"></i>
+      <p class="text-body">No PDF loaded</p>
     </div>
 
     <div v-else class="editor-content p-6 space-y-6">
@@ -56,7 +56,7 @@
             />
           </div>
           <div v-if="searchStore.searchMatches.length > 0" class="search-results">
-            <span class="text-sm font-semibold text-ink">
+            <span class="text-body font-semibold text-ink">
               {{ searchStore.currentMatchIndex + 1 }} / {{ searchStore.searchMatches.length }} matches
             </span>
             <div class="flex gap-1">
@@ -136,7 +136,7 @@
             class="w-full image-upload-btn"
             severity="secondary"
           />
-          <p class="text-xs text-muted mt-2">Max size: 5MB</p>
+          <p class="text-meta text-muted mt-2">Max size: 5MB</p>
         </div>
       </div>
 
@@ -150,7 +150,7 @@
         </div>
         <div class="tool-body">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-medium text-ink">Show Grid</span>
+            <span class="text-body font-medium text-ink">Show Grid</span>
             <Button
               :icon="drawingStore.gridEnabled ? 'pi pi-eye' : 'pi pi-eye-slash'"
               @click="drawingStore.toggleGrid()"
@@ -160,7 +160,7 @@
             />
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-sm font-medium text-ink">Snap to Grid</span>
+            <span class="text-body font-medium text-ink">Snap to Grid</span>
             <Button
               :icon="drawingStore.snapToGrid ? 'pi pi-lock' : 'pi pi-lock-open'"
               @click="drawingStore.toggleSnapToGrid()"
@@ -209,7 +209,7 @@
           </div>
           <div class="flex-1">
             <h4 class="tool-title">Edit History</h4>
-            <p class="text-xs text-muted">{{ editorStore.editHistory.length }} changes</p>
+            <p class="text-meta text-muted">{{ editorStore.editHistory.length }} changes</p>
           </div>
         </div>
         <div class="tool-body">
