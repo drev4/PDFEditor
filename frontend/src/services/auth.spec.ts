@@ -1,13 +1,25 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { authService } from './auth'
-import { api } from './api'
+import { api, setAccessToken, getAccessToken, refreshSession } from './api'
 
-vi.mock('./api')
+vi.mock('./api', async () => {
+  // The access token is module state in api.ts, so the mock keeps its own and
+  // behaves the same way. Testing against a stub that always returns null would
+  // make every assertion about token handling vacuous.
+  let token: string | null = null
+  return {
+    api: { post: vi.fn(), get: vi.fn() },
+    setAccessToken: vi.fn((t: string | null) => { token = t }),
+    getAccessToken: vi.fn(() => token),
+    refreshSession: vi.fn(async () => false)
+  }
+})
 
 describe('Auth Service', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.clearAllMocks()
+    setAccessToken(null)
   })
 
   const mockAuthResponse = {
@@ -21,7 +33,7 @@ describe('Auth Service', () => {
   }
 
   describe('register', () => {
-    it('should register user and store token', async () => {
+    it('holds the access token in memory, never in localStorage', async () => {
       vi.mocked(api.post).mockResolvedValue(mockAuthResponse)
 
       const result = await authService.register('test@example.com', 'password123', 'Test User')
@@ -32,7 +44,11 @@ describe('Auth Service', () => {
         name: 'Test User'
       })
       expect(result.token).toBe('test-token')
-      expect(localStorage.getItem('token')).toBe('test-token')
+      expect(getAccessToken()).toBe('test-token')
+      // Finding S4: nothing readable by an XSS, and nothing that outlives the
+      // page. The refresh token is in an httpOnly cookie this code cannot see.
+      expect(localStorage.getItem('token')).toBeNull()
+      expect(JSON.stringify(localStorage)).not.toContain('test-token')
     })
 
     it('should register without name', async () => {
@@ -49,7 +65,7 @@ describe('Auth Service', () => {
   })
 
   describe('login', () => {
-    it('should login user and store token', async () => {
+    it('holds the access token in memory, never in localStorage', async () => {
       vi.mocked(api.post).mockResolvedValue(mockAuthResponse)
 
       const result = await authService.login('test@example.com', 'password123')
@@ -59,7 +75,8 @@ describe('Auth Service', () => {
         password: 'password123'
       })
       expect(result.user.email).toBe('test@example.com')
-      expect(localStorage.getItem('token')).toBe('test-token')
+      expect(getAccessToken()).toBe('test-token')
+      expect(localStorage.getItem('token')).toBeNull()
     })
   })
 
@@ -75,44 +92,68 @@ describe('Auth Service', () => {
   })
 
   describe('logout', () => {
-    it('should remove token from localStorage', () => {
-      localStorage.setItem('token', 'test-token')
+    it('revokes on the server, not just locally', async () => {
+      vi.mocked(api.post).mockResolvedValue(mockAuthResponse)
+      await authService.login('test@example.com', 'password123')
+      vi.mocked(api.post).mockClear()
+      vi.mocked(api.post).mockResolvedValue(undefined as never)
 
-      authService.logout()
+      await authService.logout()
 
-      expect(localStorage.getItem('token')).toBeNull()
+      // The defect S4 describes: logout used to be a localStorage delete, and
+      // the token stayed valid for the rest of the week.
+      expect(api.post).toHaveBeenCalledWith('/auth/logout', {})
+      expect(getAccessToken()).toBeNull()
+    })
+
+    it('clears local state even when the request fails', async () => {
+      vi.mocked(api.post).mockResolvedValue(mockAuthResponse)
+      await authService.login('test@example.com', 'password123')
+      vi.mocked(api.post).mockRejectedValue(new Error('offline'))
+
+      await expect(authService.logout()).resolves.toBeUndefined()
+
+      // A network failure must not leave someone looking logged in on a shared
+      // machine.
+      expect(getAccessToken()).toBeNull()
     })
   })
 
-  describe('isAuthenticated', () => {
-    it('should return true when token exists', () => {
-      localStorage.setItem('token', 'test-token')
+  describe('bootstrapSession', () => {
+    it('returns true without a request when a token is already held', async () => {
+      setAccessToken('already-here')
 
-      const result = authService.isAuthenticated()
+      await expect(authService.bootstrapSession()).resolves.toBe(true)
 
-      expect(result).toBe(true)
+      expect(refreshSession).not.toHaveBeenCalled()
     })
 
-    it('should return false when no token', () => {
-      const result = authService.isAuthenticated()
+    it('asks the server when there is no token in memory', async () => {
+      vi.mocked(refreshSession).mockResolvedValue(true)
 
-      expect(result).toBe(false)
+      await expect(authService.bootstrapSession()).resolves.toBe(true)
+
+      // After a reload there is nothing local to consult: the access token died
+      // with the page and the refresh cookie is unreadable. Only the server knows.
+      expect(refreshSession).toHaveBeenCalled()
+    })
+
+    it('reports no session when the refresh fails', async () => {
+      vi.mocked(refreshSession).mockResolvedValue(false)
+
+      await expect(authService.bootstrapSession()).resolves.toBe(false)
     })
   })
 
   describe('getToken', () => {
-    it('should return token if exists', () => {
-      localStorage.setItem('token', 'test-token')
+    it('returns the in-memory token', () => {
+      setAccessToken('test-token')
 
-      const token = authService.getToken()
-
-      expect(token).toBe('test-token')
+      expect(authService.getToken()).toBe('test-token')
     })
 
     it('should return null if no token', () => {
-      const token = authService.getToken()
-
-      expect(token).toBeNull()
+      expect(authService.getToken()).toBeNull()
     })
   })
 })

@@ -1,4 +1,4 @@
-import { api } from './api'
+import { api, setAccessToken, getAccessToken, refreshSession } from './api'
 
 export interface User {
   id: string
@@ -19,13 +19,13 @@ interface MeResponse {
 export const authService = {
   async register(email: string, password: string, name?: string): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/register', { email, password, name })
-    localStorage.setItem('token', response.token)
+    setAccessToken(response.token)
     return response
   },
 
   async login(email: string, password: string): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/login', { email, password })
-    localStorage.setItem('token', response.token)
+    setAccessToken(response.token)
     return response
   },
 
@@ -34,15 +34,42 @@ export const authService = {
     return response.user
   },
 
-  logout(): void {
-    localStorage.removeItem('token')
+  /**
+   * Logging out is a server-side act now, not a client-side one.
+   *
+   * It used to be `localStorage.removeItem('token')`, which ended nothing: the
+   * token stayed valid for the rest of its seven days, so anyone holding a copy
+   * kept full access. This revokes the refresh-token family, so every token
+   * descended from that login stops working.
+   *
+   * The local state is cleared whatever the request does. A network failure must
+   * not leave someone looking logged in on a shared machine.
+   */
+  async logout(): Promise<void> {
+    try {
+      await api.post('/auth/logout', {})
+    } catch {
+      // Deliberately swallowed — see above.
+    } finally {
+      setAccessToken(null)
+    }
   },
 
-  isAuthenticated(): boolean {
-    return !!localStorage.getItem('token')
+  /**
+   * Recovers a session after a page load.
+   *
+   * The access token lives in memory, so a reload always starts without one.
+   * The refresh cookie survives, so this exchanges it for a fresh access token.
+   * Returns false when there is no usable session — which is the honest answer
+   * to "is this person logged in", and the only way to get it now that nothing
+   * readable by JavaScript says so.
+   */
+  async bootstrapSession(): Promise<boolean> {
+    if (getAccessToken()) return true
+    return refreshSession()
   },
 
   getToken(): string | null {
-    return localStorage.getItem('token')
+    return getAccessToken()
   }
 }

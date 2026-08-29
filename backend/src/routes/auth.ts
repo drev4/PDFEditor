@@ -1,11 +1,26 @@
-import { Router } from 'express'
+import { Router, Response } from 'express'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
-import { loginRateLimit, registerRateLimit } from '../middleware/rateLimit.js'
+import { verifySameOrigin } from '../middleware/csrf.js'
+import {
+  loginRateLimit,
+  registerRateLimit,
+  refreshRateLimit
+} from '../middleware/rateLimit.js'
+import {
+  issueRefreshToken,
+  rotateRefreshToken,
+  revokeSession
+} from '../services/refresh-token.js'
+import {
+  REFRESH_COOKIE,
+  setRefreshCookie,
+  clearRefreshCookie
+} from '../services/session-cookie.js'
 
 export const authRouter = Router()
 
@@ -19,6 +34,28 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string()
 })
+
+/**
+ * Minutes, not days (finding S4). An access token cannot be revoked — that is
+ * the price of verifying it without a database round trip — so its lifetime is
+ * the window in which a stolen one is still useful. Everything that ends a
+ * session early acts on the refresh token instead.
+ */
+function accessTokenTtl(): string {
+  return process.env.JWT_ACCESS_TTL || '15m'
+}
+
+function signAccessToken(userId: string): string {
+  // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
+  return jwt.sign({ userId }, process.env.JWT_SECRET!, { expiresIn: accessTokenTtl() })
+}
+
+/** Starts a session: a fresh refresh-token family, and the cookie carrying it. */
+async function startSession(res: Response, userId: string): Promise<string> {
+  const { token } = await issueRefreshToken(userId)
+  setRefreshCookie(res, token)
+  return signAccessToken(userId)
+}
 
 // POST /api/auth/register
 authRouter.post('/register', registerRateLimit, async (req, res, next) => {
@@ -45,12 +82,7 @@ authRouter.post('/register', registerRateLimit, async (req, res, next) => {
       select: { id: true, email: true, name: true, createdAt: true }
     })
 
-    // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
-    const token = jwt.sign(
-      { userId: user.id },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    )
+    const token = await startSession(res, user.id)
 
     res.status(201).json({ user, token })
   } catch (error) {
@@ -81,12 +113,7 @@ authRouter.post('/login', loginRateLimit, async (req, res, next) => {
       throw new AppError(401, 'Invalid credentials')
     }
 
-    // @ts-expect-error - Type definition issue with jsonwebtoken expiresIn
-    const token = jwt.sign(
-      { userId: user.id },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    )
+    const token = await startSession(res, user.id)
 
     res.json({
       user: {
@@ -97,6 +124,52 @@ authRouter.post('/login', loginRateLimit, async (req, res, next) => {
       },
       token
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/auth/refresh
+//
+// Authenticated by the cookie alone, which is why it carries `verifySameOrigin`
+// — see middleware/csrf.ts. It is also the one route where a failure must not
+// explain itself: "unknown", "expired" and "replayed" all return the same 401,
+// or the endpoint becomes an oracle for probing captured tokens.
+authRouter.post('/refresh', refreshRateLimit, verifySameOrigin, async (req, res, next) => {
+  try {
+    const presented = req.cookies?.[REFRESH_COOKIE]
+    if (!presented) {
+      throw new AppError(401, 'Not authenticated')
+    }
+
+    const result = await rotateRefreshToken(presented)
+
+    if (!result.ok) {
+      // The cookie is dead whichever way it failed, including the replay case
+      // where rotateRefreshToken has just revoked the whole family.
+      clearRefreshCookie(res)
+      throw new AppError(401, 'Not authenticated')
+    }
+
+    setRefreshCookie(res, result.token)
+    res.json({ token: signAccessToken(result.userId) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/auth/logout
+//
+// Deliberately not behind `authenticate`: logging out must work when the access
+// token has already expired, which is exactly when a user reaches for it. The
+// cookie is the credential, so the CSRF guard applies here too.
+authRouter.post('/logout', verifySameOrigin, async (req, res, next) => {
+  try {
+    const presented = req.cookies?.[REFRESH_COOKIE]
+    if (presented) await revokeSession(presented)
+
+    clearRefreshCookie(res)
+    res.status(204).send()
   } catch (error) {
     next(error)
   }

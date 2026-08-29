@@ -7,13 +7,19 @@ description: Change backend/prisma/schema.prisma safely and keep the rest of the
 
 Current model: `User → Form → Field → Response → Answer` (`docs/sot/03-domain-model.md`). Planned changes are in `docs/sot/10-saas-roadmap.md`.
 
-## Stop: there is no migration history
+## The migration history exists — use it
 
-`backend/prisma/migrations/` does not exist. Everything so far has used `prisma db push`, which mutates a database to match the schema with no record of intent, no ordering and no down path.
+`backend/prisma/migrations/` holds `0_baseline` and everything since. It was baselined as step 0 of `features/0001`; this section used to say no history existed, which stopped being true then.
 
-**Before the first schema change that touches a database with real data, baseline the migrations:** generate an initial migration from the current schema, check the generated SQL against what is already deployed, and commit it. Then switch CI and every environment to `prisma migrate deploy`. `db push` is for throwaway local databases only, from that point on.
+So: **every schema change goes through `prisma migrate dev` locally and `prisma migrate deploy` everywhere else.** `db push` is for throwaway local databases only, and never for anything holding data you would miss.
 
-Do not begin roadmap schema work on `db push`. See `docs/sot/08-operations.md`.
+Two things that will trip you up locally, neither of which CI has:
+
+- **The integration suite runs against a different database.** `vuepdf_test`, not `vuepdf` (see `backend/vitest.integration.config.ts`). `migrate dev` only touches the one in `backend/.env`, so after adding a migration run it against the test database too, or the integration suite fails with `relation ... does not exist`:
+  ```bash
+  cd backend && DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vuepdf_test?schema=public' npx prisma migrate deploy
+  ```
+- **`migrate deploy` does not generate the client**; only `migrate dev` does. See `docs/sot/08-operations.md`.
 
 ## Before editing the schema
 
