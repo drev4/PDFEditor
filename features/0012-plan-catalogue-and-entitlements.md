@@ -223,17 +223,28 @@ Team's seat count is `null` rather than a number: the canvas prices it as "€39
 
 The spec required the tests to be written first and seen to fail. **They were written after the enforcement was wired**, so that was not honoured as written. It was checked instead of assumed: the three route files were stashed and the integration suite run against the unenforced code, where **9 of its 22 tests failed** — the nine that assert the new behaviour. The other 13 pass either way, being guards rather than the core assertions.
 
+### Added after the spec: a development override
+
+Requested by the repository owner once the limits were in: one published form is not a workable development environment. `DEV_PLAN_KEY` forces every organization onto one plan, ignoring `organizations.plan_key` — `dev` for the unlimited *Developer* pseudo-plan, or `free`/`pro`/`team` to drive the limit screens on purpose rather than by tripping over them. It is temporary and meant to be deleted in favour of real environments; the row that remembers is in [`docs/BACKLOG.md`](../docs/BACKLOG.md).
+
+The part worth keeping is the guard. The obvious check is `NODE_ENV !== 'production'`, which honours the override whenever `NODE_ENV` is unset, misspelled or dropped by a process manager — every one of which is an ordinary way to give the product away with no error anywhere. It is an **allowlist** instead: `development` or `test`, and nothing else. A missing `NODE_ENV` enforces limits.
+
+Two things it turned up:
+
+- **`.env` reaches the test suites.** `src/app.ts` calls `dotenv.config()` and every spec imports it, so `DEV_PLAN_KEY=dev` in a local `.env` switched enforcement off inside the suites and **four tests failed** — the tests were right and the environment was wrong. All three test configurations now pin `DEV_PLAN_KEY: ''`, empty rather than absent, because dotenv fills in a missing key and leaves a present one alone. Written up in [09-quality](../docs/sot/09-quality-and-testing.md) as a rule for the next setting like it.
+- **The pseudo-plan is not in `PLANS`.** `PLANS` is the catalogue taken from the canvas and a fake tier inside it would eventually be offered to somebody. It is also deliberately visible: the plan renders as *Developer* in the sidebar and on Settings, so limits being off is something you can see rather than something you have to remember.
+
 ### Verification
 
 Every suite, on `Node 22.22.0` against a real PostgreSQL, at the end of the work:
 
 | Command | Result |
 |---|---|
-| `npm run test:backend` | **13 files, 138 tests passed** (was 12/115; +19 new, and 4 pre-existing specs' mocks updated) |
+| `npm run test:backend` | **13 files, 148 tests passed** (was 12/115; +29 new, and 4 pre-existing specs' mocks updated) |
 | `npm run test:integration` | **9 files, 99 tests passed** (was 7/72; +22 new) |
 | `npm run test:frontend` | **36 files, 297 tests passed** (was 35/284; +13 new) |
 | `npm run test:e2e` | **50 passed** (18.5s) |
-| `npm run build --workspace=frontend` | ✓ built in 18.33s, `vue-tsc` clean |
+| `npm run build --workspace=frontend` | ✓ `vue-tsc` clean |
 | `cd backend && npx tsc --noEmit` | clean, no output |
 
 `npm run lint` was not run and is not cited: it lints nothing in this repository.

@@ -109,6 +109,16 @@ expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields', mockFieldData)
 
 Test stores and composables through their public surface — call an action, assert the resulting state and the requests made. Do not reach into internal refs when an observable effect says the same thing, and do not mount a whole view to test logic that lives in a composable.
 
+## The suites do not read your `.env`, and that is on purpose
+
+`backend/src/app.ts` calls `dotenv.config()`, and every backend spec imports `app.ts`. So whatever is in `backend/.env` **is** in `process.env` while the tests run, including settings that change the behaviour under test.
+
+This is not hypothetical: adding `DEV_PLAN_KEY=dev` to a local `.env` turned plan enforcement off inside the suites and four tests in `tests/entitlements.spec.ts` failed — the tests were right and the environment was wrong, which is the confusing direction for that to happen in.
+
+Anything that can switch a behaviour off is therefore **pinned in the test configuration**, not left to the environment: `backend/vitest.config.ts`, `backend/vitest.integration.config.ts` and `playwright.config.ts` all set `RATE_LIMIT_*` high and `DEV_PLAN_KEY: ''`. Set it to the empty string rather than leaving it out — dotenv fills in a key that is absent from `process.env` and leaves alone one that is already there.
+
+**Add a line to all three whenever you add a setting that can disable something.** A suite that passes because a feature was switched off is worse than a failing one.
+
 ## Where a test belongs
 
 | Question the test answers | Level |

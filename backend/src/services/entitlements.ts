@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from './db.js'
 import { AppError } from '../middleware/errorHandler.js'
-import { PLANS, isWithin, resolvePlan, type Plan } from './plans.js'
+import { PLANS, effectivePlan, isWithin, type Plan } from './plans.js'
 
 /**
  * Where plan limits get checked.
@@ -65,7 +65,9 @@ async function planFor(organizationId: string): Promise<Readonly<Plan>> {
     select: { planKey: true }
   })
 
-  return organization ? resolvePlan(organization.planKey) : PLANS.free
+  // `effectivePlan`, never `resolvePlan`: the development override has to have
+  // exactly one way in, and this and `assertResponseWithinLimit` are it.
+  return organization ? effectivePlan(organization.planKey) : PLANS.free
 }
 
 /**
@@ -242,7 +244,7 @@ export async function assertResponseWithinLimit(
     select: { planKey: true }
   })
 
-  const plan = organization ? resolvePlan(organization.planKey) : PLANS.free
+  const plan = organization ? effectivePlan(organization.planKey) : PLANS.free
   const period = currentPeriod()
 
   const counter = await tx.usageCounter.upsert({

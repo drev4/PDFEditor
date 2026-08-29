@@ -177,6 +177,8 @@ The frontend shows "upgrade your plan" for one and "you do not have access" for 
 
 **The meter is claimed atomically, never read-then-written.** `assertResponseWithinLimit(tx, organizationId)` upserts the counter with an `increment` and compares the value it gets back, inside the same transaction as the `Response`. The upsert takes the row lock, so a second concurrent submission blocks and then reads `limit + 1` and throws — and the throw rolls back the increment and the response together. Read-compare-increment would let two submissions both pass at `limit - 1`, and a compensating decrement is a thing to get wrong. Nothing may catch that throw before the transaction boundary.
 
+**One function resolves a plan, and it is `effectivePlan`.** `resolvePlan` maps a stored key to a catalogue entry and stays pure; `effectivePlan` is that plus the temporary `DEV_PLAN_KEY` override ([08-operations](./08-operations.md)). Every limit check calls the latter, so the override has exactly one way in and one way out — and so that deleting it later is a local edit rather than a hunt.
+
 Finally, the boundary that survives into step 8: **nothing in `routes/` imports anything from a billing provider.** Domain routes ask the entitlements service a question about limits; only `SubscriptionService` will ever know Stripe exists.
 
 ## 11. Response headers are global, except where a route earns an exception

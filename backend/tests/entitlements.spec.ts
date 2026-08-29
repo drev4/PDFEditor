@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import request from 'supertest'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { PrismaClient } from '@prisma/client'
-import { PLANS, resolvePlan, isWithin } from '../src/services/plans'
+import { PLANS, DEV_PLAN, resolvePlan, effectivePlan, isWithin } from '../src/services/plans'
 import { currentPeriod } from '../src/services/entitlements'
 
 vi.mock('../src/services/db', async () => {
@@ -308,6 +308,114 @@ describe('plan limits', () => {
       const res = await request(app).get('/api/organizations/entitlements')
 
       expect(res.status).toBe(404)
+    })
+  })
+  /**
+   * The development override (`DEV_PLAN_KEY`) — temporary, and the reason this
+   * suite tests it at all is that it can switch enforcement off.
+   *
+   * The property that matters is not "it works", it is **"it cannot come on by
+   * accident"**. Every negative case below is a way a real deployment loses or
+   * mangles `NODE_ENV`, and each one must leave limits enforced.
+   */
+  describe('DEV_PLAN_KEY', () => {
+    const originalEnv = process.env.NODE_ENV
+    const originalKey = process.env.DEV_PLAN_KEY
+
+    function environment(nodeEnv: string | undefined, devPlanKey: string | undefined) {
+      if (nodeEnv === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = nodeEnv
+      if (devPlanKey === undefined) delete process.env.DEV_PLAN_KEY
+      else process.env.DEV_PLAN_KEY = devPlanKey
+    }
+
+    afterEach(() => {
+      environment(originalEnv, originalKey)
+    })
+
+    it('is off unless it is set', () => {
+      environment('development', undefined)
+
+      expect(effectivePlan('free')).toBe(PLANS.free)
+    })
+
+    it('lifts every limit when set to dev', () => {
+      environment('development', 'dev')
+
+      const plan = effectivePlan('free')
+      expect(plan).toBe(DEV_PLAN)
+      expect(plan.maxPublishedForms).toBeNull()
+      expect(plan.maxResponsesPerMonth).toBeNull()
+    })
+
+    it('pins every organization to a named plan, so the limit screens can be driven', () => {
+      // The other half of the point: `free` forces the limits *on* for an
+      // account that would otherwise be on something roomier.
+      environment('development', 'free')
+
+      expect(effectivePlan('team')).toBe(PLANS.free)
+    })
+
+    it('is ignored in production', () => {
+      environment('production', 'dev')
+
+      expect(effectivePlan('free')).toBe(PLANS.free)
+    })
+
+    it('is ignored when NODE_ENV is unset', () => {
+      // The failure this guards. `NODE_ENV !== "production"` — the obvious
+      // check — would honour the override here, and a process manager that
+      // does not pass NODE_ENV through is an ordinary way to end up in this
+      // state with no error anywhere.
+      environment(undefined, 'dev')
+
+      expect(effectivePlan('free')).toBe(PLANS.free)
+    })
+
+    it('is ignored when NODE_ENV is something unexpected', () => {
+      environment('staging', 'dev')
+
+      expect(effectivePlan('free')).toBe(PLANS.free)
+    })
+
+    it('is ignored when it names a plan that does not exist', () => {
+      environment('development', 'unlimited')
+
+      expect(effectivePlan('free')).toBe(PLANS.free)
+    })
+
+    it('does not leak the pseudo-plan into the product catalogue', () => {
+      // `PLANS` is what the canvas describes and what a customer could be sold.
+      // A fake tier inside it would eventually be offered to somebody.
+      expect(Object.keys(PLANS)).toEqual(['free', 'pro', 'team'])
+      expect(Object.values(PLANS)).not.toContain(DEV_PLAN)
+    })
+
+    it('lets a route publish past the limit while it is on', async () => {
+      environment('development', 'dev')
+      prismaMock.form.findFirst.mockResolvedValue(form as any)
+      onPlan('free')
+      prismaMock.form.count.mockResolvedValue(99)
+      prismaMock.form.update.mockResolvedValue({ ...form, status: 'published' } as any)
+
+      const res = await request(app)
+        .patch('/api/forms/form-1/status')
+        .send({ status: 'published' })
+
+      expect(res.status).toBe(200)
+    })
+
+    it('still refuses that publish in production', async () => {
+      environment('production', 'dev')
+      prismaMock.form.findFirst.mockResolvedValue(form as any)
+      onPlan('free')
+      prismaMock.form.count.mockResolvedValue(99)
+
+      const res = await request(app)
+        .patch('/api/forms/form-1/status')
+        .send({ status: 'published' })
+
+      expect(res.status).toBe(402)
     })
   })
 })

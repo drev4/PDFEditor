@@ -13,7 +13,13 @@ import { api } from './api'
  * has taken (`docs/BACKLOG.md`), so no screen may render one as if they were.
  */
 export interface Plan {
-  key: 'free' | 'pro' | 'team'
+  /**
+   * `dev` is the backend's development-only override (`DEV_PLAN_KEY`), which
+   * really does reach this client while it is on — it is in the type so that
+   * nothing here assumes the key is always a sellable plan. It is never stored
+   * and can never appear from a production API.
+   */
+  key: 'free' | 'pro' | 'team' | 'dev'
   name: string
   /** How many forms may be **published at once** — not how many may exist. */
   maxPublishedForms: number | null

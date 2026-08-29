@@ -21,6 +21,16 @@
 export type PlanKey = 'free' | 'pro' | 'team'
 
 /**
+ * What a plan's `key` can actually be at runtime.
+ *
+ * `dev` is the development-only pseudo-plan below. It is **never stored** in
+ * `Organization.planKey` and nothing can put it there — it exists only as
+ * something `effectivePlan` can return — but it does reach the API and the UI
+ * while the override is on, which is why it is in the type.
+ */
+export type EffectivePlanKey = PlanKey | 'dev'
+
+/**
  * `null` means unlimited.
  *
  * Not `Infinity`: it does not survive `JSON.stringify` (it becomes `null`
@@ -29,7 +39,7 @@ export type PlanKey = 'free' | 'pro' | 'team'
  * own case, which is what `isWithin` below does once for all of them.
  */
 export interface Plan {
-  key: PlanKey
+  key: EffectivePlanKey
   /** As drawn on the canvas. Shown to the user; never parsed. */
   name: string
   /**
@@ -126,4 +136,123 @@ export function resolvePlan(planKey: string): Readonly<Plan> {
 /** `true` when `used` is inside `limit`. A `null` limit is always within. */
 export function isWithin(used: number, limit: number | null): boolean {
   return limit === null || used < limit
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Development override — TEMPORARY
+//
+// Everything from here to the end of this file exists so that the product can
+// be used without plan limits while it is being built, and it is meant to be
+// deleted. Removing it is: delete this block, point `effectivePlan` at
+// `resolvePlan` (or replace the two call sites in `entitlements.ts`), and drop
+// `DEV_PLAN_KEY` from `.env.example`. Nothing else reads any of it.
+//
+// The successor is per-environment configuration — a staging deployment that
+// simply runs on a real plan — not a flag that has to be remembered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A plan with nothing switched off. Development only.
+ *
+ * **Not a member of `PLANS`**, deliberately. `PLANS` is the product catalogue,
+ * taken from the design canvas, and a fake tier inside it would eventually be
+ * offered to somebody. This is reachable only through `DEV_PLAN_KEY`.
+ *
+ * It is called "Developer" rather than something invisible because the name is
+ * rendered — in the sidebar card and on the Settings screen. Seeing `Developer`
+ * where a customer would see `Free` is the signal that limits are off, and it
+ * is the reason not to make this look like a real plan.
+ */
+export const DEV_PLAN: Readonly<Plan> = Object.freeze({
+  key: 'dev',
+  name: 'Developer',
+  maxPublishedForms: null,
+  maxResponsesPerMonth: null,
+  seats: null,
+  hasBranding: true,
+  hasApiAccess: true
+})
+
+/**
+ * Environments in which `DEV_PLAN_KEY` is honoured.
+ *
+ * An **allowlist, not a denylist**, and that is the whole safety property. The
+ * obvious version of this check is `NODE_ENV !== 'production'`, which honours
+ * the override whenever `NODE_ENV` is unset, misspelled, or lost by a process
+ * manager — every one of which is a way a real deployment ends up giving the
+ * product away with no error anywhere. Here the failure mode of a missing or
+ * unexpected `NODE_ENV` is that limits are *enforced*, which is the direction a
+ * mistake should fail in (`config/env.ts` states the same rule).
+ */
+const OVERRIDE_ENVIRONMENTS = ['development', 'test']
+
+/** So a permanent condition does not print on every request. */
+const announced = new Set<string>()
+
+function announce(message: string, level: 'warn' | 'error' = 'warn'): void {
+  if (announced.has(message)) return
+  announced.add(message)
+  console[level](message)
+}
+
+/**
+ * The plan `DEV_PLAN_KEY` forces, or `null` when there is no override.
+ *
+ * Read from the environment on every call rather than captured at import time,
+ * so that a test can turn it on and off — the same reason the rate limiters
+ * read their limits lazily.
+ *
+ * Two values are useful and they do opposite things:
+ *
+ *   - `DEV_PLAN_KEY=dev` — no limits at all. Build without hitting them.
+ *   - `DEV_PLAN_KEY=free` — pins *every* organization to the free plan, which
+ *     is how the limit screens get exercised on purpose instead of by waiting
+ *     to trip over them.
+ */
+function devPlanOverride(): Readonly<Plan> | null {
+  const requested = process.env.DEV_PLAN_KEY?.trim()
+  if (!requested) return null
+
+  const environment = process.env.NODE_ENV?.trim() ?? ''
+
+  if (!OVERRIDE_ENVIRONMENTS.includes(environment)) {
+    announce(
+      `DEV_PLAN_KEY="${requested}" is set and is being IGNORED: it applies only ` +
+      `when NODE_ENV is one of ${OVERRIDE_ENVIRONMENTS.join(', ')} ` +
+      `(NODE_ENV is currently ${environment ? `"${environment}"` : 'unset'}). ` +
+      `Plan limits are being enforced normally.`,
+      'error'
+    )
+    return null
+  }
+
+  if (requested === 'dev') {
+    announce('DEV_PLAN_KEY=dev — plan limits are OFF for every organization.')
+    return DEV_PLAN
+  }
+
+  const plan = (PLANS as Record<string, Readonly<Plan>>)[requested]
+
+  if (!plan) {
+    announce(
+      `DEV_PLAN_KEY="${requested}" is not a plan. Expected "dev" or one of ` +
+      `${Object.keys(PLANS).join(', ')}. Ignoring it.`,
+      'error'
+    )
+    return null
+  }
+
+  announce(`DEV_PLAN_KEY=${requested} — every organization is on the ${plan.name} plan.`)
+  return plan
+}
+
+/**
+ * The plan actually in force for a stored `planKey`.
+ *
+ * **This, not `resolvePlan`, is what every limit check must call**, so that the
+ * override has exactly one way in and one way out. `resolvePlan` stays pure and
+ * is what tests assert the catalogue with.
+ */
+export function effectivePlan(storedKey: string): Readonly<Plan> {
+  return devPlanOverride() ?? resolvePlan(storedKey)
 }
