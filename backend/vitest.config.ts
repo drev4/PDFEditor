@@ -18,7 +18,8 @@ export default defineConfig({
             RATE_LIMIT_LOGIN_MAX: '1000',
             RATE_LIMIT_REGISTER_MAX: '1000',
             RATE_LIMIT_RESPONSES_MAX: '1000',
-            RATE_LIMIT_REFRESH_MAX: '1000'
+            RATE_LIMIT_REFRESH_MAX: '1000',
+            RATE_LIMIT_INVITATION_MAX: '1000'
         },
         setupFiles: ['./tests/setup.ts'],
         coverage: {

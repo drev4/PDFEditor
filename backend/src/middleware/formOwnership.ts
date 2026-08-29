@@ -54,28 +54,3 @@ export async function verifyFieldOwnership(req: AuthRequest, formId: string, fie
 
   return field
 }
-
-/**
- * The organization a newly created resource belongs to.
- *
- * Every account has exactly one organization today — registration creates it —
- * so there is nothing to choose between. When a user can belong to several,
- * this is the single place that has to learn how the active one is selected,
- * and the oldest membership stops being the right answer.
- */
-export async function requireOrganizationId(req: AuthRequest): Promise<string> {
-  const membership = await prisma.membership.findFirst({
-    where: { userId: req.userId },
-    orderBy: { createdAt: 'asc' },
-    select: { organizationId: true }
-  })
-
-  // Registration creates the user, the organization and the membership in one
-  // transaction, so an authenticated user without one means a row was made
-  // outside the application. Refusing is safer than inventing an organization.
-  if (!membership) {
-    throw new AppError(403, 'This account does not belong to an organization')
-  }
-
-  return membership.organizationId
-}

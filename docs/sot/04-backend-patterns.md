@@ -149,7 +149,9 @@ Three rules follow, and all three are easy to lose:
 - **Ownership failures return `404`, never `403`.** A `403` confirms the row exists and turns the endpoint into an existence oracle for form ids. `backend/tests/integration/tenancy.spec.ts` asserts this on every affected route.
 - **Never put `organizationId` in the JWT.** Access tokens live 15 minutes and cannot be revoked, so a membership baked into one outlives the membership itself. Resolve it per request; it costs a join, not a round trip.
 
-New resources get their organization from `requireOrganizationId(req)` — the single place that will have to learn how an active organization is chosen once a user can belong to more than one.
+New resources get their organization from `requireOrganizationId(req)` in `middleware/membership.ts` — the single place that will have to learn how an active organization is chosen once a user can belong to more than one.
+
+**Roles are a second, different check.** `requireRole(req, ['owner'])` returns the caller's membership or throws, and it distinguishes two rejections that must not be collapsed: **`404`** when the caller is not in the organization at all, **`403`** when they are but their role does not allow the action. Collapsing them either leaks existence or tells a legitimate member their own organization does not exist. Anything that could remove an owner calls `assertNotLastOwner` first — an organization with no owner cannot be administered or deleted, and nothing here can repair one.
 
 ## 10. Response headers are global, except where a route earns an exception
 

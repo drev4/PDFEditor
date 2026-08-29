@@ -10,6 +10,7 @@ import { formsRouter } from './routes/forms.js'
 import { formFieldsRouter } from './routes/form-fields.js'
 import { uploadRouter } from './routes/upload.js'
 import { responsesRouter } from './routes/responses.js'
+import { organizationsRouter } from './routes/organizations.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
@@ -156,5 +157,6 @@ app.use('/api/forms', formsRouter)
 app.use('/api/forms', formFieldsRouter)
 app.use('/api/upload', uploadRouter)
 app.use('/api/responses', responsesRouter)
+app.use('/api/organizations', organizationsRouter)
 
 app.use(errorHandler)

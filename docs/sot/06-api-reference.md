@@ -39,6 +39,26 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 
 `/auth/register`, `/auth/login` and `/auth/refresh` are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; the others count every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
 
+## Organizations — `routes/organizations.ts`
+
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| GET | `/organizations/members` | Bearer, any member | — | `200 {members: [{id, email, name, role, joinedAt}]}` · `404` if the caller is in no organization |
+| PATCH | `/organizations/members/:userId` | Bearer, **owner** | `{role}` | `200 {member}` · `400` if it would leave no owner · `403` wrong role · `404` not a member of this organization |
+| DELETE | `/organizations/members/:userId` | Bearer, **owner** | — | `204` · `400` if it would leave no owner · `403` · `404` |
+| GET | `/organizations/invitations` | Bearer, **owner/admin** | — | `200 {invitations}` — pending only, never a `tokenHash` |
+| POST | `/organizations/invitations` | Bearer, **owner/admin** | `{email, role}` | `201 {invitation: {id, email, role, expiresAt, link}}` · `400` already a member · `403` (an `admin` may only invite `member`) |
+| DELETE | `/organizations/invitations/:id` | Bearer, **owner/admin** | — | `204` · `404` |
+| POST | `/organizations/invitations/accept` | — | `{token, password?, name?}` | `200 {organizationId}` when signed in · `201 {user, token, organizationId}` for a new account · `400` invalid/expired/revoked/used or missing password · `401` the account exists, sign in first · `409` signed in as a different address · `429` |
+
+**`link` is returned exactly once.** The server stores only a SHA-256 of the token and cannot reproduce it, and **nothing emails it** — the inviter copies the link and delivers it themselves. A client that discards this value has created an invitation nobody can accept.
+
+**Every failure of `accept` on the token itself answers `400` with one message**, whether the token is unknown, expired, revoked or already spent. Distinguishing them would make the endpoint an oracle for probing tokens.
+
+**`409` rather than a silent join.** Accepting while signed in as an address other than the one invited is refused and names the invited address. A forwarded link must not put the wrong person inside a customer's organization.
+
+The role rules and the `404` / `403` split are in [07-security-and-privacy](./07-security-and-privacy.md#two-rejections-two-codes).
+
 ## Forms — `routes/forms.ts`
 
 | Method | Path | Auth | Notes |
@@ -151,7 +171,7 @@ Stores `ipAddress` and `userAgent` from the request. Returns `201 {success, resp
 
 ## The 429 response
 
-`POST /auth/login`, `POST /auth/register`, `POST /auth/refresh` and `POST /responses` answer with `429` once their per-IP limit is exceeded. The body uses the same shape as every other error in this API, which matters because `frontend/src/services/api.ts` parses the body as JSON before it inspects the status:
+`POST /auth/login`, `POST /auth/register`, `POST /auth/refresh`, `POST /organizations/invitations/accept` and `POST /responses` answer with `429` once their per-IP limit is exceeded. The body uses the same shape as every other error in this API, which matters because `frontend/src/services/api.ts` parses the body as JSON before it inspects the status:
 
 ```ts
 // 429

@@ -96,6 +96,19 @@ export const refreshRateLimit = createLimiter({
   message: 'Too many session refreshes from this address. Please try again in a few minutes.'
 })
 
+/**
+ * `POST /api/organizations/invitations/accept` — unauthenticated by design, and
+ * it grants access to a customer's organization. Without a limit it is a free
+ * oracle for guessing invitation tokens.
+ */
+export const invitationRateLimit = createLimiter({
+  windowEnv: 'RATE_LIMIT_INVITATION_WINDOW_MS',
+  windowDefault: 15 * MINUTE,
+  limitEnv: 'RATE_LIMIT_INVITATION_MAX',
+  limitDefault: 20,
+  message: 'Too many invitation attempts from this address. Please try again in a few minutes.'
+})
+
 /** `POST /api/responses` — garbage submissions into a published form. */
 export const responseRateLimit = createLimiter({
   windowEnv: 'RATE_LIMIT_RESPONSES_WINDOW_MS',

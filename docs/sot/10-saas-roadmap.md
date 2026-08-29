@@ -2,7 +2,7 @@
 
 The entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. The `Organization`/`Membership` design is now **built** ([`features/0009`](../../features/0009-organizations-own-resources.md)) and its section says so; reality lives in [03-domain-model](./03-domain-model.md). Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
 
-The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 4 are closed; step 5 (member invitations) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
+The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 5 are closed; step 6 (`Plan` + entitlements) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
 
 The division of labour with the backlog: [`docs/BACKLOG.md`](../BACKLOG.md) answers **what is missing and how much it matters**; the build order answers **what is next**. When priority and the chain disagree, the chain wins — see [the inversion](#a-known-inversion-between-this-chain-and-the-backlog) at the end for the case that already exists.
 
@@ -12,7 +12,7 @@ Business rationale is in [01-product-and-market.md](./01-product-and-market.md).
 
 ~~Target design.~~ **Built** ([`features/0009`](../../features/0009-organizations-own-resources.md)). `Organization`, `Membership` and `Form.organizationId` exist; every authorization check resolves a membership. The reality is described in [03-domain-model](./03-domain-model.md) and [04-backend-patterns §9](./04-backend-patterns.md) — this section is kept for the reasoning behind the shape, which is still the reasoning that governs what comes next.
 
-What is **not** built: roles are stored and not enforced, and there is no way to add a second member to an organization. Both are below.
+Roles are enforced and invitations exist too ([`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md)). What is **not** built, from here down: plans, entitlements, billing, the public API and white-labeling.
 
 The shape:
 
@@ -102,13 +102,13 @@ This is the whole build order, not only the SaaS part of it — the security and
 | 2 | ~~**A gate that can be trusted**~~ — done | A red E2E suite gates nothing and a CI that never generated the Prisma client verifies nothing: without this, no step below could be *shown* to work. [`features/0003`](../../features/0003-e2e-suite-green-and-independent.md), [`features/0005`](../../features/0005-working-ci-and-enforced-node-version.md) |
 | 3 | ~~**Risk removal on the public surface**~~ — done | The cheapest risk removal available, and the first questions on any security review. Rate limiting ([`0002`](../../features/0002-rate-limiting-on-public-write-paths.md)), regex guard ([`0004`](../../features/0004-safe-author-supplied-regex.md)), signed PDF URLs ([`0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)), security headers and CSP ([`0007`](../../features/0007-security-headers-and-csp.md)), session hardening ([`0008`](../../features/0008-session-hardening.md)). **No High findings remain open** ([07-security](./07-security-and-privacy.md)) |
 | 4 | ~~**`Organization` + `Membership`** with data migration, no visible behaviour change~~ — done | The longest-lead schema change; done while the data was small. [`features/0009`](../../features/0009-organizations-own-resources.md) |
-| 5 | **Member invitations** | The first feature that makes B2B real rather than a table with one row |
+| 5 | ~~**Member invitations**~~ — done | The first feature that makes B2B real rather than a table with one row. Shipped with role enforcement, because neither is safe alone. [`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md) |
 | 6 | **`Plan` + entitlements**, limits enforced, no charging yet | Validates the "limit reached" UX before money is involved |
 | 7 | **Stripe + `Subscription`** | Actual revenue |
 | 8 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear. Also brings the Redis that the shared rate-limit store needs — see the inversion below |
 | 9 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
 
-Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so is step 4. Next is member invitations — the first feature that makes B2B real rather than a table with one row in it.
+Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so are steps 4 and 5. Next is `Plan` + entitlements — limits enforced with no charging yet, which validates the "limit reached" experience before money is involved.
 
 ### A known inversion between this chain and the backlog
 

@@ -62,6 +62,17 @@
               />
             </template>
 
+            <router-link to="/dashboard/team">
+              <Button
+                icon="pi pi-users"
+                severity="secondary"
+                outlined
+                size="small"
+                v-tooltip.bottom="'Team'"
+                data-testid="team-link"
+              />
+            </router-link>
+
             <!-- Logout Button -->
             <Button
               icon="pi pi-sign-out"
