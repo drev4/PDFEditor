@@ -182,6 +182,50 @@ export function useFormManagement() {
     return uploadResult
   }
 
+  /**
+   * Persist the bytes of the document currently open in the editor.
+   *
+   * The editor's drawing tools (text, images, drawings) modify the PDF in the
+   * browser with pdf-lib and write the result back to
+   * `documentStore.activeDocument.arrayBuffer`. Nothing sent it anywhere, so
+   * every one of those edits was lost on reload — the document on the server
+   * was still the one that was uploaded.
+   *
+   * This uploads the edited bytes and repoints the form at them. It goes
+   * through the existing `POST /api/upload` + `PATCH /api/forms/:id` rather
+   * than a new endpoint, because both already do exactly this and neither
+   * needs a new public surface.
+   *
+   * Two things it deliberately does not do:
+   *  - It does not touch the fields. `uploadPDFForCurrentForm` saves the fields
+   *    extracted from the uploaded file, which is right when the user picks a
+   *    new PDF and wrong here: these bytes already carry the embedded AcroForm,
+   *    so re-saving them would duplicate every field.
+   *  - It does not delete the previous file. Nothing else has been shown to be
+   *    unreferenced by it, and an orphaned upload is cheaper than a form whose
+   *    PDF has gone.
+   */
+  async function persistEditedDocument(): Promise<string | undefined> {
+    const document = documentStore.activeDocument
+    if (!document?.arrayBuffer) return
+
+    // Mirrors FormFieldsOverlay: the first edit on a loose document is what
+    // creates the form to hang it on.
+    await autoInitializeForm()
+
+    const formId = formFieldsStore.currentFormId
+    if (!formId) return
+
+    const file = new File([document.arrayBuffer], document.name || 'document.pdf', {
+      type: 'application/pdf'
+    })
+
+    const { url } = await uploadPDF(file)
+    await formsStore.updateForm(formId, { pdfUrl: url })
+
+    return url
+  }
+
   return {
     isInitializing,
     isUploading,
@@ -191,6 +235,7 @@ export function useFormManagement() {
     saveCurrentForm,
     autoInitializeForm,
     uploadPDF,
-    uploadPDFForCurrentForm
+    uploadPDFForCurrentForm,
+    persistEditedDocument
   }
 }

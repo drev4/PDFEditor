@@ -30,6 +30,14 @@ vi.mock('pdf-lib', () => ({
   }
 }))
 
+// Placing text now persists the edited PDF. Mocked here so these tests stay
+// about text placement and do not make a real upload call — which they were
+// doing, and swallowing the 401 it came back with.
+const persistEditedDocument = vi.fn().mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
+vi.mock('./useFormManagement', () => ({
+  useFormManagement: () => ({ persistEditedDocument })
+}))
+
 describe('useTextPlacement', () => {
   let canvasRef: any
   let documentStore: ReturnType<typeof useDocumentStore>
@@ -50,6 +58,11 @@ describe('useTextPlacement', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  beforeEach(() => {
+    persistEditedDocument.mockClear()
+    persistEditedDocument.mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
   })
 
   describe('confirmTextPlacement', () => {
@@ -221,6 +234,70 @@ describe('useTextPlacement', () => {
 
       // Validar que la función se invoca correctamente
       expect(drawingStore.snapToGrid).toBe(true)
+    })
+  })
+
+  // Regression. The text tool drew into the in-memory PDF buffer and stopped
+  // there: nothing uploaded it, so every text edit was gone on reload while
+  // the UI showed it as applied.
+  describe('persisting the edit', () => {
+    const placeText = async () => {
+      const { confirmTextPlacement } = useTextPlacement(canvasRef)
+      editorStore.setTextPreview({
+        text: 'Signed by Marta',
+        x: 100,
+        y: 100,
+        fontSize: 14,
+        color: '#000000',
+        isBold: false,
+        isItalic: false
+      })
+      await confirmTextPlacement()
+    }
+
+    it('uploads the edited document after placing text', async () => {
+      await placeText()
+
+      expect(persistEditedDocument).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not upload anything when the text is blank', async () => {
+      const { confirmTextPlacement } = useTextPlacement(canvasRef)
+      editorStore.setTextPreview({
+        text: '   ',
+        x: 100,
+        y: 100,
+        fontSize: 14,
+        color: '#000000',
+        isBold: false,
+        isItalic: false
+      })
+
+      await confirmTextPlacement()
+
+      expect(persistEditedDocument).not.toHaveBeenCalled()
+    })
+
+    it('tells the user when the text was applied but not saved', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      persistEditedDocument.mockRejectedValueOnce(new Error('Network down'))
+
+      await placeText()
+
+      // The distinction that matters: the edit is on the page, the save is not
+      // done, and the message says so rather than claiming the text failed.
+      expect(documentStore.error).toMatch(/could not be saved/i)
+    })
+
+    it('leaves the text on the page when the save fails', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      persistEditedDocument.mockRejectedValueOnce(new Error('Network down'))
+
+      await placeText()
+
+      // Cleared preview means the text was committed to the buffer; a failed
+      // upload must not roll that back or the user loses work they can see.
+      expect(editorStore.textPreview).toBeNull()
     })
   })
 })

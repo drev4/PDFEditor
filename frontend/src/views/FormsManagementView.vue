@@ -23,7 +23,7 @@
           <button
             type="button"
             class="flex items-center gap-1.5 h-control px-3.5 rounded-control bg-accent hover:bg-accent-pressed text-white text-row font-medium transition-colors"
-            @click="router.push('/dashboard')"
+            @click="router.push('/dashboard/editor')"
           >
             <i class="pi pi-plus text-[12px]" />
             <span>New form</span>
@@ -136,17 +136,17 @@
 
       <div class="flex-grow" />
 
-      <!-- Dropzone -->
+      <!-- Dropzone. Real, not a link to somewhere else that uploads: this is
+           the first thing on the screen for someone with no forms yet. -->
       <div class="px-gutter py-6">
         <div
-          class="flex items-center justify-center gap-2.5 h-[84px] rounded-card border border-dashed border-line-strong bg-surface-subtle"
+          class="flex flex-col sm:flex-row items-center justify-center gap-3 py-5 px-6 rounded-card border border-dashed border-line-strong bg-surface-subtle"
         >
           <i class="pi pi-cloud-upload text-faint text-[15px]" />
-          <span class="text-body text-muted">
-            Drop a PDF on the
-            <RouterLink to="/dashboard">editor</RouterLink>, or
-            <RouterLink to="/dashboard">browse</RouterLink>. Existing PDF forms keep their fields.
+          <span class="text-body text-muted text-center">
+            Drop a PDF here. Existing PDF forms keep their fields.
           </span>
+          <FileUploader @loaded="router.push('/dashboard/editor')" />
         </div>
       </div>
     </div>
@@ -166,7 +166,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import Menu from 'primevue/menu'
@@ -175,6 +175,7 @@ import ConfirmDialog from 'primevue/confirmdialog'
 import AppShell from '@/layouts/AppShell.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import ShareFormModal from '@/components/forms/ShareFormModal.vue'
+import FileUploader from '@/components/ui/FileUploader.vue'
 import { useFormsStore } from '@/stores/forms.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
@@ -212,7 +213,7 @@ const emptyTitle = computed(() =>
 const emptyBody = computed(() =>
   formsStore.forms.length
     ? 'No form has this status. Try another filter.'
-    : 'Upload a PDF in the editor to turn it into a form.'
+    : 'Drop a PDF below to turn it into a form.'
 )
 
 // The row's overflow menu. Held as a ref so the actions know which form was
@@ -264,7 +265,7 @@ async function handleEdit(form: Form) {
     await documentStore.loadPDF(file)
     await formManagement.loadForm(form.id)
 
-    router.push('/dashboard')
+    router.push('/dashboard/editor')
     toast.add({ severity: 'success', summary: 'Loaded', detail: 'Form loaded for editing', life: 3000 })
   } catch (err: any) {
     toast.add({ severity: 'error', summary: 'Error', detail: err.message, life: 3000 })

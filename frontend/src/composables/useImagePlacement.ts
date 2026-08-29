@@ -3,11 +3,13 @@ import type { Ref } from 'vue'
 import { useDocumentStore } from '@/stores/document.store'
 import { useEditorStore } from '@/stores/editor.store'
 import { useDragAndDrop } from './useDragAndDrop'
+import { useFormManagement } from './useFormManagement'
 import { canvasToPDF, calculateTransform } from '@/utils/pdfCoordinates'
 
 export function useImagePlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
   const documentStore = useDocumentStore()
   const editorStore = useEditorStore()
+  const { persistEditedDocument } = useFormManagement()
 
   // Image flip state
   const flipHorizontal = ref(false)
@@ -157,6 +159,15 @@ export function useImagePlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
 
       editorStore.clearImagePreview()
       documentStore.triggerPDFReload()
+
+      // Same defect as the text tool had, one file over: the image was drawn
+      // into the in-memory buffer and nothing ever sent it anywhere.
+      try {
+        await persistEditedDocument()
+      } catch (err) {
+        console.error('Image was added but could not be saved to the server:', err)
+        documentStore.error = 'The image was added but could not be saved. Check your connection and try again.'
+      }
     } catch (error) {
       console.error('Error adding image:', error)
     }

@@ -27,20 +27,12 @@
       <div class="flex-grow" />
 
       <RouterLink
-        to="/dashboard/forms"
+        to="/dashboard"
         class="hidden sm:flex items-center gap-1.5 h-control-xs px-3 rounded-control border border-line text-body font-medium text-ink hover:bg-surface-sunken transition-colors"
+        data-testid="back-to-forms"
       >
-        <i class="pi pi-file text-[13px]" />
+        <i class="pi pi-arrow-left text-[12px]" />
         <span>Forms</span>
-      </RouterLink>
-
-      <RouterLink
-        to="/dashboard/team"
-        class="hidden sm:flex items-center gap-1.5 h-control-xs px-3 rounded-control border border-line text-body font-medium text-ink hover:bg-surface-sunken transition-colors"
-        data-testid="team-link"
-      >
-        <i class="pi pi-users text-[13px]" />
-        <span>Members</span>
       </RouterLink>
 
       <FileUploader v-if="!documentStore.activeDocument" />
@@ -104,8 +96,28 @@
     </Drawer>
 
     <main class="flex-1 flex overflow-hidden">
-      <!-- Empty state. The canvas draws this as a dashed dropzone on the Forms
-           screen, in the same restrained language: no hero, no gradient. -->
+      <!-- The left rail is the editor's own furniture and is always here, the
+           way the Editor artboard draws it. It used to appear only once a
+           document was open, so the screen you land on had no structure at all
+           and no way to reach a document from inside the editor. -->
+      <aside
+        class="hidden lg:flex w-rail flex-shrink-0 bg-surface-subtle border-r border-line overflow-hidden flex-col"
+        data-testid="editor-rail"
+      >
+        <TabView class="flex-1 flex flex-col sidebar-tabs">
+          <TabPanel value="0" header="Documents" class="flex-1">
+            <DocumentsList />
+          </TabPanel>
+          <TabPanel value="1" header="Forms" class="flex-1">
+            <FormsList />
+          </TabPanel>
+          <TabPanel value="2" header="Pages" class="flex-1">
+            <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
+          </TabPanel>
+        </TabView>
+      </aside>
+
+      <!-- Empty state: same restrained language as the Forms dropzone. -->
       <div
         v-if="!documentStore.hasDocuments"
         class="flex-1 flex items-center justify-center p-6 bg-surface-sunken overflow-y-auto"
@@ -128,37 +140,19 @@
         </div>
       </div>
 
-      <template v-else>
-        <aside
-          class="hidden lg:flex w-rail flex-shrink-0 bg-surface-subtle border-r border-line overflow-hidden flex-col"
-        >
-          <TabView class="flex-1 flex flex-col sidebar-tabs">
-            <TabPanel value="0" header="Documents" class="flex-1">
-              <DocumentsList />
-            </TabPanel>
-            <TabPanel value="1" header="Forms" class="flex-1">
-              <FormsList />
-            </TabPanel>
-            <TabPanel value="2" header="Pages" class="flex-1">
-              <PageThumbnails :pdf-doc="pdfViewerRef?.pdfDoc || null" />
-            </TabPanel>
-          </TabView>
-        </aside>
-
-        <div class="flex-1 flex overflow-hidden flex-col md:flex-row min-w-0">
-          <div class="flex-1 relative bg-surface-sunken min-w-0">
-            <PDFViewer ref="pdfViewerRef" />
-          </div>
-
-          <aside v-if="documentStore.activeDocument" class="flex">
-            <PDFEditor />
-            <FieldPropertiesPanel
-              v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField"
-              class="hidden xl:flex"
-            />
-          </aside>
+      <div v-else class="flex-1 flex overflow-hidden flex-col md:flex-row min-w-0">
+        <div class="flex-1 relative bg-surface-sunken min-w-0">
+          <PDFViewer ref="pdfViewerRef" />
         </div>
-      </template>
+
+        <aside v-if="documentStore.activeDocument" class="flex">
+          <PDFEditor />
+          <FieldPropertiesPanel
+            v-if="formFieldsStore.fields.length > 0 || formFieldsStore.selectedField"
+            class="hidden xl:flex"
+          />
+        </aside>
+      </div>
     </main>
 
     <div

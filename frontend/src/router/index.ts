@@ -21,15 +21,41 @@ const router = createRouter({
       meta: { requiresGuest: true }
     },
     {
+      // The home screen is the list of forms — the canvas's `Main` artboard.
+      // It used to be the PDF editor, which meant signing in dropped you into a
+      // workspace with no document instead of into your work.
       path: '/dashboard',
       name: 'dashboard',
-      component: () => import('@/views/DashboardView.vue'),
+      component: () => import('@/views/FormsManagementView.vue'),
       meta: { requiresAuth: true }
     },
     {
+      // Kept as a second path to the same screen rather than a redirect: it is
+      // a URL people already have, and e2e/session.spec.ts asserts on it.
       path: '/dashboard/forms',
       name: 'forms-management',
       component: () => import('@/views/FormsManagementView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      // The editor is its own screen now, and its own route. In the canvas it
+      // is full-bleed with no app sidebar — the author is working on one
+      // document and the chrome gets out of the way.
+      path: '/dashboard/editor',
+      name: 'editor',
+      component: () => import('@/views/EditorView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/dashboard/responses',
+      name: 'responses-index',
+      component: () => import('@/views/ResponsesIndexView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/dashboard/settings',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
       meta: { requiresAuth: true }
     },
     {

@@ -152,13 +152,37 @@ Colours are named by role, not by hue: `ink` / `muted` / `faint` / `disabled` fo
 
 Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as same-origin assets, imported at the top of `style.css`. A `<link>` to `fonts.googleapis.com` is **blocked twice** by the SPA's own CSP — `style-src 'self' 'unsafe-inline'` rejects the stylesheet and `font-src 'self' data:` rejects the font files (`frontend/vite.config.ts`, and [07-security-and-privacy](./07-security-and-privacy.md)). It fails silently into the fallback font. Adopting the design required no CSP change at all, and should not be allowed to.
 
+### The shape of the app
+
+`/dashboard` is the **list of forms** — the canvas's `Main` artboard — not the editor. It used to be the editor, so signing in dropped you into an empty workspace instead of into your work.
+
+| Route | Screen | Chrome |
+|---|---|---|
+| `/dashboard`, `/dashboard/forms` | `FormsManagementView` | `AppShell` sidebar |
+| `/dashboard/responses` | `ResponsesIndexView` | `AppShell` sidebar |
+| `/dashboard/team` | `MembersView` | `AppShell` sidebar |
+| `/dashboard/settings` | `SettingsView` | `AppShell` sidebar |
+| `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
+| `/dashboard/editor` | `EditorView` | none — its own top bar and left rail |
+
+`AppShell.vue` is the 232px sidebar and is where the four nav destinations live. The **editor has no app sidebar**, as the `Editor` artboard draws it: one document, and the chrome gets out of the way. Its left rail (Documents / Forms / Pages) is part of the screen and is always present — it used to appear only once a document was open, so the screen you landed on had no structure at all.
+
 ### What the canvas has that the app does not
 
-Three things are drawn and deliberately not built, so that nobody reads the canvas as a description of the product:
+Nobody should read the canvas as a description of the product. What is drawn and not built:
 
 - **The organization switcher** in the sidebar. No endpoint returns an organization's name — `frontend/src/services/organization.ts` can list members and invitations and nothing else — so there is nothing to render.
 - **The plan card** in the sidebar and the `Plans` / `LimitReached` artboards. Plans do not exist; they are step 7 of the [build order](./10-saas-roadmap.md#build-order).
 - **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+- **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
+
+### Editor edits are persisted, and were not
+
+The editor's tools modify the PDF in the browser with pdf-lib and write the result to `documentStore.activeDocument.arrayBuffer`. Nothing sent it anywhere, so **every text and image edit was lost on reload** while the UI showed it as applied.
+
+`useFormManagement().persistEditedDocument()` closes that: it uploads the edited bytes through the existing `POST /api/upload` and repoints the form with `PATCH /api/forms/:id`. No new endpoint, because those two already do exactly this. It deliberately does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced. Both consequences, and the drawing tool which was not covered, are in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+A failed save sets `documentStore.error` rather than reporting that the edit failed. The edit did not fail; it is on the page. Saying which is the difference between a user retrying and a user closing the tab believing their work is stored.
 
 The **landing page** is designed and unbuilt, and is a [parallel track](./10-saas-roadmap.md#parallel-track-the-landing-page) rather than a step in the chain.
 

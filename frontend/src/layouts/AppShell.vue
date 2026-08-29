@@ -74,9 +74,9 @@
         </button>
       </div>
 
-      <div class="flex flex-col flex-grow min-w-0 overflow-hidden">
+      <main class="flex flex-col flex-grow min-w-0 overflow-hidden">
         <slot />
-      </div>
+      </main>
     </div>
 
     <Toast position="top-right" />
@@ -97,18 +97,29 @@ const router = useRouter()
 const toast = useToast()
 
 /**
- * Only routes that exist. The canvas also draws `Responses` and `Settings` as
- * top-level items; responses are reached through a form and there is no
- * settings screen, so putting them here would be a link to nowhere.
+ * The four destinations the canvas draws, in its order.
+ *
+ * `Responses` and `Settings` lead to screens that say what is not built rather
+ * than to nothing — the navigation is the shape of the product, and leaving
+ * holes in it makes the app harder to read than admitting the gap. Neither
+ * renders invented data; see NotBuiltYet.vue.
+ *
+ * The editor is deliberately absent: it is where a form opens, not a place you
+ * navigate to on its own.
  */
 const navItems = [
-  { to: '/dashboard/forms', label: 'Forms', icon: 'pi pi-file', match: '/dashboard/forms' },
-  { to: '/dashboard', label: 'Editor', icon: 'pi pi-pencil', match: '/dashboard' },
+  { to: '/dashboard', label: 'Forms', icon: 'pi pi-file', match: '/dashboard' },
+  { to: '/dashboard/responses', label: 'Responses', icon: 'pi pi-inbox', match: '/dashboard/responses' },
   { to: '/dashboard/team', label: 'Members', icon: 'pi pi-users', match: '/dashboard/team' },
+  { to: '/dashboard/settings', label: 'Settings', icon: 'pi pi-cog', match: '/dashboard/settings' },
 ]
 
+// `Forms` owns both /dashboard and /dashboard/forms, and must not also light up
+// for every other screen underneath /dashboard.
 const isActive = (item: { match: string }) =>
-  item.match === '/dashboard' ? route.path === '/dashboard' : route.path.startsWith(item.match)
+  item.match === '/dashboard'
+    ? route.path === '/dashboard' || route.path.startsWith('/dashboard/forms')
+    : route.path.startsWith(item.match)
 
 const email = computed(() => authStore.user?.email ?? '')
 

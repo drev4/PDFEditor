@@ -11,10 +11,11 @@ test.describe('Form Management', () => {
   });
 
   test('should display empty state when no forms exist', async ({ page }) => {
-    // The empty state is a dropzone, not a greeting: the design canvas has no
-    // "welcome back" hero, and the assertion that looked for one was checking
-    // decoration rather than the thing a new user actually needs to find.
-    await expect(page.locator('text=Start a form').first()).toBeVisible();
+    // /dashboard is the list of forms now, so the empty state is that list's:
+    // a heading saying there is nothing yet, and the dropzone that fixes it.
+    // The assertion this replaced looked for a "welcome back" hero, which the
+    // design canvas does not have.
+    await expect(page.locator('text=No forms yet').first()).toBeVisible();
     await expect(page.locator('text=/upload|drop a pdf/i').first()).toBeVisible();
   });
 
@@ -57,6 +58,64 @@ test.describe('Form Save and Load', () => {
     await expect(page.locator('.dashboard-view, main').first()).toBeVisible();
 
     await expect(page.locator('header')).toBeVisible();
+  });
+});
+
+test.describe('The shell', () => {
+  let user: TestUser;
+
+  test.beforeEach(async ({ page }) => {
+    user = await registerNewUser(page, 'shell');
+  });
+
+  // /dashboard used to be the PDF editor, so signing in dropped you into an
+  // empty workspace rather than into your work. It is the list of forms now,
+  // and the sidebar is how you reach everything else.
+  test('lands on the list of forms, with the sidebar', async ({ page }) => {
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible();
+    await expect(page.locator('h1', { hasText: 'Forms' })).toBeVisible();
+  });
+
+  test('reaches every destination the sidebar offers', async ({ page }) => {
+    const sidebar = page.locator('[data-testid="app-sidebar"]');
+
+    await sidebar.getByRole('link', { name: 'Responses' }).click();
+    await expect(page).toHaveURL(/\/dashboard\/responses/);
+
+    await sidebar.getByRole('link', { name: 'Members' }).click();
+    await expect(page).toHaveURL(/\/dashboard\/team/);
+    await expect(page.locator('[data-testid="members-table"]')).toBeVisible();
+
+    await sidebar.getByRole('link', { name: 'Settings' }).click();
+    await expect(page).toHaveURL(/\/dashboard\/settings/);
+
+    await sidebar.getByRole('link', { name: 'Forms' }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+  });
+
+  // Responses and Settings are in the navigation before they are built. They
+  // must say so rather than render an empty table, which reads as "you have no
+  // data" instead of "this does not exist yet".
+  test('says plainly which screens are not built', async ({ page }) => {
+    await page.goto('/dashboard/responses');
+    await expect(page.locator('text=Not built yet')).toBeVisible();
+
+    await page.goto('/dashboard/settings');
+    await expect(page.locator('text=Nothing else here yet')).toBeVisible();
+    // The one real thing on it.
+    await expect(page.locator(`text=${user.email}`).first()).toBeVisible();
+  });
+
+  // The editor is its own route now, and its rail is part of the screen rather
+  // than something that appears once a document is open.
+  test('the editor is its own screen and always has its rail', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+
+    await expect(page.locator('[data-testid="editor-rail"]')).toBeVisible();
+    // Full-bleed: no app sidebar competing with the document.
+    await expect(page.locator('[data-testid="app-sidebar"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="back-to-forms"]')).toBeVisible();
   });
 });
 

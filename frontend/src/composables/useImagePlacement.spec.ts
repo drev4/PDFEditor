@@ -34,6 +34,13 @@ const createMockImageFile = (name: string, type: string) => {
   return file
 }
 
+// Placing an image now persists the edited PDF. Mocked so these tests stay
+// about image placement rather than making a real upload call.
+const persistEditedDocument = vi.fn().mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
+vi.mock('./useFormManagement', () => ({
+  useFormManagement: () => ({ persistEditedDocument })
+}))
+
 describe('useImagePlacement', () => {
   let canvasRef: any
   let documentStore: ReturnType<typeof useDocumentStore>
@@ -54,6 +61,11 @@ describe('useImagePlacement', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  beforeEach(() => {
+    persistEditedDocument.mockClear()
+    persistEditedDocument.mockResolvedValue('http://localhost:3000/uploads/pdfs/edited.pdf')
   })
 
   describe('toggleFlipHorizontal', () => {
@@ -213,6 +225,39 @@ describe('useImagePlacement', () => {
       // El valor debería ajustarse al grid más cercano
       // Esta prueba valida que la función se invoca correctamente
       expect(drawingStore.snapToGrid).toBe(true)
+    })
+  })
+
+  // Same regression the text tool had: the image was drawn into the in-memory
+  // buffer and nothing uploaded it, so it was gone on reload.
+  describe('persisting the edit', () => {
+    const placeImage = async () => {
+      editorStore.setImagePreview({
+        file: createMockImageFile('signature.png', 'image/png'),
+        dataUrl: 'data:image/png;base64,mock',
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 150,
+        maintainAspectRatio: true
+      })
+      const { confirmImagePlacement } = useImagePlacement(canvasRef)
+      await confirmImagePlacement()
+    }
+
+    it('uploads the edited document after placing an image', async () => {
+      await placeImage()
+
+      expect(persistEditedDocument).toHaveBeenCalledTimes(1)
+    })
+
+    it('tells the user when the image was applied but not saved', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      persistEditedDocument.mockRejectedValueOnce(new Error('Network down'))
+
+      await placeImage()
+
+      expect(documentStore.error).toMatch(/could not be saved/i)
     })
   })
 })

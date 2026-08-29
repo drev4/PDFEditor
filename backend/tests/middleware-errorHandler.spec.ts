@@ -58,4 +58,54 @@ describe('Error Handler Middleware', () => {
     expect(statusMock).toHaveBeenCalledWith(500)
     expect(jsonMock).toHaveBeenCalledWith({ error: 'Internal server error' })
   })
+
+  // Regression: opening the login page with no session calls POST
+  // /api/auth/refresh, which correctly answers 401 — and used to print a stack
+  // trace for it, so a healthy server looked like a broken one.
+  describe('what it writes to the log', () => {
+    it('does not log an expected 4xx', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      spy.mockClear()
+
+      errorHandler(new AppError(401, 'Not authenticated'), mockReq as any, mockRes as any, mockNext)
+
+      expect(spy).not.toHaveBeenCalled()
+      // Still answered, so nothing is swallowed.
+      expect(statusMock).toHaveBeenCalledWith(401)
+      expect(jsonMock).toHaveBeenCalledWith({ error: 'Not authenticated' })
+    })
+
+    it('does not log any other client error either', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      spy.mockClear()
+
+      for (const status of [400, 403, 404, 409, 429]) {
+        errorHandler(new AppError(status, 'nope'), mockReq as any, mockRes as any, mockNext)
+      }
+
+      expect(spy).not.toHaveBeenCalled()
+    })
+
+    it('logs an AppError that is a server fault', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      spy.mockClear()
+      const error = new AppError(503, 'Upstream is down')
+
+      errorHandler(error, mockReq as any, mockRes as any, mockNext)
+
+      expect(spy).toHaveBeenCalledWith('Error:', error)
+      expect(statusMock).toHaveBeenCalledWith(503)
+    })
+
+    it('logs an unexpected error, which is the whole point of the log', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      spy.mockClear()
+      const error = new Error('Unexpected error')
+
+      errorHandler(error, mockReq as any, mockRes as any, mockNext)
+
+      expect(spy).toHaveBeenCalledWith('Error:', error)
+      expect(statusMock).toHaveBeenCalledWith(500)
+    })
+  })
 })
