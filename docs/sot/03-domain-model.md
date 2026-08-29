@@ -5,14 +5,20 @@ Source of record: `backend/prisma/schema.prisma`. Everything below was read out 
 ## Entities
 
 ```
-User 1───* Form 1───* Field 1───* Answer *───1 Response *───1 Form
+Organization 1───* Membership *───1 User
+Organization 1───* Form 1───* Field 1───* Answer *───1 Response *───1 Form
 User 1───* RefreshToken
+User 0───* Form            (createdByUserId — provenance, never ownership)
 ```
+
+**`Organization` owns forms; `User` does not.** A user reaches a form only through a `Membership`. A B2C account is an organization with exactly one member, created at signup — there is no separate "personal account" concept and no second code path ([`features/0009`](../../features/0009-organizations-own-resources.md)).
 
 | Entity | Purpose | Notes that matter |
 |---|---|---|
-| `User` | An account | `id, email (unique), passwordHash, name?`. No roles, no organization. Flat and single-tenant. |
-| `Form` | A PDF plus its field layout | Belongs to a `User`. `shareId` (nanoid 12) is the public identifier. `status: draft \| published \| closed`. `settings: Json?` is writable through `PUT /forms/:id` but is never read by any code — a free extension point for per-form configuration (branding, limits, webhooks) that needs no migration. `viewCount` incremented on every public fetch. |
+| `User` | An account | `id, email (unique), passwordHash, name?`. Owns nothing directly — reaches forms through `Membership`. |
+| `Organization` | The tenant. Owns forms | `id, name, slug (unique)`. Created for every user at signup. |
+| `Membership` | Which users may act on which organization's resources | `(organizationId, userId)` unique. `role: owner \| admin \| member` — **stored but not enforced**: nothing reads it to make a decision yet, so every member is effectively an admin. |
+| `Form` | A PDF plus its field layout | Belongs to an `Organization` (`organizationId`, required). `createdByUserId` records who made it and is **nullable and never an authorization input** — a deleted user must not take the organization's forms with them. `shareId` (nanoid 12) is the public identifier. `status: draft \| published \| closed`. `settings: Json?` is writable through `PUT /forms/:id` but is never read by any code — a free extension point for per-form configuration (branding, limits, webhooks) that needs no migration. `viewCount` incremented on every public fetch. |
 | `Field` | One input placed on the PDF | `type: text \| textarea \| checkbox \| radio \| dropdown`. `position: Json` in **canvas** coordinates. `options: Json?` for radio/dropdown. `validation: Json?` = `{minLength?, maxLength?, pattern?}`. `order: Int` drives render and tab order. `deletedAt: DateTime?` — non-null means **archived**: removed from the editor and the public form, still present in the responses table and the CSV export. See [the `deletedAt` lifecycle](#the-deletedat-lifecycle). |
 | `Response` | One public submission | Stores `ipAddress` and `userAgent`. No respondent identity beyond that. `pdfUrl?` exists on the model but nothing writes it today. |
 | `Answer` | One value in one submission | `value: String` — **everything is a string**, including booleans (`String(value)`). Type meaning is reconstructed at read time. |
@@ -37,7 +43,9 @@ The two unenforced invariants at the bottom are the ones to watch. Both are the 
 
 ## Indexes
 
-Present and appropriate: `Form.userId`, `Field.formId`, `Response.formId`, `Answer.responseId`, and the composite `Response(formId, submittedAt)` that backs the paginated dashboard listing.
+Present and appropriate: `Form.organizationId`, `Field.formId`, `Response.formId`, `Answer.responseId`, and the composite `Response(formId, submittedAt)` that backs the paginated dashboard listing.
+
+`Membership.userId` and `Membership.organizationId` are both indexed: every authenticated request resolves the caller's membership, so this is the hottest lookup in the application. `Form.userId`'s index was dropped with the column's rename — nothing filters on the creator.
 
 `Answer.fieldId` is also indexed, added with the safe bulk save: the handler counts answers per removed field on every editor save.
 
@@ -49,7 +57,10 @@ Nothing is currently missing that a known workload needs.
 
 | Relation | On delete of the parent | Consequence |
 |---|---|---|
-| `Form.user` → `User` | `Cascade` | Deleting a user deletes all their forms, fields and responses. Correct, but there is no account-deletion endpoint, so this only fires from the database. |
+| `Form.organization` → `Organization` | `Cascade` | Deleting an organization deletes all its forms, fields and responses. **The largest blast radius in this schema**, and deliberate: an organization is the tenant, so deleting it deletes the tenant's data. No endpoint does this; it fires only from the database. |
+| **`Form.createdBy` → `User`** | **`SetNull`** | Deleting a user **no longer destroys forms**. This was `Cascade` until [`features/0009`](../../features/0009-organizations-own-resources.md), when removing a user destroyed their forms and every response ever collected through them. The organization owns those forms and colleagues may depend on them, so the row survives and only the record of who created it is lost. |
+| `Membership.user` → `User` | `Cascade` | Deleting a user removes their memberships. A membership is a link and holds no customer data. Note the consequence: deleting the last member of an organization leaves the organization and its forms with nobody able to reach them — tracked in [`docs/BACKLOG.md`](../BACKLOG.md). |
+| `Membership.organization` → `Organization` | `Cascade` | Deleting an organization removes its memberships. |
 | `Field.form` → `Form` | `Cascade` | Deleting a form deletes its fields. Correct. |
 | `Response.form` → `Form` | `Cascade` | Deleting a form deletes its responses. Correct and intended — but irreversible, with no soft delete and no export prompt. |
 | `Answer.response` → `Response` | `Cascade` | Correct. |

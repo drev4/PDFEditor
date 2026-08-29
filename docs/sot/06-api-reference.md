@@ -185,6 +185,8 @@ Unauthenticated on purpose: an anonymous respondent has to load the PDF of a pub
 - `404 {error: "File not found"}` — signature valid, file absent
 - `404 {error: "Not found"}` — anything else under `/uploads`, including every URL of the old unsigned shape
 
+**No form response carries an owner id.** `toApiForm` strips `organizationId` and `createdByUserId` from every form the API returns, authenticated or public. Ownership is decided entirely on the server ([04-backend-patterns §9](./04-backend-patterns.md)); the client is deliberately unaware that organizations exist. A form the caller cannot reach answers `404`, never `403`.
+
 **Every response that carries a form carries a freshly signed `pdfUrl`** — `GET /api/forms`, `GET /api/forms/:id`, `GET /api/forms/public/:shareId`, `POST /api/forms`, `PUT /api/forms/:id`, `PATCH /api/forms/:id/status`. All of them go through one `toApiForm` serializer in `routes/forms.ts`. Conversely `POST /api/forms` and `PUT /api/forms/:id` normalise an incoming `pdfUrl` back to canonical form before writing, so a client echoing back a value it read cannot persist a signature.
 
 TTL is configuration — [08-operations](./08-operations.md#configuration).

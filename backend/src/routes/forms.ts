@@ -4,7 +4,7 @@ import { nanoid } from 'nanoid'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
-import { verifyFormOwnership } from '../middleware/formOwnership.js'
+import { verifyFormOwnership, callerCanReachForm, requireOrganizationId } from '../middleware/formOwnership.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
 import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
@@ -35,16 +35,26 @@ const updateFormSchema = z.object({
  * one TTL later. The signature is therefore minted per response, never
  * persisted. Miss one `res.json({ form })` and that screen's PDF 403s while
  * every other screen works.
+ *
+ * `organizationId` and `createdByUserId` are stripped here rather than at each
+ * call site. Nothing in the client uses either, tenancy is decided entirely on
+ * the server, and internal ids that no consumer needs are surface a future
+ * change has to keep compatible for no benefit. When an organization switcher
+ * needs one, add it back deliberately.
  */
-function toApiForm<T extends { pdfUrl: string | null }>(form: T): T {
-  return { ...form, pdfUrl: signPdfUrl(form.pdfUrl) }
+function toApiForm<T extends { pdfUrl: string | null }>(form: T): Omit<T, 'organizationId' | 'createdByUserId'> {
+  const { organizationId, createdByUserId, ...rest } = form as T & {
+    organizationId?: string
+    createdByUserId?: string | null
+  }
+  return { ...rest, pdfUrl: signPdfUrl(form.pdfUrl) } as Omit<T, 'organizationId' | 'createdByUserId'>
 }
 
 // GET /api/forms - List user's forms
 formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const forms = await prisma.form.findMany({
-      where: { userId: req.userId },
+      where: callerCanReachForm(req),
       orderBy: { createdAt: 'desc' },
       include: {
         _count: {
@@ -79,7 +89,9 @@ formsRouter.post('/', authenticate, async (req: AuthRequest, res, next) => {
 
     const form = await prisma.form.create({
       data: {
-        userId: req.userId!,
+        organizationId: await requireOrganizationId(req),
+        // Provenance only. Authorization reads the organization, never this.
+        createdByUserId: req.userId!,
         title,
         description,
         // Only ever the canonical unsigned URL reaches the column. A client that
@@ -139,7 +151,7 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
     const id = req.params.id as string
 
     const form = await prisma.form.findFirst({
-      where: { id, userId: req.userId },
+      where: { id, ...callerCanReachForm(req) },
       include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
     })
 
@@ -253,9 +265,9 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
       data: { viewCount: { increment: 1 } }
     })
 
-    const { userId, ...publicForm } = form
-
-    res.json({ form: toApiForm(publicForm) })
+    // `toApiForm` strips the owning organization and the creator from every
+    // response, so nothing extra is needed here for the anonymous case.
+    res.json({ form: toApiForm(form) })
   } catch (error) {
     next(error)
   }
@@ -305,7 +317,7 @@ formsRouter.get('/:id/responses/export', authenticate, async (req: AuthRequest, 
     // No `deletedAt` filter, on purpose: an archived field keeps its column and
     // its original label in the export, so historical rows stay readable.
     const form = await prisma.form.findFirst({
-      where: { id, userId: req.userId },
+      where: { id, ...callerCanReachForm(req) },
       include: { fields: { orderBy: { order: 'asc' } } }
     })
 

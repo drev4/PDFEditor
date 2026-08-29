@@ -17,7 +17,8 @@ Everything below is the state of the code on **2026-08-28**, read out of the sou
 | Rotation | Every refresh issues a new token and revokes the one presented. Presenting an already-revoked token is treated as replay and **revokes the whole family**, ending that session everywhere |
 | Logout | Server-side. `POST /api/auth/logout` revokes the family, so a captured refresh token stops working. Local state is cleared even if the request fails |
 | CSRF | `POST /api/auth/refresh` and `POST /api/auth/logout` are the only cookie-authenticated routes and carry `middleware/csrf.ts`. Everything else authenticates with a header, which cannot be set cross-site, so it is not a CSRF target |
-| Authorization | Resource ownership, checked per handler by `verifyFormOwnership` / `verifyFieldOwnership`. No roles, no organizations |
+| Authorization | **Tenancy.** A caller may act on a form when a `Membership` links them to the organization that owns it — `verifyFormOwnership` / `verifyFieldOwnership`, called per handler. `Form.createdByUserId` is provenance and is never an input. Membership is resolved from the database per request, **not** carried in the JWT: access tokens live 15 minutes and cannot be revoked, so a membership claim inside one would keep working for 15 minutes after someone was removed from an organization |
+| Roles | `owner \| admin \| member` are **stored but not enforced**. Nothing reads `Membership.role` to make a decision, so every member of an organization can do everything. Tracked in [`docs/BACKLOG.md`](../BACKLOG.md) |
 | Lockout / throttling | Per-IP rate limits on `POST /api/auth/login` (failed attempts only), `POST /api/auth/register` and `POST /api/responses` — `middleware/rateLimit.ts`. **No account-level lockout**: a per-account limiter without an unlock path would let anyone lock a named user out by spamming their address, so it is deferred to S10 |
 | MFA / SSO | **None** |
 
@@ -33,8 +34,13 @@ Anonymous internet
   ├── GET  /api/forms/public/:shareId  reads a form, no auth, mutates viewCount, no throttle
   └── GET  /uploads/pdfs/<sig>/<file>  reads one uploaded PDF, no auth, signature-gated, expiring, no throttle
 
-Authenticated user (JWT)
-  └── /api/forms, /api/upload, /api/auth/me   scoped to resources they own
+Authenticated user (access token)
+  ├── /api/auth/me, /api/upload               the caller themselves
+  └── /api/forms/**                           scoped to the ORGANIZATIONS they are a member of
+                                              (not to what they created)
+
+Tenant boundary
+  └── Organization ──< Membership >── User    the only thing an authorization check reads
 
 Server-side, no boundary
   └── PDF processing, filesystem writes
@@ -43,6 +49,8 @@ Server-side, no boundary
 These are the whole external attack surface. The three write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and the PDF route now requires a signature this service issued, which bounds who can call it at all.
 
 **Author-supplied regex is compiled by RE2, and degrades to no constraint.** A `pattern` that the engine cannot compile — one stored before validation existed, or an engine that failed to load — is logged and treated as *no pattern constraint*, never thrown. Throwing would restore the 500 this fixed; rejecting would punish a respondent for the author's mistake. `pattern` is a formatting convenience that nothing downstream trusts, so unconstrained is the right degradation — but do not read the field as a guaranteed-enforced rule.
+
+**The tenant boundary is one filter, and it is the whole of multi-tenancy.** Every form query is scoped by `organization: { memberships: { some: { userId } } }` ([04-backend-patterns §9](./04-backend-patterns.md)). A cross-tenant read is a `404`, never a `403`, so no endpoint confirms that a form id exists. `backend/tests/integration/tenancy.spec.ts` asserts that on every affected route, and all eight of its tests fail if the filter is removed — which was verified rather than assumed.
 
 **Per-IP is only as good as `req.ip`.** That depends on `trust proxy`, configured from `TRUST_PROXY_HOPS` in `app.ts` and defaulting to trusting nothing. Set too high — or to `true` — and the client can forge its own identity through `X-Forwarded-For` and bypass every limiter. See [08-operations](./08-operations.md#configuration).
 

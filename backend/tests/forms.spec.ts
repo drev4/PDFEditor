@@ -30,7 +30,8 @@ describe('Forms Routes', () => {
 
   const mockForm = {
     id: 'form-1',
-    userId: 'user-1',
+    organizationId: 'org-1',
+    createdByUserId: 'user-1',
     title: 'Test Form',
     description: 'Test description',
     shareId: 'share-123',
@@ -66,6 +67,9 @@ describe('Forms Routes', () => {
 
   describe('POST /api/forms', () => {
     it('should create a new form', async () => {
+      // Creating a form now resolves the caller's organization first — see
+      // requireOrganizationId in middleware/formOwnership.ts.
+      prismaMock.membership.findFirst.mockResolvedValue({ organizationId: 'org-1' } as any)
       prismaMock.form.create.mockResolvedValue(mockForm as any)
 
       const res = await request(app)
@@ -184,7 +188,10 @@ describe('Forms Routes', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.form).toHaveProperty('title')
-      expect(res.body.form).not.toHaveProperty('userId')
+      // Neither the creator nor the owning organization reaches an anonymous
+      // respondent.
+      expect(res.body.form).not.toHaveProperty('createdByUserId')
+      expect(res.body.form).not.toHaveProperty('organizationId')
     })
 
     it('should return 404 if form not published', async () => {

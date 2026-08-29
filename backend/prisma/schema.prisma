@@ -14,10 +14,58 @@ model User {
   name          String?
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
-  forms         Form[]
+  createdForms  Form[]
+  memberships   Membership[]
   refreshTokens RefreshToken[]
 
   @@map("users")
+}
+
+/// The tenant. Every `Form` belongs to one, and a user reaches a form only
+/// through a `Membership` — never by having created it.
+///
+/// A B2C account is an organization with exactly one member, created at signup.
+/// There is no separate "personal account" concept and no second code path, so
+/// nothing downstream has to branch on which kind of account it is dealing with.
+model Organization {
+  id          String       @id @default(uuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  forms       Form[]
+  memberships Membership[]
+
+  @@map("organizations")
+}
+
+/// `owner` bills and can delete the organization; `admin` manages forms and
+/// members; `member` manages the forms they created.
+///
+/// STORED BUT NOT ENFORCED. Nothing reads this field to make a decision yet —
+/// every member is effectively an admin. See docs/sot/07-security-and-privacy.md.
+enum MembershipRole {
+  owner
+  admin
+  member
+}
+
+/// Which users may act on which organization's resources. This is the only
+/// thing an authorization check reads.
+model Membership {
+  id             String         @id @default(uuid())
+  organizationId String         @map("organization_id")
+  userId         String         @map("user_id")
+  role           MembershipRole @default(member)
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("memberships")
 }
 
 /// One row per issued refresh token. This is what makes a session revocable:
@@ -52,7 +100,13 @@ model RefreshToken {
 
 model Form {
   id          String     @id @default(uuid())
-  userId      String     @map("user_id")
+  /// The owner. Every authorization decision reads this, through a Membership.
+  organizationId String  @map("organization_id")
+  /// Provenance, not ownership: who first created this form. Nullable because a
+  /// deleted user must not take the organization's forms with them — losing the
+  /// record of who made it is the right trade, and blocking user deletion
+  /// forever is not. Never read by an authorization check.
+  createdByUserId String? @map("created_by_user_id")
   title       String
   description String?
   shareId     String     @unique @map("share_id")
@@ -63,10 +117,11 @@ model Form {
   updatedAt   DateTime   @updatedAt @map("updated_at")
   viewCount   Int        @default(0) @map("view_count")
   fields      Field[]
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses   Response[]
 
-  @@index([userId])
+  @@index([organizationId])
   @@map("forms")
 }
 

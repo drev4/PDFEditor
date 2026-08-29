@@ -146,7 +146,8 @@ describe('Serving an uploaded PDF', () => {
 describe('The API mints a signed URL on every read', () => {
   const storedForm = {
     id: 'form-1',
-    userId: 'user-1',
+    organizationId: 'org-1',
+    createdByUserId: 'user-1',
     title: 'Test',
     description: null,
     shareId: 'share-1',
@@ -198,7 +199,8 @@ describe('The API mints a signed URL on every read', () => {
     expect(res.status).toBe(200)
     expectSigned(res.body.form.pdfUrl)
     // The existing guarantee, not to be regressed by the new serializer.
-    expect(res.body.form.userId).toBeUndefined()
+    expect(res.body.form.createdByUserId).toBeUndefined()
+    expect(res.body.form.organizationId).toBeUndefined()
   })
 
   it('keeps the stored URL canonical when a client sends back a signed one', async () => {
