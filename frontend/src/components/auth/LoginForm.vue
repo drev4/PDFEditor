@@ -1,13 +1,13 @@
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <div>
-      <h2 class="text-2xl font-bold text-gray-800 mb-2">Welcome Back</h2>
-      <p class="text-gray-600 text-sm">Sign in to continue to your workspace</p>
+      <h2 class="text-title font-bold text-ink mb-2">Welcome Back</h2>
+      <p class="text-muted text-body">Sign in to continue to your workspace</p>
     </div>
 
     <!-- Email Field -->
     <div class="space-y-2">
-      <label for="email" class="block text-sm font-medium text-gray-700">
+      <label for="email" class="block text-body font-medium text-ink">
         Email Address
       </label>
       <InputText
@@ -21,12 +21,12 @@
         autocomplete="email"
         data-testid="login-email-input"
       />
-      <small v-if="errors.email" class="text-red-500">{{ errors.email }}</small>
+      <small v-if="errors.email" class="text-danger">{{ errors.email }}</small>
     </div>
 
     <!-- Password Field -->
     <div class="space-y-2">
-      <label for="password" class="block text-sm font-medium text-gray-700">
+      <label for="password" class="block text-body font-medium text-ink">
         Password
       </label>
       <Password
@@ -43,7 +43,7 @@
         inputId="login-password-input"
         data-testid="login-password-input"
       />
-      <small v-if="errors.password" class="text-red-500">{{ errors.password }}</small>
+      <small v-if="errors.password" class="text-danger">{{ errors.password }}</small>
     </div>
 
     <!-- Error General -->

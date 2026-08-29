@@ -1,10 +1,10 @@
 <template>
-  <div class="pdf-viewer-container h-full flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+  <div class="pdf-viewer-container h-full flex flex-col bg-surface-sunken">
     <!-- No PDF Loaded State -->
     <div v-if="!documentStore.activeDocument" class="flex items-center justify-center h-full">
       <div class="text-center">
-        <i class="pi pi-file-pdf text-6xl text-gray-400 mb-4"></i>
-        <p class="text-gray-600 text-lg">No PDF loaded</p>
+        <i class="pi pi-file-pdf text-display text-faint mb-4"></i>
+        <p class="text-muted text-section">No PDF loaded</p>
       </div>
     </div>
 
@@ -31,7 +31,12 @@
             @select-tool="handleToolSelection"
           />
 
-          <div class="pdf-canvas-wrapper" :style="{ transform: `rotate(${rotation}deg)` }">
+          <!-- No CSS rotation here. pdf.js already renders the page rotated
+               (`getViewport({ scale, rotation })` in usePDFRendering.ts), so
+               turning the wrapper as well rotated everything twice: at 90 the
+               page showed at 180, and the field overlay - positioned in
+               unrotated coordinates - sat nowhere near the page. -->
+          <div class="pdf-canvas-wrapper">
             <!-- Grid Overlay -->
             <canvas
               ref="gridCanvasRef"
@@ -57,11 +62,18 @@
             ></div>
 
             <!-- Form Fields Overlay -->
-            <slot name="fields-overlay" :width="canvasRef?.width" :height="canvasRef?.height" :scale="scale">
+            <slot
+              name="fields-overlay"
+              :width="canvasSize.width"
+              :height="canvasSize.height"
+              :display-scale="canvasSize.displayScale"
+              :scale="scale"
+            >
               <FormFieldsOverlay
                 v-if="canvasRef && !readOnly"
-                :canvas-width="canvasRef?.width || 0"
-                :canvas-height="canvasRef?.height || 0"
+                :canvas-width="canvasSize.width"
+                :canvas-height="canvasSize.height"
+                :display-scale="canvasSize.displayScale"
               />
             </slot>
 
@@ -110,7 +122,7 @@
                 @input="handleTextInput"
                 @mousedown.stop
                 @click.stop
-                placeholder="Escribe aquí..."
+                placeholder="Type here..."
                 :style="{
                   fontSize: `${editorStore.textPreview.fontSize}px`,
                   color: editorStore.textPreview.color,
@@ -163,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onBeforeUnmount, nextTick, shallowRef } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { useDocumentStore } from '@/stores/document.store'
 import { useDrawingStore } from '@/stores/drawing.store'
@@ -363,10 +375,57 @@ const performSpotlightSearch = async () => {
   }
 }
 
+/**
+ * The rendered canvas size, held reactively.
+ *
+ * `canvasRef.value.width` is a plain DOM property: assigning it does not tell
+ * Vue anything, so bindings that read it never update on their own. It happened
+ * to work while the wrapper had a `:style` binding on `rotation` forcing a
+ * re-render on every turn - and the field overlay silently stopped following
+ * the page the moment that binding was removed. Anything downstream that needs
+ * the canvas size reads this instead.
+ */
+const canvasSize = ref({ width: 0, height: 0, displayScale: 1 })
+
+/**
+ * `canvas { max-width: 100%; height: auto }` means the canvas is often *drawn*
+ * smaller than the pixels it holds — and always is once the page is turned a
+ * quarter, because the rotated canvas is wider than the column. Field positions
+ * are computed in canvas pixels, so without this ratio they drift further from
+ * the page the narrower the window gets.
+ */
+const measureCanvas = () => {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  canvasSize.value = {
+    width: canvas.width,
+    height: canvas.height,
+    displayScale: canvas.width ? (canvas.clientWidth || canvas.width) / canvas.width : 1
+  }
+}
+
+let canvasObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  // The CSS box changes without any render happening — resizing the window is
+  // enough — so this has to be observed rather than sampled after a draw.
+  if (typeof ResizeObserver !== 'undefined') {
+    canvasObserver = new ResizeObserver(measureCanvas)
+    if (canvasRef.value) canvasObserver.observe(canvasRef.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  canvasObserver?.disconnect()
+  canvasObserver = null
+})
+
 // Render page with all overlays
 const renderPageWithOverlays = async () => {
   const result = await renderPage()
   if (result) {
+    measureCanvas()
+    if (canvasObserver && canvasRef.value) canvasObserver.observe(canvasRef.value)
     // Draw grid after rendering page
     drawGrid()
     // Render text layer for text selection
@@ -482,7 +541,7 @@ onUnmounted(async () => {
 <style scoped>
 .pdf-viewer-container {
   position: relative;
-  background: linear-gradient(to bottom, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(to bottom, #fbfbfc 0%, #f4f5f7 100%);
 }
 
 .pdf-canvas-wrapper {
@@ -547,14 +606,14 @@ canvas {
 
 .image-preview-container {
   position: absolute;
-  border: 2px dashed #3b82f6;
+  border: 2px dashed #3554d1;
   z-index: 10;
   user-select: none;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .image-preview-container:hover {
-  border-color: #2563eb;
+  border-color: #3554d1;
 }
 
 .image-preview {
@@ -574,7 +633,7 @@ canvas {
   position: absolute;
   width: 12px;
   height: 12px;
-  background: #3b82f6;
+  background: #3554d1;
   border: 2px solid white;
   border-radius: 50%;
   z-index: 11;
@@ -582,7 +641,7 @@ canvas {
 }
 
 .resize-handle:hover {
-  background: #2563eb;
+  background: #3554d1;
   transform: scale(1.2);
 }
 
@@ -614,7 +673,7 @@ canvas {
   position: absolute;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.2);
-  border: 2px dashed #6366f1;
+  border: 1px dashed #7a90e2;
   border-radius: 4px;
   z-index: 10;
   cursor: move;
@@ -639,6 +698,6 @@ canvas {
 }
 
 .text-preview-input::placeholder {
-  color: #9ca3af;
+  color: #9ba1ac;
 }
 </style>

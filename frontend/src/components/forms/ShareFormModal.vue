@@ -8,17 +8,17 @@
   >
     <div v-if="form" class="space-y-6">
       <!-- Form Status -->
-      <div class="flex items-center justify-between p-4 rounded-lg bg-gray-50">
+      <div class="flex items-center justify-between p-4 rounded-lg bg-surface-subtle">
         <div class="flex items-center gap-3">
           <i
-            class="pi text-2xl"
-            :class="form.status === 'published' ? 'pi-globe text-green-500' : 'pi-lock text-gray-400'"
+            class="pi text-title"
+            :class="form.status === 'published' ? 'pi-globe text-published' : 'pi-lock text-faint'"
           ></i>
           <div>
-            <p class="font-semibold text-gray-900">
+            <p class="font-semibold text-ink">
               {{ form.status === 'published' ? 'Published' : 'Draft' }}
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-body text-muted">
               {{ form.status === 'published' ? 'Anyone with the link can respond' : 'Form is not accepting responses' }}
             </p>
           </div>
@@ -32,25 +32,25 @@
 
       <!-- Analytics -->
       <div v-if="form.status === 'published'" class="grid grid-cols-2 gap-4">
-        <div class="p-4 rounded-lg bg-blue-50 border border-blue-200">
+        <div class="p-4 rounded-lg bg-accent-soft border border-accent">
           <div class="flex items-center gap-2 mb-1">
-            <i class="pi pi-eye text-blue-600"></i>
-            <span class="text-sm font-medium text-blue-900">Views</span>
+            <i class="pi pi-eye text-accent"></i>
+            <span class="text-body font-medium text-accent">Views</span>
           </div>
-          <p class="text-2xl font-bold text-blue-700">{{ form.viewCount || 0 }}</p>
+          <p class="text-title font-bold text-accent">{{ form.viewCount || 0 }}</p>
         </div>
-        <div class="p-4 rounded-lg bg-green-50 border border-green-200">
+        <div class="p-4 rounded-lg bg-published-soft border border-published">
           <div class="flex items-center gap-2 mb-1">
-            <i class="pi pi-check-circle text-green-600"></i>
-            <span class="text-sm font-medium text-green-900">Responses</span>
+            <i class="pi pi-check-circle text-published"></i>
+            <span class="text-body font-medium text-published">Responses</span>
           </div>
-          <p class="text-2xl font-bold text-green-700">{{ form._count?.responses || 0 }}</p>
+          <p class="text-title font-bold text-published">{{ form._count?.responses || 0 }}</p>
         </div>
       </div>
 
       <!-- Share Link -->
       <div v-if="form.status === 'published'">
-        <label class="block text-sm font-medium text-gray-700 mb-2">Share Link</label>
+        <label class="block text-body font-medium text-ink mb-2">Share Link</label>
         <div class="flex gap-2">
           <InputText
             :value="shareUrl"
@@ -66,7 +66,7 @@
             severity="secondary"
           />
         </div>
-        <p class="text-xs text-gray-500 mt-2">
+        <p class="text-meta text-muted mt-2">
           Share this link with people you want to collect responses from
         </p>
       </div>

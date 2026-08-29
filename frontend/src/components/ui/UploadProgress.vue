@@ -96,7 +96,7 @@ function formatBytes(bytes: number): string {
 .upload-progress-filename {
   font-weight: 600;
   font-size: 14px;
-  color: #1f2937;
+  color: #191b21;
   margin: 0 0 4px 0;
   white-space: nowrap;
   overflow: hidden;
@@ -105,13 +105,13 @@ function formatBytes(bytes: number): string {
 
 .upload-progress-status {
   font-size: 12px;
-  color: #6b7280;
+  color: #6a6f7b;
   margin: 0;
 }
 
 .upload-progress-bar-container {
   height: 6px;
-  background: #e5e7eb;
+  background: #e7e8ec;
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -119,7 +119,7 @@ function formatBytes(bytes: number): string {
 
 .upload-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  background: linear-gradient(90deg, #3554d1, #3554d1);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
@@ -128,6 +128,6 @@ function formatBytes(bytes: number): string {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #6b7280;
+  color: #6a6f7b;
 }
 </style>

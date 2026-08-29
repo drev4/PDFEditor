@@ -122,34 +122,114 @@ expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields', mockFieldData)
 
 Do not assert on the internal shape of a composable's refs when the same thing can be asserted on what it caused.
 
-## 8. Visual design — `[NOT IMPLEMENTED]`
+## 8. Visual design
 
-**A full design exists and none of it is built.** The UI in `frontend/src` today is the original one: PrimeVue defaults, Tailwind's stock palette, gradients and glass in places. Everything in this section is target design, and nothing should be described elsewhere as though it ships.
+**Built** ([`features/0011`](../../features/0011-adopt-the-design-system.md)). The design that existed only as a canvas is now the running app: the stock Tailwind palette, `system-ui` type, the gradients and the glass are gone, and so is the "PDF Editor Pro" name, which appeared nowhere in the design or the product.
 
-**Source of truth for the design:** the *VuePDF Forms* canvas at <https://claude.ai/code/artifact/be7f6015-4f99-46aa-9a61-8c051d4637b4>. It is **not in this repository** — it is a published Claude Design canvas, and this section exists so the next session can find it rather than rediscovering it. It holds 11 artboards on four pages: **Landing** (desktop + phone), **Product** (Forms, Field editor, Responses, Public form + phone), **SaaS layer** (Plan & usage, Members & roles, Plan limit reached), and **System**.
+**Source of truth for the design:** the *VuePDF Forms* canvas at <https://claude.ai/code/artifact/be7f6015-4f99-46aa-9a61-8c051d4637b4>. It is **not in this repository** — it is a published Claude Design canvas. It holds 11 artboards on four pages: **Landing** (`Landing`, `LandingMobile`), **Product** (`Main`, `Editor`, `Responses`, `PublicForm`, `PublicFormMobile`), **SaaS layer** (`Plans`, `Members`, `LimitReached`), and **System**.
 
-The values, read out of the `System` artboard:
+Reading it is not obvious and is worth recording, because the first attempt fails: the artboards are lazily offloaded, so the published page looks like a 2.6 MB runtime shell. The artboard sources are in it, as JSON string values keyed by `<Name>.dc.html`. Read the artifact with the Artifact tool, which saves the page to a local file, then slice each value out and `json.loads` it — what comes back is the original artboard as plain inline-styled HTML.
+
+### Where the values live now
 
 | | |
 |---|---|
-| Type | **Instrument Sans** 400/500/600; **JetBrains Mono** 400/500 |
-| Ink / Muted / Faint / Line | `#191b21` / `#6a6f7b` / `#9ba1ac` / `#e7e8ec` |
-| Accent / Accent soft | `#3554d1` / `#eef1fd` |
-| Published / At limit | `#12704f` / `#8a5c0a` |
-| Type scale | 21/600/-0.015em title · 15/600 section · 13.5/500 row title · 13/400 body · 11/600/0.06em column label · mono 12 |
-| Controls | 36 px primary, 34 px secondary, 32 px compact |
-| Geometry | radius 10 / 7 / 999 (card / control / pill) · gutter 32 · sidebar 232 · table row 56 · mobile hit target 48 |
-| Elevation | paper and menus only |
+| Palette, type scale, radii, control heights, shadows | `frontend/tailwind.config.cjs` |
+| PrimeVue component tokens | `frontend/src/theme.ts` (`VuePDFPreset`), applied in `main.ts` |
+| `.num`, `.col-label`, `.pill` and the base layer | `frontend/src/style.css` |
 
-Three rules the canvas states, which are the ones easiest to lose in implementation:
+`tailwind.config.cjs` **replaces** `colors`, `fontFamily` and `fontSize` rather than extending them. That is deliberate — leaving the stock ramps reachable is how a screen ends up half in `slate-500` and half in `muted` — and it has a consequence worth knowing before editing any component: **an undefined utility is dropped by Tailwind silently.** There is no build error and no warning. `npm run build` passing says nothing about whether a class name still resolves; `grep`, or a check of the generated CSS, is the only signal.
 
-- **Accent is rationed** — one primary action per screen, the active nav item, the selected field. Everything else neutral, so a selection on the PDF canvas never competes with chrome.
-- **Numbers are always mono.** Counts, dates, ids and coordinates line up in a column and are never mistaken for prose.
-- **A field looks different in the two places it appears.** In the editor it is a bordered rectangle with a type tag, because the author is manipulating geometry; on the public form it drops to a single underline so the document still reads as a document.
+Colours are named by role, not by hue: `ink` / `muted` / `faint` / `disabled` for text, `accent` (+`.pressed`, `.soft`), `published`, `limit`, `danger`, `neutral` for status, `surface` (+`.subtle`, `.sunken`, `.track`), `line` (+`.strong`, `.soft`, `.paper`), and `field` (`.idle`, `.underline`, `.guide`). Type is named by role too — `title`, `section`, `row`, `body`, `meta`, `micro`, `label`, `mono` — so a screen cannot invent a fourteenth size.
 
-**This is not a rewrite of the component layer.** The canvas says so explicitly: *"Tailwind's default palette is replaced; PrimeVue Aura keeps the component behaviour."* Adopting it is a token and layout change, not a migration away from PrimeVue.
+### The three rules, and where each is enforced
 
-Tracked in [`docs/BACKLOG.md`](../BACKLOG.md); sequenced in the [build order](./10-saas-roadmap.md#build-order).
+- **Accent is rationed** — one primary action per screen, the active nav item, the selected field. It is the reason `FormFieldItem.vue` no longer gives each field type its own hue: five saturated colours over a document leave nothing for the selection to say with.
+- **Numbers are always mono.** The `.num` class in `style.css`, plus `frontend/src/utils/formatDate.ts`, which holds the three date shapes the design uses (`relativeTime`, `submittedAt`, `calendarDate`).
+- **A field looks different in the two places it appears.** `FormFieldItem.vue` is a bordered rectangle with a type tag; `PublicFormFieldItem.vue` drops to a single underline. They share no styling, on purpose.
+
+### Fonts are self-hosted, and have to be
+
+Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as same-origin assets, imported at the top of `style.css`. A `<link>` to `fonts.googleapis.com` is **blocked twice** by the SPA's own CSP — `style-src 'self' 'unsafe-inline'` rejects the stylesheet and `font-src 'self' data:` rejects the font files (`frontend/vite.config.ts`, and [07-security-and-privacy](./07-security-and-privacy.md)). It fails silently into the fallback font. Adopting the design required no CSP change at all, and should not be allowed to.
+
+### The shape of the app
+
+`/dashboard` is the **list of forms** — the canvas's `Main` artboard — not the editor. It used to be the editor, so signing in dropped you into an empty workspace instead of into your work.
+
+| Route | Screen | Chrome |
+|---|---|---|
+| `/dashboard`, `/dashboard/forms` | `FormsManagementView` | `AppShell` sidebar |
+| `/dashboard/responses` | `ResponsesIndexView` | `AppShell` sidebar |
+| `/dashboard/team` | `MembersView` | `AppShell` sidebar |
+| `/dashboard/settings` | `SettingsView` | `AppShell` sidebar |
+| `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
+| `/dashboard/editor` | `EditorView` | none — its own top bar and left rail |
+
+`AppShell.vue` is the 232px sidebar and is where the four nav destinations live. The **editor has no app sidebar**, as the `Editor` artboard draws it: one document, and the chrome gets out of the way. Its left rail is **one fixed rail** — the field types, then the page thumbnails, as the `Editor` artboard draws it (`components/editor/EditorRail.vue`). It replaced a tabbed rail (Documents / Forms / Pages), and it has no disclosure of its own; it collapses into a drawer only below `lg`, where it cannot sit beside the document.
+
+The floating toolbar keeps the field types too. Both read and write the same `fieldTypeToAdd` in the store, so arming a type in one lights it up in the other and cancelling in either cancels once — which is what makes two entry points defensible rather than two sources of truth.
+
+The editor's menu button opens the **application's** navigation, not the rail: from inside a form there was otherwise no way to reach anything else without going through the back link. Both it and the dashboard sidebar read `composables/useAppNav.ts`, because a navigation that disagrees with itself depending on where it was opened is worse than one that is merely incomplete.
+
+### What the canvas has that the app does not
+
+Nobody should read the canvas as a description of the product. What is drawn and not built:
+
+- **The organization switcher** in the sidebar. No endpoint returns an organization's name — `frontend/src/services/organization.ts` can list members and invitations and nothing else — so there is nothing to render.
+- **The plan card** in the sidebar and the `Plans` / `LimitReached` artboards. Plans do not exist; they are step 7 of the [build order](./10-saas-roadmap.md#build-order).
+- **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+- **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
+
+### Editor edits are held, then saved explicitly
+
+The editor's tools modify the PDF in the browser with pdf-lib and write the result to `documentStore.activeDocument.arrayBuffer`. Nothing sent it anywhere, so **every text and image edit was lost on reload** while the UI showed it as applied.
+
+They are now held deliberately, not accidentally. `documentStore.hasUnsavedEdits` records that there is something to commit; `useFormManagement().persistEditedDocument()` commits it, from **`Save all` in the editor panel and nowhere else**. The first attempt at this uploaded on every placement, which is worse than it sounds: it makes a stray click a fact on the server and leaves someone who is experimenting with no way back.
+
+**Field geometry works the same way**, and did not used to. Placing, moving or resizing a field wrote to the server on mouseup (`formFieldsStore.saveField`), so one screen had two save models and the user could not know what was stored without remembering which tool they had used. `formFieldsStore.hasUnsavedChanges` is the field-side flag; `Save all` clears it through `saveAllFields`. The editor's warning and its button read both flags as one.
+
+### One thing ends an editor session
+
+`useFormManagement().resetEditorSession()` closes the document, clears the fields, and forgets the form — the three together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form.
+
+Because the edits are held, three things have to exist together and are easy to drop one of:
+
+- `Save all` saves the fields **first**, then the document bytes. The field save embeds the AcroForm into the PDF on the server; uploading the browser's copy afterwards is the only order that does not overwrite it.
+- The editor says the edits are unsaved, next to the button that saves them.
+- `EditorView.vue` guards both exits — `beforeunload` for closing the tab, `onBeforeRouteLeave` for **every** in-app navigation, whichever control started it.
+
+The in-app guard is `UnsavedChangesDialog.vue`, in the product's own styling rather than a `window.confirm`. That matters less than what it offers: the browser dialog had two answers, *lose the work* or *stay*, and the one people want is **Save and leave**, which is the accent action.
+
+It also covers a second way to lose work that is not an edit at all. A PDF that has been opened but never given a field has **no form row**, so closing the editor discarded the document itself. `saveDocumentToDatabase()` stores it with no fields — the document is the work — and `createFormForCurrentDocument` now uploads the open document's bytes whenever a form is created. Without that, `autoInitializeForm` produced a form with a null `pdfUrl`: listed on the dashboard, and failing to open with *"This form has no PDF"*.
+
+`persistEditedDocument` uploads through the existing `POST /api/upload` and repoints the form with `PATCH /api/forms/:id`; no new endpoint, because those two already do this. It does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced ([`docs/BACKLOG.md`](../BACKLOG.md)).
+
+### Page rotation
+
+Field positions are stored **once**, in canvas pixels at the base scale with the page upright, because that is what the backend embeds against (`pdf-processor.ts`). Rotating the view must never change what is stored — only where the field is drawn.
+
+**Four** faults lived here, and the first fix only removed two of them:
+
+1. pdf.js already renders a rotated page (`getViewport({ scale, rotation })`) and `PDFViewer.vue` **also** applied a CSS `rotate()` to the wrapper, so 90° displayed as 180°.
+2. Nothing mapped field geometry through the rotation at all.
+3. Removing that CSS binding broke the overlay in a new way. The canvas size reached it as `:canvas-width="canvasRef?.width"`, and **`canvas.width` is a plain DOM property — assigning it tells Vue nothing.** The `:style` binding on `rotation` had been forcing a re-render on every turn and hiding that. `PDFViewer.vue` now keeps a reactive `canvasSize`, and anything needing the canvas size reads it.
+4. `canvas { max-width: 100%; height: auto }` means the canvas is usually *drawn* smaller than the pixels it holds — and always is once the page is turned a quarter, because the rotated canvas is wider than the column. `canvasSize.displayScale` carries that ratio, measured with a `ResizeObserver`.
+
+**The overlay applies that ratio once, to itself.** It is sized in the canvas's own pixels and given `transform: scale(displayScale)` with a top-left origin, so everything inside it is laid out in canvas pixels and nothing below needs to know the display ratio exists. The first attempt multiplied it into each field's geometry instead, which is an agreement every call site has to remember — and on a narrow window the fields drifted off the page. A click has to be divided back out (`getBoundingClientRect` reports the *visual* box), and that division lives in one place, next to the transform.
+
+The lesson worth keeping: **a DOM property is not reactive state.** Two of these four were the same mistake, one of them introduced by fixing the other.
+
+`utils/pdfCoordinates.ts` now holds three functions with tests, including the round trip that is the property that matters:
+
+| | |
+|---|---|
+| `rotateFieldRect` | stored rect → where to draw it |
+| `unrotateFieldPoint` | a click on the rotated page → what to store |
+| `unrotatedPageSize` | the page's upright size, worked back out of the canvas pdf.js produced |
+
+They are inverses, and a disagreement between them saves fields in the wrong place silently. Dragging and resizing are refused while the page is rotated rather than applying an unmapped screen delta — see [`docs/BACKLOG.md`](../BACKLOG.md).
+
+The **landing page** is designed and unbuilt, and is a [parallel track](./10-saas-roadmap.md#parallel-track-the-landing-page) rather than a step in the chain.
 
 ## 9. What the frontend is missing
 

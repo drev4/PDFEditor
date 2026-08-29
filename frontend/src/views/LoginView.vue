@@ -6,7 +6,7 @@
       Don't have an account?
       <RouterLink
         to="/register"
-        class="text-blue-600 hover:text-blue-700 font-medium ml-1"
+        class="text-accent hover:text-accent font-medium ml-1"
       >
         Sign up
       </RouterLink>

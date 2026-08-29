@@ -1,49 +1,51 @@
 <template>
-  <div class="responses-view min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-6 md:p-8">
-    <div class="max-w-7xl mx-auto">
+  <AppShell>
+    <div class="responses-view flex flex-col flex-grow min-h-0">
       <!-- Header -->
-      <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <Button 
-              icon="pi pi-arrow-left" 
-              text 
-              rounded 
-              @click="router.push('/dashboard')"
-              class="text-gray-600 hover:text-blue-600"
-            />
-            <h1 class="text-3xl font-bold text-gray-900">
-              {{ form?.title || 'Loading Form...' }}
-            </h1>
-          </div>
-          <p class="text-gray-600 ml-12">
-            {{ responses.length > 0 ? `Viewing ${totalResponses} responses` : 'No responses yet' }}
-          </p>
-        </div>
+      <header class="px-gutter pt-[26px]">
+        <nav class="flex items-center gap-1.5 text-meta text-faint mb-2">
+          <RouterLink to="/dashboard/forms" class="text-muted">Forms</RouterLink>
+          <i class="pi pi-angle-right text-[11px]" />
+          <span class="truncate max-w-[420px]">{{ form?.title || 'Loading' }}</span>
+        </nav>
 
-        <div class="flex items-center gap-3 ml-12 md:ml-0 translate-y-0 opacity-100 transition-all duration-500 delay-100">
-          <Button 
-            icon="pi pi-download" 
-            label="Export CSV" 
-            severity="secondary" 
-            outlined
-            :disabled="!responses.length"
-            :loading="exporting"
-            @click="handleExport"
-          />
-          <Button 
-            icon="pi pi-refresh" 
-            severity="secondary" 
-            text 
-            rounded
-            :loading="loading"
-            @click="loadData"
-          />
+        <div class="flex items-end gap-4">
+          <h1 class="text-title flex-grow">Responses</h1>
+
+          <div class="flex items-center gap-2.5">
+            <button
+              type="button"
+              class="flex items-center justify-center w-control-sm h-control-sm rounded-control border border-line text-muted hover:text-ink hover:bg-surface-sunken transition-colors"
+              :disabled="loading"
+              aria-label="Refresh"
+              @click="loadData"
+            >
+              <i class="pi pi-refresh text-[13px]" :class="{ 'pi-spin': loading }" />
+            </button>
+            <button
+              type="button"
+              class="flex items-center gap-1.5 h-control-sm px-3.5 rounded-control border border-line text-body font-medium text-ink hover:bg-surface-sunken transition-colors disabled:text-disabled disabled:hover:bg-surface"
+              :disabled="!responses.length || exporting"
+              @click="handleExport"
+            >
+              <i class="pi text-[13px]" :class="exporting ? 'pi-spin pi-spinner' : 'pi-download'" />
+              <span>Export CSV</span>
+            </button>
+          </div>
         </div>
       </header>
 
-      <!-- Main Content -->
-      <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-xl border border-white overflow-hidden animate-scale-in">
+      <!-- Count strip. Numbers are mono, so a reader can compare them down the
+           page rather than reading them as prose. -->
+      <div class="flex items-center px-gutter pt-4 pb-2.5 border-b border-line">
+        <div class="flex-grow" />
+        <span class="text-meta text-faint">
+          <strong class="num font-medium text-ink">{{ totalResponses }}</strong>
+          total
+        </span>
+      </div>
+
+      <div class="flex-grow min-h-0 overflow-hidden">
         <DataTable
           :value="formattedResponses"
           :loading="loading"
@@ -52,120 +54,107 @@
           :rows="rows"
           :totalRecords="totalResponses"
           @page="onPage($event)"
-          class="p-datatable-sm responses-table"
-          stripedRows
+          class="responses-table"
           scrollable
-          scrollHeight="calc(100vh - 350px)"
+          scrollHeight="flex"
           responsiveLayout="scroll"
         >
           <template #empty>
-            <div class="flex flex-col items-center justify-center py-20 text-gray-500">
-              <i class="pi pi-inbox text-6xl mb-4 opacity-20"></i>
-              <p class="text-xl font-medium">No responses found</p>
-              <p class="text-sm">Share your form to start collecting data!</p>
+            <div class="flex flex-col items-center justify-center py-20 text-center">
+              <p class="text-section">No responses yet</p>
+              <p class="text-body text-muted mt-1.5">
+                Share the form's link and answers appear here as they arrive.
+              </p>
             </div>
           </template>
 
-          <Column field="submittedAt" header="Date Submitted" sortable style="min-width: 180px">
+          <Column field="submittedAt" header="Submitted" sortable style="min-width: 148px">
             <template #body="{ data }">
-              <span class="font-medium text-gray-700">
-                {{ formatDate(data.submittedAt) }}
-              </span>
+              <span class="num text-mono text-muted">{{ submittedAt(data.submittedAt) }}</span>
             </template>
           </Column>
 
-          <Column 
-            v-for="col in dynamicColumns" 
-            :key="col.fieldId" 
-            :field="col.fieldId" 
+          <Column
+            v-for="col in dynamicColumns"
+            :key="col.fieldId"
+            :field="col.fieldId"
             :header="col.header"
             style="min-width: 150px"
           >
             <template #body="{ data, field }">
-              <div class="truncate max-w-xs" v-tooltip.top="String(data[field as string] || '')">
-                {{ data[field as string] || '-' }}
+              <div class="truncate max-w-xs text-row" v-tooltip.top="String(data[field as string] || '')">
+                {{ data[field as string] || '—' }}
               </div>
             </template>
           </Column>
 
-          <Column field="ipAddress" header="IP Address" style="min-width: 130px">
+          <Column field="ipAddress" header="IP address" style="min-width: 130px">
             <template #body="{ data }">
-              <span class="text-xs font-mono text-gray-500">{{ data.ipAddress || 'unknown' }}</span>
+              <span class="num text-mono text-faint">{{ data.ipAddress || 'unknown' }}</span>
             </template>
           </Column>
 
-          <Column header="Actions" alignFrozen="right" frozen style="min-width: 80px">
+          <Column header="" alignFrozen="right" frozen style="min-width: 56px">
             <template #body="{ data }">
-              <Button 
-                icon="pi pi-eye" 
-                text 
-                rounded 
-                severity="info" 
+              <button
+                type="button"
+                class="flex items-center justify-center w-7 h-7 rounded-input text-faint hover:text-ink hover:bg-surface-sunken transition-colors"
+                aria-label="View response"
                 @click="viewDetails(data)"
-              />
+              >
+                <i class="pi pi-arrow-up-right text-[12px]" />
+              </button>
             </template>
           </Column>
         </DataTable>
       </div>
     </div>
 
-    <!-- Detail Modal -->
-    <Dialog 
-      v-model:visible="showDetails" 
-      :header="`Response Detail - ${formattedDate}`" 
-      modal 
-      :style="{ width: '50vw' }" 
+    <!-- Detail -->
+    <Dialog
+      v-model:visible="showDetails"
+      :header="`Response · ${formattedDate}`"
+      modal
+      :style="{ width: '46rem' }"
       :breakpoints="{ '960px': '75vw', '641px': '100vw' }"
     >
-      <div v-if="selectedResponse" class="space-y-6 py-4">
-        <!-- Metadata -->
-        <div class="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6">
+      <div v-if="selectedResponse" class="py-1">
+        <div class="grid grid-cols-2 gap-4 p-4 rounded-card border border-line bg-surface-subtle mb-6">
           <div>
-            <p class="text-xs uppercase tracking-wider text-gray-500 font-bold mb-1">Submitted At</p>
-            <p class="text-sm font-medium">{{ formatDate(selectedResponse.submittedAt) }}</p>
+            <p class="col-label mb-1">Submitted</p>
+            <p class="num text-mono">{{ submittedAt(selectedResponse.submittedAt) }}</p>
           </div>
           <div>
-            <p class="text-xs uppercase tracking-wider text-gray-500 font-bold mb-1">IP Address</p>
-            <p class="text-sm font-medium">{{ selectedResponse.ipAddress || 'N/A' }}</p>
+            <p class="col-label mb-1">IP address</p>
+            <p class="num text-mono">{{ selectedResponse.ipAddress || '—' }}</p>
           </div>
         </div>
 
-        <!-- Answers -->
-        <div class="space-y-4">
-          <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-            <i class="pi pi-list text-blue-600"></i>
-            Responses
-          </h3>
-          <div class="grid grid-cols-1 gap-y-4">
-            <div 
-              v-for="field in responseFields" 
-              :key="field.id"
-              class="border-b border-gray-100 pb-4"
-            >
-              <p class="text-sm font-bold text-gray-700 mb-1">{{ field.label || field.name }}</p>
-              <div class="text-gray-600 text-sm whitespace-pre-wrap leading-relaxed">
-                {{ getAnswerValue(field.id) }}
-              </div>
-            </div>
+        <div class="flex flex-col">
+          <div
+            v-for="field in responseFields"
+            :key="field.id"
+            class="py-3.5 border-b border-line-soft last:border-0"
+          >
+            <p class="col-label mb-1.5">{{ field.label || field.name }}</p>
+            <div class="text-body whitespace-pre-wrap">{{ getAnswerValue(field.id) }}</div>
           </div>
         </div>
       </div>
     </Dialog>
-
-    <Toast position="top-right" />
-  </div>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, type Directive } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
-import Toast from 'primevue/toast'
 import Tooltip from 'primevue/tooltip'
+import AppShell from '@/layouts/AppShell.vue'
+import { submittedAt } from '@/utils/formatDate'
 import { formsService, type Form, type Field } from '@/services/forms'
 import { responsesService, type FormResponse } from '@/services/responses'
 
@@ -173,7 +162,6 @@ import { responsesService, type FormResponse } from '@/services/responses'
 const vTooltip = Tooltip as unknown as Directive
 
 const route = useRoute()
-const router = useRouter()
 const toast = useToast()
 
 const formId = route.params.id as string
@@ -257,17 +245,9 @@ const formattedResponses = computed(() => {
   })
 })
 
-function formatDate(dateStr: string) {
-  const date = new Date(dateStr)
-  return new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(date)
-}
-
 const formattedDate = computed(() => {
   if (!selectedResponse.value) return ''
-  return formatDate(selectedResponse.value.submittedAt)
+  return submittedAt(selectedResponse.value.submittedAt)
 })
 
 function viewDetails(data: { id: string }) {
@@ -318,50 +298,47 @@ async function handleExport() {
 </script>
 
 <style scoped>
-.responses-view {
-  min-height: 100vh;
-}
-
+/* The Responses artboard: an uppercase 11px column label over a quiet header
+   row, 56px rows, and a rule rather than a fill between them. */
 .responses-table :deep(.p-datatable-thead > tr > th) {
-  background: white;
-  color: #334155;
-  font-weight: 700;
+  background: theme('colors.surface.subtle');
+  color: theme('colors.faint');
+  font-weight: 600;
   text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-  padding: 1rem;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 11px 16px;
+  border-bottom: 1px solid theme('colors.line.soft');
 }
 
 .responses-table :deep(.p-datatable-tbody > tr) {
-  background: rgba(255, 255, 255, 0.4);
-  transition: background-color 0.2s;
+  background: theme('colors.surface.DEFAULT');
+  transition: background-color 0.15s;
 }
 
 .responses-table :deep(.p-datatable-tbody > tr:hover) {
-  background: rgba(255, 255, 255, 0.9) !important;
+  background: theme('colors.surface.subtle') !important;
 }
 
 .responses-table :deep(.p-datatable-tbody > tr > td) {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgba(229, 231, 235, 0.5);
-  font-size: 0.875rem;
+  padding: 12px 16px;
+  border-bottom: 1px solid theme('colors.line.soft');
+  font-size: 13.5px;
+  height: 56px;
 }
 
-/* Custom Paginator */
 :deep(.p-paginator) {
   background: transparent;
   border: none;
-  padding: 1rem;
+  border-top: 1px solid theme('colors.line.DEFAULT');
+  padding: 14px 16px;
 }
 
-:deep(.p-paginator .p-paginator-pages .p-paginator-page) {
-  min-width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.75rem;
-}
-
-:deep(.p-paginator .p-paginator-pages .p-paginator-page.p-highlight) {
-  background: #2563eb;
-  color: white;
+:deep(.p-paginator .p-paginator-page) {
+  min-width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  font-family: theme('fontFamily.mono');
+  font-size: 12px;
 }
 </style>

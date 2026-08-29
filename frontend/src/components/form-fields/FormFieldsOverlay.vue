@@ -1,8 +1,21 @@
 <template>
+  <!--
+    Sized in the canvas's own pixels and scaled as a whole, rather than left at
+    100% and every field scaled individually.
+
+    `canvas { max-width: 100% }` means the canvas is usually drawn smaller than
+    the pixels it holds, so a field laid out in canvas pixels inside a
+    100%-wide overlay drifts further from the page the narrower the window
+    gets — and off the page entirely on a small one. One transform on the
+    container keeps the overlay and the canvas in the same coordinate space by
+    construction, which is a property rather than an arithmetic agreement that
+    every call site has to remember.
+  -->
   <div
     ref="overlayRef"
     class="form-fields-overlay"
     :class="{ 'adding-mode': formFieldsStore.isAddingField }"
+    :style="overlayStyle"
     @click="handleOverlayClick"
     @mousemove="handleMouseMove"
   >
@@ -11,6 +24,10 @@
       v-for="field in currentPageFields"
       :key="field.id"
       :field="field"
+      :page-width="pageSize.pageWidth"
+      :page-height="pageSize.pageHeight"
+      :rotation="rotation"
+      :scale-factor="scaleFactor"
     />
 
     <!-- Preview when adding new field -->
@@ -26,15 +43,15 @@
       }"
     >
       <i :class="getFieldIcon(formFieldsStore.fieldTypeToAdd!)"></i>
-      <span>Click para colocar</span>
+      <span>Click to place</span>
     </div>
 
     <!-- Adding mode indicator -->
     <div v-if="formFieldsStore.isAddingField" class="adding-indicator">
-      <span>Agregando: {{ getFieldTypeLabel(formFieldsStore.fieldTypeToAdd!) }}</span>
+      <span>Placing: {{ getFieldTypeLabel(formFieldsStore.fieldTypeToAdd!) }}</span>
       <button @click.stop="formFieldsStore.cancelAddingField()">
         <i class="pi pi-times"></i>
-        Cancelar
+        Cancel
       </button>
     </div>
   </div>
@@ -43,6 +60,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import { unrotateFieldPoint, unrotatedPageSize } from '@/utils/pdfCoordinates'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
 import { useToast } from 'primevue/usetoast'
@@ -51,6 +69,7 @@ import FormFieldItem from './FormFieldItem.vue'
 const props = defineProps<{
   canvasWidth: number
   canvasHeight: number
+  displayScale?: number
 }>()
 
 const formFieldsStore = useFormFieldsStore()
@@ -62,6 +81,38 @@ const overlayRef = ref<HTMLDivElement | null>(null)
 const previewPosition = ref<{ x: number; y: number } | null>(null)
 
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
+const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
+
+/**
+ * Positions are stored in canvas pixels at the base scale with the page
+ * upright. The canvas we are drawing on is at the current scale and may be
+ * turned, so both have to be divided back out before anything is compared to a
+ * stored coordinate.
+ */
+const BASE_SCALE = 1.5
+
+/** Stored units -> canvas pixels. */
+const renderScale = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)
+
+/**
+ * Stored units -> canvas pixels. The overlay is laid out in canvas pixels and
+ * scaled as a whole, so nothing below here needs to know about the display
+ * ratio.
+ */
+const scaleFactor = renderScale
+
+const overlayStyle = computed(() => ({
+  width: `${props.canvasWidth}px`,
+  height: `${props.canvasHeight}px`,
+  transform: `scale(${props.displayScale ?? 1})`,
+  transformOrigin: 'top left'
+}))
+
+// Derived from the canvas's own pixels, not its displayed box: this is the
+// page's size in stored units and must not move when the window is resized.
+const pageSize = computed(() =>
+  unrotatedPageSize(props.canvasWidth, props.canvasHeight, rotation.value, renderScale.value)
+)
 
 const currentPageFields = computed(() => {
   return formFieldsStore.getFieldsForPage(currentPage.value)
@@ -98,11 +149,11 @@ const getFieldIcon = (type: FieldType) => {
 
 const getFieldTypeLabel = (type: FieldType) => {
   const labels: Record<FieldType, string> = {
-    text: 'Campo de texto',
-    textarea: 'Área de texto',
-    checkbox: 'Casilla',
-    radio: 'Opción múltiple',
-    dropdown: 'Lista desplegable'
+    text: 'Text field',
+    textarea: 'Paragraph',
+    checkbox: 'Checkbox',
+    radio: 'Radio group',
+    dropdown: 'Dropdown'
   }
   return labels[type]
 }
@@ -114,13 +165,14 @@ const handleMouseMove = (e: MouseEvent) => {
   }
 
   const rect = overlayRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left - defaultFieldSize.value.width / 2
-  const y = e.clientY - rect.top - defaultFieldSize.value.height / 2
+  const display = props.displayScale ?? 1
+  const x = (e.clientX - rect.left) / display - defaultFieldSize.value.width / 2
+  const y = (e.clientY - rect.top) / display - defaultFieldSize.value.height / 2
 
-  // Keep within bounds using the actual rendered size of the overlay
+  // Bounded by the overlay's own pixels, not its visual box.
   previewPosition.value = {
-    x: Math.max(0, Math.min(x, rect.width - defaultFieldSize.value.width)),
-    y: Math.max(0, Math.min(y, rect.height - defaultFieldSize.value.height))
+    x: Math.max(0, Math.min(x, props.canvasWidth - defaultFieldSize.value.width)),
+    y: Math.max(0, Math.min(y, props.canvasHeight - defaultFieldSize.value.height))
   }
 }
 
@@ -131,9 +183,38 @@ const handleOverlayClick = async (e: MouseEvent) => {
     return
   }
 
+  // `getBoundingClientRect` reports the *visual* box, so a click inside a
+  // scaled element has to be divided back out to element-local pixels.
   const rect = overlayRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left - defaultFieldSize.value.width / 2
-  const y = e.clientY - rect.top - defaultFieldSize.value.height / 2
+  const display = props.displayScale ?? 1
+  const size = defaultFieldSize.value
+
+  // The click arrives in screen space on a page that may be turned. What gets
+  // stored has to be in the upright, base-scale space the backend embeds
+  // against, so the point goes back through the inverse of the transform the
+  // field is drawn with. Storing the raw click is how a field placed on a
+  // rotated page ends up somewhere else on the printed PDF.
+  const screenX = (e.clientX - rect.left) / display - size.width / 2
+  const screenY = (e.clientY - rect.top) / display - size.height / 2
+
+  const canvasW = props.canvasWidth
+  const canvasH = props.canvasHeight
+
+  const stored = unrotateFieldPoint(
+    {
+      x: Math.max(0, Math.min(screenX, canvasW - size.width)),
+      y: Math.max(0, Math.min(screenY, canvasH - size.height))
+    },
+    pageSize.value.pageWidth,
+    pageSize.value.pageHeight,
+    rotation.value,
+    scaleFactor.value
+  )
+
+  // A quarter turn maps the top-left corner of the drawn box to a different
+  // corner of the stored box, so clamp after mapping rather than before.
+  const x = Math.max(0, Math.min(stored.x, pageSize.value.pageWidth - size.width))
+  const y = Math.max(0, Math.min(stored.y, pageSize.value.pageHeight - size.height))
 
   // Create the field
   const fieldType = formFieldsStore.fieldTypeToAdd
@@ -149,41 +230,31 @@ const handleOverlayClick = async (e: MouseEvent) => {
     required: false,
     border: false, // Por defecto, los campos son transparentes sin borde
     position: {
-      x: Math.max(0, Math.min(x, rect.width - defaultFieldSize.value.width)),
-      y: Math.max(0, Math.min(y, rect.height - defaultFieldSize.value.height)),
-      width: defaultFieldSize.value.width,
-      height: defaultFieldSize.value.height,
+      x,
+      y,
+      width: size.width,
+      height: size.height,
       page: currentPage.value
     },
-    options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Opción 1', 'Opción 2'] : undefined
+    options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Option 1', 'Option 2'] : undefined
   })
 
-  // Auto-initialize form if needed and save to server
+  // Placing a field does not write to the server either. What it does do is
+  // make sure there is a form to belong to, because the document itself has to
+  // be stored for any of this to mean anything — see useFormManagement.
   try {
-    // Ensure we have a form to save to
     await autoInitializeForm()
-
-    // Save the new field
-    await formFieldsStore.saveField(newField.id)
-
-    toast.add({
-      severity: 'success',
-      summary: 'Campo agregado',
-      detail: `${getFieldTypeLabel(fieldType)} agregado exitosamente`,
-      life: 2000
-    })
+    formFieldsStore.markDirty()
   } catch (error) {
-    console.error('Failed to save field:', error)
+    console.error('Failed to prepare the form:', error)
 
     toast.add({
       severity: 'error',
-      summary: 'Error al agregar campo',
-      detail: 'No se pudo guardar el campo. Intenta de nuevo.',
+      summary: 'Could not add the field',
+      detail: 'The form could not be prepared. Try again.',
       life: 3000
     })
   }
-
-  previewPosition.value = null
 }
 </script>
 
@@ -209,7 +280,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
 
 .field-preview {
   position: absolute;
-  border: 2px dashed #3b82f6;
+  border: 2px dashed #3554d1;
   background: rgba(59, 130, 246, 0.2);
   border-radius: 4px;
   display: flex;
@@ -217,7 +288,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   justify-content: center;
   gap: 8px;
   font-size: 12px;
-  color: #1e40af;
+  color: #2a45b8;
   pointer-events: none;
   opacity: 0.8;
 }
@@ -228,15 +299,15 @@ const handleOverlayClick = async (e: MouseEvent) => {
 
 .field-preview.preview-checkbox,
 .field-preview.preview-radio {
-  border-color: #10b981;
+  border-color: #12704f;
   background: rgba(16, 185, 129, 0.2);
-  color: #065f46;
+  color: #12704f;
 }
 
 .field-preview.preview-dropdown {
-  border-color: #f59e0b;
+  border-color: #8a5c0a;
   background: rgba(245, 158, 11, 0.2);
-  color: #92400e;
+  color: #8a5c0a;
 }
 
 .adding-indicator {
@@ -244,7 +315,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  background: #1e40af;
+  background: #2a45b8;
   color: white;
   padding: 8px 16px;
   border-radius: 8px;

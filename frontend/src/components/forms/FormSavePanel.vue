@@ -3,13 +3,13 @@
     <!-- Form Info Card -->
     <div v-if="!formFieldsStore.currentFormId" class="tool-card info-card">
       <div class="tool-header">
-        <div class="tool-icon bg-yellow-100">
-          <i class="pi pi-info-circle text-yellow-600"></i>
+        <div class="tool-icon bg-limit-soft">
+          <i class="pi pi-info-circle text-limit"></i>
         </div>
         <h4 class="tool-title">Save Form</h4>
       </div>
       <div class="tool-body">
-        <p class="text-sm text-gray-600 mb-4">
+        <p class="text-body text-muted mb-4">
           Save this PDF form to the cloud to access it later and share with others.
         </p>
 
@@ -48,7 +48,7 @@
           />
         </div>
 
-        <p class="text-xs text-gray-500">
+        <p class="text-meta text-muted">
           <i class="pi pi-info-circle"></i>
           Upload PDF alone or save complete form with fields
         </p>
@@ -58,12 +58,12 @@
     <!-- Already Saved Card -->
     <div v-else class="tool-card success-card">
       <div class="tool-header">
-        <div class="tool-icon bg-green-100">
-          <i class="pi pi-check-circle text-green-600"></i>
+        <div class="tool-icon bg-published-soft">
+          <i class="pi pi-check-circle text-published"></i>
         </div>
         <div class="flex-1">
           <h4 class="tool-title">Form Saved</h4>
-          <p class="text-xs text-gray-500">ID: {{ formFieldsStore.currentFormId }}</p>
+          <p class="text-meta text-muted">ID: {{ formFieldsStore.currentFormId }}</p>
         </div>
         <Button
           icon="pi pi-times"
@@ -77,9 +77,9 @@
       </div>
       <div class="tool-body space-y-2">
         <div v-if="currentForm" class="info-box">
-          <p class="text-sm font-semibold text-gray-800">{{ currentForm.title }}</p>
-          <p v-if="currentForm.description" class="text-xs text-gray-600">{{ currentForm.description }}</p>
-          <p class="text-xs text-gray-500 mt-2">
+          <p class="text-body font-semibold text-ink">{{ currentForm.title }}</p>
+          <p v-if="currentForm.description" class="text-meta text-muted">{{ currentForm.description }}</p>
+          <p class="text-meta text-muted mt-2">
             {{ currentForm.fields?.length || 0 }} fields • {{ currentForm.status }}
           </p>
         </div>
@@ -94,14 +94,21 @@
         />
 
         <Button
-          label="Update Fields"
+          :label="hasUnsavedWork ? 'Save all (unsaved changes)' : 'Save all'"
           icon="pi pi-save"
           @click="handleUpdateFields"
           class="w-full"
           severity="info"
-          outlined
-          :loading="formFieldsStore.loading"
+          :outlined="!hasUnsavedWork"
+          :loading="formFieldsStore.loading || isUploadingPDF"
         />
+
+        <!-- The text and image tools change the PDF in the browser and nothing
+             is sent until this is pressed, so the editor has to say so. -->
+        <p v-if="hasUnsavedWork" class="text-meta text-limit flex items-start gap-1">
+          <i class="pi pi-exclamation-circle mt-0.5"></i>
+          <span>Your changes are only in this browser. Save all to store them.</span>
+        </p>
 
         <Button
           label="Upload PDF to Server"
@@ -115,17 +122,17 @@
           v-if="!currentForm?.pdfUrl"
         />
 
-        <p v-if="!currentForm?.pdfUrl" class="text-xs text-amber-600 flex items-center gap-1">
+        <p v-if="!currentForm?.pdfUrl" class="text-meta text-limit flex items-center gap-1">
           <i class="pi pi-info-circle"></i>
           Upload PDF first to enable sharing
         </p>
 
-        <div v-else class="info-box bg-blue-50 border-blue-200">
+        <div v-else class="info-box bg-accent-soft border-accent">
           <div class="flex items-start gap-2">
-            <i class="pi pi-file-pdf text-blue-600 mt-0.5"></i>
+            <i class="pi pi-file-pdf text-accent mt-0.5"></i>
             <div class="flex-1 min-w-0">
-              <p class="text-xs font-medium text-blue-900">PDF Uploaded</p>
-              <p class="text-xs text-blue-700 truncate">{{ getPDFFilename(currentForm.pdfUrl) }}</p>
+              <p class="text-meta font-medium text-accent">PDF Uploaded</p>
+              <p class="text-meta text-accent truncate">{{ getPDFFilename(currentForm.pdfUrl) }}</p>
             </div>
           </div>
         </div>
@@ -174,6 +181,12 @@ const showShareModal = ref(false)
 const hasFields = computed(() => formFieldsStore.fields.length > 0)
 const currentForm = computed(() => formsStore.currentForm)
 const hasPDFLoaded = computed(() => !!documentStore.activeDocument?.file)
+
+// One notion of "unsaved" for the whole editor: field geometry and document
+// bytes are written by different calls but they are one decision to the user.
+const hasUnsavedWork = computed(
+  () => documentStore.hasUnsavedEdits || formFieldsStore.hasUnsavedChanges
+)
 
 // Auto-populate form title from document name and clear form state
 watch(() => documentStore.activeDocument, async (doc, oldDoc) => {
@@ -271,7 +284,27 @@ async function handleSaveForm() {
 async function handleUpdateFields() {
   try {
     const fieldCount = formFieldsStore.fields.length
+    const hadDocumentEdits = documentStore.hasUnsavedEdits
+
     await formFieldsStore.saveAllFields()
+
+    // The order matters. Saving the fields embeds them into the PDF on the
+    // server, so the document bytes have to go up afterwards or the upload
+    // would overwrite that with the browser's copy, which has no AcroForm.
+    if (hadDocumentEdits) {
+      isUploadingPDF.value = true
+      try {
+        await formManagement.persistEditedDocument()
+        toast.add({
+          severity: 'success',
+          summary: 'Document saved',
+          detail: 'The text and images you added are now stored.',
+          life: 3000
+        })
+      } finally {
+        isUploadingPDF.value = false
+      }
+    }
 
     // Show enhanced message indicating fields are embedded in PDF
     toast.add({
@@ -422,18 +455,18 @@ async function handleUnpublish(formId: string) {
   border-radius: 16px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e7e8ec;
   transition: all 0.2s ease;
 }
 
 .info-card {
-  background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
-  border-color: #fde68a;
+  background: linear-gradient(135deg, #fbf2e0 0%, #fbf2e0 100%);
+  border-color: #fbf2e0;
 }
 
 .success-card {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-  border-color: #bbf7d0;
+  background: linear-gradient(135deg, #e8f4ee 0%, #e8f4ee 100%);
+  border-color: #e8f4ee;
 }
 
 .tool-header {
@@ -457,7 +490,7 @@ async function handleUnpublish(formId: string) {
 .tool-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: #191b21;
   margin: 0;
 }
 
@@ -468,8 +501,8 @@ async function handleUnpublish(formId: string) {
 
 .info-box {
   padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: #fbfbfc;
+  border: 1px solid #e7e8ec;
   border-radius: 8px;
 }
 

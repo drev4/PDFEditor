@@ -8,7 +8,7 @@
           v-model="localText"
           @input="$emit('update-text', localText)"
           class="text-input"
-          placeholder="Escribe aquí..."
+          placeholder="Type here..."
         />
       </div>
 
@@ -63,7 +63,7 @@
         size="small"
       />
       <Button
-        label="Cancelar"
+        label="Cancel"
         icon="pi pi-times"
         @click="$emit('cancel')"
         severity="danger"
@@ -154,14 +154,14 @@ watch(() => props.color, (newVal) => {
 label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #6b7280;
+  color: #6a6f7b;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .text-input {
   padding: 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid #d8dae1;
   border-radius: 0.375rem;
   font-size: 0.875rem;
   outline: none;
@@ -170,13 +170,13 @@ label {
 }
 
 .text-input:focus {
-  border-color: #3b82f6;
+  border-color: #3554d1;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .size-input {
   padding: 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid #d8dae1;
   border-radius: 0.375rem;
   font-size: 0.875rem;
   outline: none;
@@ -185,14 +185,14 @@ label {
 }
 
 .size-input:focus {
-  border-color: #3b82f6;
+  border-color: #3554d1;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .color-input {
   width: 50px;
   height: 35px;
-  border: 1px solid #d1d5db;
+  border: 1px solid #d8dae1;
   border-radius: 0.375rem;
   cursor: pointer;
   outline: none;

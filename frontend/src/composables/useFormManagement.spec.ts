@@ -9,10 +9,30 @@ import { createMockPDFFile } from '@/test/helpers/test-utils'
 vi.mock('@/services/forms')
 vi.mock('@/services/fields')
 
+// Creating a form now uploads the open document's bytes, because a form row
+// with a null `pdfUrl` is a broken form: it lists on the dashboard and fails to
+// open. Without this the suite made a real XHR and failed on `No token
+// provided`.
+const uploadPDF = vi.fn().mockResolvedValue({
+  url: 'http://localhost:3000/uploads/pdfs/uploaded.pdf',
+  filename: 'uploaded.pdf',
+  size: 1024,
+  fields: []
+})
+vi.mock('@/services/upload', () => ({
+  uploadService: { uploadPDF: (...args: unknown[]) => uploadPDF(...args) }
+}))
+
 describe('useFormManagement', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    uploadPDF.mockResolvedValue({
+      url: 'http://localhost:3000/uploads/pdfs/uploaded.pdf',
+      filename: 'uploaded.pdf',
+      size: 1024,
+      fields: []
+    })
   })
 
   const mockForm = {
@@ -48,10 +68,12 @@ describe('useFormManagement', () => {
       const { createFormForCurrentDocument } = useFormManagement()
       const form = await createFormForCurrentDocument('My Form')
 
+      // `pdfUrl` used to be `undefined` here, and that was the defect rather
+      // than the contract: the form was created without its PDF.
       expect(formsStore.createForm).toHaveBeenCalledWith({
         title: 'My Form',
         description: undefined,
-        pdfUrl: undefined
+        pdfUrl: 'http://localhost:3000/uploads/pdfs/uploaded.pdf'
       })
       expect(setCurrentFormSpy).toHaveBeenCalledWith('form-1')
       expect(form.id).toBe('form-1')
@@ -168,6 +190,43 @@ describe('useFormManagement', () => {
       await autoInitializeForm()
 
       expect(formsStore.createForm).not.toHaveBeenCalled()
+    })
+  })
+
+  // Regression: `autoInitializeForm` created the form with no `pdfUrl`, so
+  // placing a field on a freshly opened document left a row on the dashboard
+  // that could not be opened - "This form has no PDF".
+  describe('the PDF always goes up with the form', () => {
+    it('uploads the open document when creating a form for it', async () => {
+      const documentStore = useDocumentStore()
+      const formsStore = useFormsStore()
+      await createMockDocument(documentStore)
+      vi.mocked(formsStore).createForm = vi.fn().mockResolvedValue(mockForm)
+
+      const { createFormForCurrentDocument } = useFormManagement()
+      await createFormForCurrentDocument()
+
+      expect(uploadPDF).toHaveBeenCalledTimes(1)
+      expect(formsStore.createForm).toHaveBeenCalledWith(
+        expect.objectContaining({ pdfUrl: 'http://localhost:3000/uploads/pdfs/uploaded.pdf' })
+      )
+    })
+
+    it('saves a document that has no fields at all', async () => {
+      const documentStore = useDocumentStore()
+      const formsStore = useFormsStore()
+      const formFieldsStore = useFormFieldsStore()
+      await createMockDocument(documentStore)
+      vi.mocked(formsStore).createForm = vi.fn().mockResolvedValue(mockForm)
+
+      const { saveDocumentToDatabase } = useFormManagement()
+      await saveDocumentToDatabase()
+
+      // The document is the work; needing a field before it can be stored is
+      // what made closing an untouched PDF throw it away.
+      expect(formsStore.createForm).toHaveBeenCalledTimes(1)
+      expect(formFieldsStore.currentFormId).toBe('form-1')
+      expect(documentStore.hasUnsavedEdits).toBe(false)
     })
   })
 })

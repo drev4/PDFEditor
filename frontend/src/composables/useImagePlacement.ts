@@ -157,6 +157,10 @@ export function useImagePlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
 
       editorStore.clearImagePreview()
       documentStore.triggerPDFReload()
+
+      // Held in memory until an explicit save, like the text tool. See
+      // document.store.ts.
+      documentStore.markEdited()
     } catch (error) {
       console.error('Error adding image:', error)
     }

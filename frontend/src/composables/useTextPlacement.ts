@@ -96,6 +96,13 @@ export function useTextPlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
 
       editorStore.clearTextPreview()
       documentStore.triggerPDFReload()
+
+      // The text is in the in-memory buffer and nowhere else. It is not
+      // uploaded here on purpose: an edit is not a decision until the user says
+      // so, and writing every placement straight to the server gave someone
+      // trying something out no way back. `Save all` in the editor panel is
+      // what commits it; this only records that there is something to commit.
+      documentStore.markEdited()
     } catch (error) {
       console.error('Error adding text:', error)
     }

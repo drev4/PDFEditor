@@ -154,6 +154,8 @@ What CI still does not do:
 
 Currently: `console.log`, `console.warn` and `console.error` to stdout, plus a `/health` endpoint returning `{status, timestamp}`.
 
+**What the error handler logs, and why it is a subset.** `middleware/errorHandler.ts` logs a stack trace for 5xx and for any error that is not an `AppError`; it logs **nothing** for a 4xx. A 4xx is the API answering correctly — the client asked for something it may not have — and it is already reported in the response. This is not fastidiousness: opening the login page with no session calls `POST /api/auth/refresh`, which correctly answers `401 Not authenticated`, and that printed a stack trace on every anonymous page load. A log that cries fault when nothing is wrong is a log people stop reading, which is where the real fault will be. Once `pino` lands, 4xx belongs at `info` with a request id — a distinction the bare console cannot express.
+
 There is no request id, no structured output, no log aggregation, no metrics, no error tracking and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone.
 
 Minimum viable observability, in order:

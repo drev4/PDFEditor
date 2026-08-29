@@ -74,11 +74,11 @@ async function submit() {
 
 <style scoped>
 .accept-view { max-width: 420px; margin: 4rem auto; padding: 0 1rem; }
-.explain { color: #6b7280; }
+.explain { color: #6a6f7b; }
 form { display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem; }
 label { display: flex; flex-direction: column; gap: 0.35rem; font-weight: 600; }
-input { padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 400; }
-button { padding: 0.7rem; border: none; border-radius: 4px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+input { padding: 0.6rem; border: 1px solid #d8dae1; border-radius: 4px; font-weight: 400; }
+button { padding: 0.7rem; border: none; border-radius: 4px; background: #3554d1; color: white; font-weight: 600; cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: default; }
-.error { color: #b91c1c; background: #fef2f2; padding: 0.75rem 1rem; border-radius: 6px; }
+.error { color: #b02a30; background: #f7ecec; padding: 0.75rem 1rem; border-radius: 6px; }
 </style>

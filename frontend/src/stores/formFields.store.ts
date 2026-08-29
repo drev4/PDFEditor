@@ -38,6 +38,18 @@ export interface FormField {
 export const useFormFieldsStore = defineStore('formFields', () => {
   const fields = ref<FormField[]>([])
   const selectedFieldId = ref<string | null>(null)
+  /**
+   * Field changes that are only in the browser.
+   *
+   * Placing, moving and resizing a field used to write to the server the moment
+   * the mouse came up. That is a different model from the one the rest of the
+   * editor uses — text and images wait for `Save all` — and two save models in
+   * one screen means the user cannot know what is stored without remembering
+   * which tool they used. Everything waits now.
+   */
+  const hasUnsavedChanges = ref(false)
+  const markDirty = () => { hasUnsavedChanges.value = true }
+
   const isAddingField = ref(false)
   const fieldTypeToAdd = ref<FieldType | null>(null)
   const currentFormId = ref<string | null>(null)
@@ -143,6 +155,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     selectedFieldId.value = null
     isAddingField.value = false
     fieldTypeToAdd.value = null
+    hasUnsavedChanges.value = false
   }
 
   const getFieldsForPage = (page: number) => {
@@ -224,6 +237,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       const { fields: savedFields, archived } = await fieldsService.bulkSave(formId, fieldsData)
       loadFieldsFromForm(savedFields)
       archivedFieldIds.value = archived
+      hasUnsavedChanges.value = false
       return savedFields
     }, { fallbackMessage: 'Failed to save fields' })
   }
@@ -299,6 +313,8 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     fields,
     selectedFieldId,
     isAddingField,
+    hasUnsavedChanges,
+    markDirty,
     fieldTypeToAdd,
     currentFormId,
     loading,

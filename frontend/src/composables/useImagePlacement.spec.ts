@@ -215,4 +215,25 @@ describe('useImagePlacement', () => {
       expect(drawingStore.snapToGrid).toBe(true)
     })
   })
+
+  // Same regression the text tool had: the image went into the in-memory
+  // buffer and nothing recorded that there was anything to save.
+  describe('marking the document as edited', () => {
+    it('marks the document as having unsaved edits', async () => {
+      editorStore.setImagePreview({
+        file: createMockImageFile('signature.png', 'image/png'),
+        dataUrl: 'data:image/png;base64,mock',
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 150,
+        maintainAspectRatio: true
+      })
+      const { confirmImagePlacement } = useImagePlacement(canvasRef)
+
+      await confirmImagePlacement()
+
+      expect(documentStore.hasUnsavedEdits).toBe(true)
+    })
+  })
 })

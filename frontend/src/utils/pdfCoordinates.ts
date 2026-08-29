@@ -88,3 +88,107 @@ export function pdfToCanvas(pdf: PDFCoordinates, transform: CoordinateTransform)
 
   return result
 }
+
+/**
+ * Field geometry under page rotation.
+ *
+ * A field's position is stored once, in canvas pixels at `DEFAULT_SCALE` with
+ * the page unrotated — that is the contract the backend embeds against
+ * (`pdf-processor.ts`), and rotating the view must never change it. What has to
+ * move is where the field is *drawn*, because pdf.js renders the rotated page
+ * into the canvas and the canvas axes turn with it.
+ *
+ * The two functions below are inverses. `rotateFieldRect` takes a stored rect
+ * to screen; `unrotateFieldPoint` takes a click on the rotated page back to
+ * storage. Round-tripping one through the other is the property the tests
+ * assert, and it is the only thing standing between a rotated page and fields
+ * that save in the wrong place.
+ *
+ * `pageWidth`/`pageHeight` are the page's **unrotated** size in stored units
+ * (canvas pixels at the base scale).
+ */
+export interface FieldRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function normalizeRotation(rotation: number): 0 | 90 | 180 | 270 {
+  const r = ((rotation % 360) + 360) % 360
+  return (r - (r % 90)) as 0 | 90 | 180 | 270
+}
+
+export function rotateFieldRect(
+  rect: FieldRect,
+  pageWidth: number,
+  pageHeight: number,
+  rotation: number,
+  scaleFactor = 1
+): FieldRect {
+  const { x, y, width, height } = rect
+  let out: FieldRect
+
+  switch (normalizeRotation(rotation)) {
+    case 90:
+      // The page turns clockwise, so the rect's bottom-left corner becomes its
+      // top-left, and the axes swap.
+      out = { x: pageHeight - (y + height), y: x, width: height, height: width }
+      break
+    case 180:
+      out = { x: pageWidth - (x + width), y: pageHeight - (y + height), width, height }
+      break
+    case 270:
+      out = { x: y, y: pageWidth - (x + width), width: height, height: width }
+      break
+    default:
+      out = { x, y, width, height }
+  }
+
+  return {
+    x: out.x * scaleFactor,
+    y: out.y * scaleFactor,
+    width: out.width * scaleFactor,
+    height: out.height * scaleFactor
+  }
+}
+
+export function unrotateFieldPoint(
+  point: { x: number; y: number },
+  pageWidth: number,
+  pageHeight: number,
+  rotation: number,
+  scaleFactor = 1
+): { x: number; y: number } {
+  const x = point.x / scaleFactor
+  const y = point.y / scaleFactor
+
+  switch (normalizeRotation(rotation)) {
+    case 90:
+      return { x: y, y: pageHeight - x }
+    case 180:
+      return { x: pageWidth - x, y: pageHeight - y }
+    case 270:
+      return { x: pageWidth - y, y: x }
+    default:
+      return { x, y }
+  }
+}
+
+/**
+ * The page's unrotated size, worked back out of the canvas pdf.js produced.
+ * At 90 and 270 the rendered canvas has the page's axes swapped, so the caller
+ * cannot use the canvas dimensions directly and every call site getting this
+ * wrong is a field in the wrong place.
+ */
+export function unrotatedPageSize(
+  canvasWidth: number,
+  canvasHeight: number,
+  rotation: number,
+  scaleFactor = 1
+): { pageWidth: number; pageHeight: number } {
+  const w = canvasWidth / scaleFactor
+  const h = canvasHeight / scaleFactor
+  const quarterTurned = normalizeRotation(rotation) === 90 || normalizeRotation(rotation) === 270
+  return quarterTurned ? { pageWidth: h, pageHeight: w } : { pageWidth: w, pageHeight: h }
+}

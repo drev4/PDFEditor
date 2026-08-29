@@ -9,39 +9,39 @@
     :breakpoints="{ '1199px': '75vw', '575px': '90vw' }"
   >
     <div class="preview-content py-2">
-      <p class="text-sm text-gray-500 mb-6">
+      <p class="text-body text-muted mb-6">
         Please review your answers below before submitting. You won't be able to change them after submission.
       </p>
 
       <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-        <div v-for="field in fields" :key="field.id" class="field-preview-item pb-3 border-b border-gray-100 last:border-b-0">
-          <h4 class="text-sm font-semibold text-gray-700 mb-1 flex items-center">
+        <div v-for="field in fields" :key="field.id" class="field-preview-item pb-3 border-b border-line last:border-b-0">
+          <h4 class="text-body font-semibold text-ink mb-1 flex items-center">
             {{ field.label }}
-            <span v-if="field.required" class="text-red-500 ml-1 italic font-normal text-xs">(Required)</span>
+            <span v-if="field.required" class="text-danger ml-1 italic font-normal text-meta">(Required)</span>
           </h4>
           
           <div class="answer-box">
             <template v-if="hasAnswer(field.id)">
-              <div v-if="field.type === 'checkbox'" class="flex items-center text-blue-700">
-                <i class="pi pi-check-circle mr-2 text-green-500"></i>
+              <div v-if="field.type === 'checkbox'" class="flex items-center text-accent">
+                <i class="pi pi-check-circle mr-2 text-published"></i>
                 <span>Checked / Yes</span>
               </div>
               
-              <div v-else-if="field.type === 'radio' || field.type === 'dropdown'" class="text-gray-900 bg-gray-50 px-3 py-2 rounded border border-gray-200">
+              <div v-else-if="field.type === 'radio' || field.type === 'dropdown'" class="text-ink bg-surface-subtle px-3 py-2 rounded border border-line">
                 {{ answers[field.id] }}
               </div>
               
-              <div v-else-if="field.type === 'textarea'" class="text-gray-900 bg-gray-50 px-3 py-2 rounded border border-gray-200 whitespace-pre-wrap">
+              <div v-else-if="field.type === 'textarea'" class="text-ink bg-surface-subtle px-3 py-2 rounded border border-line whitespace-pre-wrap">
                 {{ answers[field.id] }}
               </div>
               
-              <div v-else class="text-gray-900 bg-gray-50 px-3 py-2 rounded border border-gray-200">
+              <div v-else class="text-ink bg-surface-subtle px-3 py-2 rounded border border-line">
                 {{ answers[field.id] }}
               </div>
             </template>
             
             <template v-else>
-              <div class="text-gray-400 italic bg-gray-50 px-3 py-2 rounded border border-gray-200">
+              <div class="text-faint italic bg-surface-subtle px-3 py-2 rounded border border-line">
                 Not answered
               </div>
             </template>
@@ -51,7 +51,7 @@
     </div>
 
     <template #footer>
-      <div class="flex justify-end gap-3 pt-4 border-t border-gray-100">
+      <div class="flex justify-end gap-3 pt-4 border-t border-line">
         <Button 
           label="Back to Edit" 
           icon="pi pi-arrow-left" 
@@ -101,7 +101,7 @@ function hasAnswer(fieldId: string) {
 <style scoped>
 .submit-preview-modal :deep(.p-dialog-header) {
   padding-bottom: 1rem;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid #f4f5f7;
 }
 
 .submit-preview-modal :deep(.p-dialog-content) {
@@ -115,6 +115,6 @@ function hasAnswer(fieldId: string) {
 }
 
 .field-preview-item:hover {
-  background-color: #f9fafb;
+  background-color: #fbfbfc;
 }
 </style>
