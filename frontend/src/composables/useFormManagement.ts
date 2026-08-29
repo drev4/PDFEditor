@@ -60,6 +60,23 @@ export function useFormManagement() {
   }
 
   /**
+   * Close the editor's session: the document, its fields, and the form they
+   * belonged to.
+   *
+   * These three live in stores that outlive the route and each other, and
+   * closing only one of them is a bug every time. Closing the document on its
+   * own left the fields in place, so the next PDF opened with the previous
+   * form's fields drawn on it — and saving would have written them into the new
+   * form. This is the only thing that should ever end a session.
+   */
+  function resetEditorSession() {
+    documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
+    formFieldsStore.clearFields()
+    formFieldsStore.setCurrentForm(null)
+    documentStore.markSaved()
+  }
+
+  /**
    * The open document as a `File`, ready to upload.
    *
    * Prefers the in-memory buffer over the originally picked file, because the
@@ -284,6 +301,7 @@ export function useFormManagement() {
     uploadPDF,
     uploadPDFForCurrentForm,
     persistEditedDocument,
-    saveDocumentToDatabase
+    saveDocumentToDatabase,
+    resetEditorSession
   }
 }

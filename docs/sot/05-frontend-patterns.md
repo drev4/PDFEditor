@@ -186,6 +186,12 @@ The editor's tools modify the PDF in the browser with pdf-lib and write the resu
 
 They are now held deliberately, not accidentally. `documentStore.hasUnsavedEdits` records that there is something to commit; `useFormManagement().persistEditedDocument()` commits it, from **`Save all` in the editor panel and nowhere else**. The first attempt at this uploaded on every placement, which is worse than it sounds: it makes a stray click a fact on the server and leaves someone who is experimenting with no way back.
 
+**Field geometry works the same way**, and did not used to. Placing, moving or resizing a field wrote to the server on mouseup (`formFieldsStore.saveField`), so one screen had two save models and the user could not know what was stored without remembering which tool they had used. `formFieldsStore.hasUnsavedChanges` is the field-side flag; `Save all` clears it through `saveAllFields`. The editor's warning and its button read both flags as one.
+
+### One thing ends an editor session
+
+`useFormManagement().resetEditorSession()` closes the document, clears the fields, and forgets the form — the three together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form.
+
 Because the edits are held, three things have to exist together and are easy to drop one of:
 
 - `Save all` saves the fields **first**, then the document bytes. The field save embeds the AcroForm into the PDF on the server; uploading the browser's copy afterwards is the only order that does not overwrite it.
@@ -207,7 +213,9 @@ Field positions are stored **once**, in canvas pixels at the base scale with the
 1. pdf.js already renders a rotated page (`getViewport({ scale, rotation })`) and `PDFViewer.vue` **also** applied a CSS `rotate()` to the wrapper, so 90° displayed as 180°.
 2. Nothing mapped field geometry through the rotation at all.
 3. Removing that CSS binding broke the overlay in a new way. The canvas size reached it as `:canvas-width="canvasRef?.width"`, and **`canvas.width` is a plain DOM property — assigning it tells Vue nothing.** The `:style` binding on `rotation` had been forcing a re-render on every turn and hiding that. `PDFViewer.vue` now keeps a reactive `canvasSize`, and anything needing the canvas size reads it.
-4. `canvas { max-width: 100%; height: auto }` means the canvas is usually *drawn* smaller than the pixels it holds — and always is once the page is turned a quarter, because the rotated canvas is wider than the column. `canvasSize.displayScale` carries that ratio, measured with a `ResizeObserver`, and the overlays multiply by it.
+4. `canvas { max-width: 100%; height: auto }` means the canvas is usually *drawn* smaller than the pixels it holds — and always is once the page is turned a quarter, because the rotated canvas is wider than the column. `canvasSize.displayScale` carries that ratio, measured with a `ResizeObserver`.
+
+**The overlay applies that ratio once, to itself.** It is sized in the canvas's own pixels and given `transform: scale(displayScale)` with a top-left origin, so everything inside it is laid out in canvas pixels and nothing below needs to know the display ratio exists. The first attempt multiplied it into each field's geometry instead, which is an agreement every call site has to remember — and on a narrow window the fields drifted off the page. A click has to be divided back out (`getBoundingClientRect` reports the *visual* box), and that division lives in one place, next to the transform.
 
 The lesson worth keeping: **a DOM property is not reactive state.** Two of these four were the same mistake, one of them introduced by fixing the other.
 

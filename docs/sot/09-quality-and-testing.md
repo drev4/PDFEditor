@@ -1,5 +1,12 @@
 # Quality and testing
 
+
+### The E2E suite starts its own backend, always
+
+`playwright.config.ts` sets `reuseExistingServer: false` for the **backend** and leaves it on for the frontend. The asymmetry is the point: the backend `webServer` entry passes `RATE_LIMIT_*: 100000`, and a dev backend already listening on `:3000` does not have them. Adopting one makes registration hit the real limiter, and roughly 28 tests then fail on a `waitForURL` timeout that looks exactly like an application bug — it was diagnosed three times in one session before the cause was found. The SPA carries no test-only configuration, so adopting a dev server there is harmless.
+
+The cost is that a leaked server from a previous run makes the next run fail to start rather than fail mysteriously. That is the trade being made on purpose.
+
 ## What exists
 
 | Level | Count | Tooling | Location |

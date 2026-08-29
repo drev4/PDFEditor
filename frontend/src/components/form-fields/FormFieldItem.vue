@@ -58,7 +58,6 @@
 import { computed, ref } from 'vue'
 import { useFormFieldsStore, type FormField } from '@/stores/formFields.store'
 import { rotateFieldRect } from '@/utils/pdfCoordinates'
-import { useToast } from 'primevue/usetoast'
 
 const props = defineProps<{
   field: FormField
@@ -69,7 +68,6 @@ const props = defineProps<{
 }>()
 
 const formFieldsStore = useFormFieldsStore()
-const toast = useToast()
 
 const isSelected = computed(() => formFieldsStore.selectedFieldId === props.field.id)
 
@@ -160,24 +158,14 @@ const onDrag = (e: MouseEvent) => {
   formFieldsStore.moveField(props.field.id, newX, newY)
 }
 
-const stopDrag = async () => {
+const stopDrag = () => {
   isDragging.value = false
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
 
-  // Save field position to server after drag
-  try {
-    await formFieldsStore.saveField(props.field.id)
-  } catch (error) {
-    console.error('Failed to save field position:', error)
-
-    toast.add({
-      severity: 'error',
-      summary: 'Error al guardar posición',
-      detail: 'No se pudo guardar la nueva posición del campo',
-      life: 3000
-    })
-  }
+  // Not saved here. `Save all` is what writes field positions, the same as it
+  // is for text and images — see formFields.store.ts.
+  formFieldsStore.markDirty()
 }
 
 const startResize = (e: MouseEvent, handle: string) => {
@@ -232,25 +220,13 @@ const onResize = (e: MouseEvent) => {
   formFieldsStore.resizeField(props.field.id, newWidth, newHeight)
 }
 
-const stopResize = async () => {
+const stopResize = () => {
   isResizing.value = false
   resizeHandle.value = null
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
 
-  // Save field size to server after resize
-  try {
-    await formFieldsStore.saveField(props.field.id)
-  } catch (error) {
-    console.error('Failed to save field size:', error)
-
-    toast.add({
-      severity: 'error',
-      summary: 'Error al guardar tamaño',
-      detail: 'No se pudo guardar el nuevo tamaño del campo',
-      life: 3000
-    })
-  }
+  formFieldsStore.markDirty()
 }
 </script>
 

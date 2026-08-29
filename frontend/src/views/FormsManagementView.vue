@@ -161,7 +161,7 @@
           <span class="text-body text-muted text-center">
             Drop a PDF here. Existing PDF forms keep their fields.
           </span>
-          <FileUploader @loaded="router.push('/dashboard/editor')" @before-select="resetEditorState" />
+          <FileUploader @loaded="router.push('/dashboard/editor')" @before-select="formManagement.resetEditorSession" />
         </div>
       </div>
     </div>
@@ -210,22 +210,8 @@ const showShareModal = ref(false)
 const selectedForm = ref<Form | null>(null)
 const newFormInput = ref<HTMLInputElement | null>(null)
 
-/**
- * Everything the editor holds about the form being worked on.
- *
- * The editor reads its document and its fields from stores that outlive the
- * route, so opening it without clearing them shows the previous form. That is
- * what made "New form" open an existing one.
- */
-function resetEditorState() {
-  documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
-  formFieldsStore.clearFields()
-  formFieldsStore.setCurrentForm(null)
-  documentStore.markSaved()
-}
-
 function startNewForm() {
-  resetEditorState()
+  formManagement.resetEditorSession()
   newFormInput.value?.click()
 }
 
@@ -309,7 +295,7 @@ async function handleEdit(form: Form) {
   try {
     // Same reason as `startNewForm`: whatever is already open would otherwise
     // still be there underneath the form being opened.
-    resetEditorState()
+    formManagement.resetEditorSession()
 
     const pdfFileName = form.pdfUrl.split('/').pop() || `${form.title}.pdf`
 

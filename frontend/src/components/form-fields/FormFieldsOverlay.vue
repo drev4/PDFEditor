@@ -1,8 +1,21 @@
 <template>
+  <!--
+    Sized in the canvas's own pixels and scaled as a whole, rather than left at
+    100% and every field scaled individually.
+
+    `canvas { max-width: 100% }` means the canvas is usually drawn smaller than
+    the pixels it holds, so a field laid out in canvas pixels inside a
+    100%-wide overlay drifts further from the page the narrower the window
+    gets — and off the page entirely on a small one. One transform on the
+    container keeps the overlay and the canvas in the same coordinate space by
+    construction, which is a property rather than an arithmetic agreement that
+    every call site has to remember.
+  -->
   <div
     ref="overlayRef"
     class="form-fields-overlay"
     :class="{ 'adding-mode': formFieldsStore.isAddingField }"
+    :style="overlayStyle"
     @click="handleOverlayClick"
     @mousemove="handleMouseMove"
   >
@@ -81,8 +94,19 @@ const BASE_SCALE = 1.5
 /** Stored units -> canvas pixels. */
 const renderScale = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)
 
-/** Stored units -> pixels on screen, which is what the overlay is laid out in. */
-const scaleFactor = computed(() => renderScale.value * (props.displayScale ?? 1))
+/**
+ * Stored units -> canvas pixels. The overlay is laid out in canvas pixels and
+ * scaled as a whole, so nothing below here needs to know about the display
+ * ratio.
+ */
+const scaleFactor = renderScale
+
+const overlayStyle = computed(() => ({
+  width: `${props.canvasWidth}px`,
+  height: `${props.canvasHeight}px`,
+  transform: `scale(${props.displayScale ?? 1})`,
+  transformOrigin: 'top left'
+}))
 
 // Derived from the canvas's own pixels, not its displayed box: this is the
 // page's size in stored units and must not move when the window is resized.
@@ -141,13 +165,14 @@ const handleMouseMove = (e: MouseEvent) => {
   }
 
   const rect = overlayRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left - defaultFieldSize.value.width / 2
-  const y = e.clientY - rect.top - defaultFieldSize.value.height / 2
+  const display = props.displayScale ?? 1
+  const x = (e.clientX - rect.left) / display - defaultFieldSize.value.width / 2
+  const y = (e.clientY - rect.top) / display - defaultFieldSize.value.height / 2
 
-  // Keep within bounds using the actual rendered size of the overlay
+  // Bounded by the overlay's own pixels, not its visual box.
   previewPosition.value = {
-    x: Math.max(0, Math.min(x, rect.width - defaultFieldSize.value.width)),
-    y: Math.max(0, Math.min(y, rect.height - defaultFieldSize.value.height))
+    x: Math.max(0, Math.min(x, props.canvasWidth - defaultFieldSize.value.width)),
+    y: Math.max(0, Math.min(y, props.canvasHeight - defaultFieldSize.value.height))
   }
 }
 
@@ -158,7 +183,10 @@ const handleOverlayClick = async (e: MouseEvent) => {
     return
   }
 
+  // `getBoundingClientRect` reports the *visual* box, so a click inside a
+  // scaled element has to be divided back out to element-local pixels.
   const rect = overlayRef.value.getBoundingClientRect()
+  const display = props.displayScale ?? 1
   const size = defaultFieldSize.value
 
   // The click arrives in screen space on a page that may be turned. What gets
@@ -166,13 +194,16 @@ const handleOverlayClick = async (e: MouseEvent) => {
   // against, so the point goes back through the inverse of the transform the
   // field is drawn with. Storing the raw click is how a field placed on a
   // rotated page ends up somewhere else on the printed PDF.
-  const screenX = e.clientX - rect.left - size.width / 2
-  const screenY = e.clientY - rect.top - size.height / 2
+  const screenX = (e.clientX - rect.left) / display - size.width / 2
+  const screenY = (e.clientY - rect.top) / display - size.height / 2
+
+  const canvasW = props.canvasWidth
+  const canvasH = props.canvasHeight
 
   const stored = unrotateFieldPoint(
     {
-      x: Math.max(0, Math.min(screenX, rect.width - size.width)),
-      y: Math.max(0, Math.min(screenY, rect.height - size.height))
+      x: Math.max(0, Math.min(screenX, canvasW - size.width)),
+      y: Math.max(0, Math.min(screenY, canvasH - size.height))
     },
     pageSize.value.pageWidth,
     pageSize.value.pageHeight,
@@ -208,32 +239,22 @@ const handleOverlayClick = async (e: MouseEvent) => {
     options: (fieldType === 'radio' || fieldType === 'dropdown') ? ['Option 1', 'Option 2'] : undefined
   })
 
-  // Auto-initialize form if needed and save to server
+  // Placing a field does not write to the server either. What it does do is
+  // make sure there is a form to belong to, because the document itself has to
+  // be stored for any of this to mean anything — see useFormManagement.
   try {
-    // Ensure we have a form to save to
     await autoInitializeForm()
-
-    // Save the new field
-    await formFieldsStore.saveField(newField.id)
-
-    toast.add({
-      severity: 'success',
-      summary: 'Campo agregado',
-      detail: `${getFieldTypeLabel(fieldType)} agregado exitosamente`,
-      life: 2000
-    })
+    formFieldsStore.markDirty()
   } catch (error) {
-    console.error('Failed to save field:', error)
+    console.error('Failed to prepare the form:', error)
 
     toast.add({
       severity: 'error',
-      summary: 'Error al agregar campo',
-      detail: 'No se pudo guardar el campo. Intenta de nuevo.',
+      summary: 'Could not add the field',
+      detail: 'The form could not be prepared. Try again.',
       life: 3000
     })
   }
-
-  previewPosition.value = null
 }
 </script>
 

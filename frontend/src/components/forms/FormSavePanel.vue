@@ -94,20 +94,20 @@
         />
 
         <Button
-          :label="documentStore.hasUnsavedEdits ? 'Save all (unsaved changes)' : 'Save all'"
+          :label="hasUnsavedWork ? 'Save all (unsaved changes)' : 'Save all'"
           icon="pi pi-save"
           @click="handleUpdateFields"
           class="w-full"
           severity="info"
-          :outlined="!documentStore.hasUnsavedEdits"
+          :outlined="!hasUnsavedWork"
           :loading="formFieldsStore.loading || isUploadingPDF"
         />
 
         <!-- The text and image tools change the PDF in the browser and nothing
              is sent until this is pressed, so the editor has to say so. -->
-        <p v-if="documentStore.hasUnsavedEdits" class="text-meta text-limit flex items-start gap-1">
+        <p v-if="hasUnsavedWork" class="text-meta text-limit flex items-start gap-1">
           <i class="pi pi-exclamation-circle mt-0.5"></i>
-          <span>Text and images you added are only in this browser. Save all to store them.</span>
+          <span>Your changes are only in this browser. Save all to store them.</span>
         </p>
 
         <Button
@@ -181,6 +181,12 @@ const showShareModal = ref(false)
 const hasFields = computed(() => formFieldsStore.fields.length > 0)
 const currentForm = computed(() => formsStore.currentForm)
 const hasPDFLoaded = computed(() => !!documentStore.activeDocument?.file)
+
+// One notion of "unsaved" for the whole editor: field geometry and document
+// bytes are written by different calls but they are one decision to the user.
+const hasUnsavedWork = computed(
+  () => documentStore.hasUnsavedEdits || formFieldsStore.hasUnsavedChanges
+)
 
 // Auto-populate form title from document name and clear form state
 watch(() => documentStore.activeDocument, async (doc, oldDoc) => {

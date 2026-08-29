@@ -73,7 +73,11 @@
         </button>
       </header>
 
-      <main class="flex-1 overflow-hidden relative bg-surface-sunken">
+      <!-- The PublicForm artboard sets the page on a grey ground as a sheet of
+           paper with its own border and shadow. `.public-paper` gives the
+           rendered canvas that treatment; elevation is for paper and menus
+           only, and this is the paper. -->
+      <main class="flex-1 overflow-hidden relative bg-surface-sunken public-paper">
         <div
           v-if="loadingPdf"
           class="absolute inset-0 flex flex-col items-center justify-center bg-surface-sunken/80 z-20"
@@ -299,3 +303,18 @@ async function handleConfirmSubmit() {
   }
 }
 </script>
+
+<style scoped>
+.public-paper :deep(.pdf-canvas-wrapper) {
+  background: theme('colors.surface.DEFAULT');
+  border: 1px solid theme('colors.line.paper');
+  box-shadow: theme('boxShadow.paper');
+}
+
+/* The respondent's page is a document, not a workspace: no grid, no drawing
+   chrome, and room around the sheet the way the artboard frames it. */
+.public-paper :deep(.grid-overlay) {
+  display: none;
+}
+</style>
+

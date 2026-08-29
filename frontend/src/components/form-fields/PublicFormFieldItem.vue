@@ -89,7 +89,6 @@ const props = defineProps<{
   rotation?: number
   pageWidth?: number
   pageHeight?: number
-  displayScale?: number
 }>()
 
 defineEmits<{
@@ -100,7 +99,9 @@ defineEmits<{
 const BASE_SCALE = props.baseScale || 1.5
 
 const fieldStyle = computed(() => {
-  const scaleFactor = (props.scale / BASE_SCALE) * (props.displayScale ?? 1)
+  // Canvas pixels. The overlay carries the display ratio for everything inside
+  // it, so this must not apply it a second time.
+  const scaleFactor = props.scale / BASE_SCALE
   const { x, y, width, height } = props.field.position
 
   // The page's upright size in stored units, which rotation is measured

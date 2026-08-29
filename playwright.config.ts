@@ -25,7 +25,13 @@ export default defineConfig({
         {
             command: 'npm run dev --workspace=backend',
             url: 'http://localhost:3000/health',
-            reuseExistingServer: !process.env.CI,
+            // Never adopt a server this config did not start. A dev backend
+            // already on :3000 does not have the RATE_LIMIT_* overrides below,
+            // so registration hits the real limiter and ~28 tests fail on a
+            // `waitForURL` timeout that looks exactly like an application bug.
+            // That happened three times in one session before it was diagnosed.
+            // If the port is busy, failing to start is the honest outcome.
+            reuseExistingServer: false,
             timeout: 120000,
             stdout: 'pipe',
             stderr: 'pipe',
@@ -50,6 +56,8 @@ export default defineConfig({
         {
             command: 'npm run dev --workspace=frontend',
             url: 'http://localhost:5173',
+            // The SPA carries no test-only configuration, so adopting a dev
+            // server here is harmless — unlike the backend above.
             reuseExistingServer: !process.env.CI,
             timeout: 120000,
             stdout: 'pipe',

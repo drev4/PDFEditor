@@ -91,35 +91,68 @@
       Below `lg` the rail cannot sit beside the document either, so it rides
       along underneath. That is the only reason it is ever collapsed.
     -->
-    <Drawer v-model:visible="mobileMenuVisible" header="Menu" class="w-80">
+    <Drawer
+      v-model:visible="mobileMenuVisible"
+      class="w-80 app-drawer"
+      :showHeader="false"
+    >
       <div class="flex flex-col h-full">
-        <nav class="flex flex-col gap-0.5 pb-4 border-b border-line">
+        <!-- Its own header, so the panel opens with the product's mark rather
+             than the component's default bar. -->
+        <div class="flex items-center gap-3 px-1 pb-5">
+          <BrandMark />
+          <div class="flex-grow" />
+          <button
+            type="button"
+            class="flex items-center justify-center w-8 h-8 rounded-input text-faint hover:text-ink hover:bg-surface-sunken transition-colors"
+            aria-label="Close menu"
+            @click="mobileMenuVisible = false"
+          >
+            <i class="pi pi-times text-[13px]" />
+          </button>
+        </div>
+
+        <nav class="flex flex-col gap-1 pb-5">
           <RouterLink
             v-for="item in navItems"
             :key="item.to"
             :to="item.to"
-            class="flex items-center gap-2.5 h-nav px-2.5 rounded-input text-row text-muted hover:bg-surface-sunken transition-colors"
+            class="group flex items-center gap-3 h-11 px-2.5 rounded-card text-row font-medium text-ink hover:bg-accent-soft transition-colors"
             @click="mobileMenuVisible = false"
           >
-            <i :class="item.icon" class="text-[15px]" />
+            <!-- The tinted tile is the one bit of colour in the panel. It reads
+                 as a destination rather than a list item, which is what makes
+                 this feel like a way out of the editor. -->
+            <span
+              class="flex items-center justify-center w-8 h-8 rounded-input bg-surface-sunken text-muted
+                     group-hover:bg-accent group-hover:text-white transition-colors"
+            >
+              <i :class="item.icon" class="text-[13px]" />
+            </span>
             <span>{{ item.label }}</span>
+            <span class="flex-grow" />
+            <i class="pi pi-angle-right text-[12px] text-faint group-hover:text-accent transition-colors" />
           </RouterLink>
         </nav>
 
+        <div class="h-px bg-line" />
+
         <EditorRail
-          class="flex flex-1 lg:hidden w-full border-r-0"
+          class="flex flex-1 lg:hidden w-full border-r-0 bg-transparent"
           :pdf-doc="pdfViewerRef?.pdfDoc || null"
         />
 
-        <div class="pt-4 border-t border-line">
-          <Button
-            label="Log out"
-            icon="pi pi-sign-out"
-            severity="danger"
-            text
-            class="w-full justify-start"
+        <div class="pt-4 mt-auto border-t border-line">
+          <button
+            type="button"
+            class="flex items-center gap-3 w-full h-11 px-2.5 rounded-card text-row font-medium text-muted hover:text-danger hover:bg-danger-soft transition-colors"
             @click="handleLogout"
-          />
+          >
+            <span class="flex items-center justify-center w-8 h-8 rounded-input bg-surface-sunken">
+              <i class="pi pi-sign-out text-[13px]" />
+            </span>
+            <span>Log out</span>
+          </button>
         </div>
       </div>
     </Drawer>
@@ -247,7 +280,11 @@ useFieldsErrorHandler()
  *    impossible.
  */
 const hasUnsavedWork = computed(
-  () => !!documentStore.activeDocument && (documentStore.hasUnsavedEdits || !formFieldsStore.currentFormId)
+  () => !!documentStore.activeDocument && (
+    documentStore.hasUnsavedEdits ||
+    formFieldsStore.hasUnsavedChanges ||
+    !formFieldsStore.currentFormId
+  )
 )
 
 const leaveDialog = ref<{ visible: boolean; saving: boolean; to: RouteLocationRaw | null }>({
@@ -267,7 +304,7 @@ const leaveDialogCopy = computed(() => {
   return {
     title: 'You have unsaved changes',
     message:
-      'The text and images you added are only in this browser. Leaving now discards them.'
+      'The fields, text and images you changed are only in this browser. Leaving now discards them.'
   }
 })
 
@@ -326,10 +363,7 @@ const handleLeaveSave = async () => {
 const handleLeaveDiscard = () => {
   // The document is being abandoned, so it must not be waiting in the store for
   // whatever screen comes next.
-  documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
-  formFieldsStore.clearFields()
-  formFieldsStore.setCurrentForm(null)
-  documentStore.markSaved()
+  formManagement.resetEditorSession()
   proceed()
 }
 
@@ -342,9 +376,11 @@ onMounted(() => {
 })
 
 const closeDocument = () => {
-  if (documentStore.activeDocumentId) {
-    documentStore.closeDocument(documentStore.activeDocumentId)
-  }
+  if (!documentStore.activeDocumentId) return
+
+  // Closes the fields and the form with it. Closing only the document left the
+  // previous form's fields drawn over whatever PDF was opened next.
+  formManagement.resetEditorSession()
 }
 
 const handleLogout = async () => {
@@ -374,3 +410,12 @@ watch(() => documentStore.error, (error) => {
   }
 })
 </script>
+
+<style scoped>
+/* A drawer that feels like part of this product rather than a grey panel:
+   the sidebar's own tint, and room for the tiles to breathe. */
+.app-drawer :deep(.p-drawer-content) {
+  background: theme('colors.surface.subtle');
+  padding: 18px 14px;
+}
+</style>

@@ -1,5 +1,8 @@
 <template>
-  <div class="public-form-fields-overlay">
+  <!-- Same transform as the editor overlay, for the same reason: the canvas is
+       drawn smaller than its pixels, and on a phone it is drawn much smaller.
+       See FormFieldsOverlay.vue. -->
+  <div class="public-form-fields-overlay" :style="overlayStyle">
     <PublicFormFieldItem
       v-for="field in pageFields"
       :key="field.id"
@@ -11,7 +14,6 @@
       :rotation="rotation"
       :page-width="pageSize.pageWidth"
       :page-height="pageSize.pageHeight"
-      :display-scale="displayScale"
     />
   </div>
 </template>
@@ -46,6 +48,13 @@ const pageSize = computed(() =>
   unrotatedPageSize(props.canvasWidth || 0, props.canvasHeight || 0, rotation.value, props.scale / 1.5)
 )
 
+const overlayStyle = computed(() => ({
+  width: `${props.canvasWidth || 0}px`,
+  height: `${props.canvasHeight || 0}px`,
+  transform: `scale(${props.displayScale ?? 1})`,
+  transformOrigin: 'top left'
+}))
+
 const pageFields = computed(() => {
   return props.fields.filter(field => (field.position?.page || 1) === currentPage.value)
 })
@@ -64,8 +73,6 @@ const updateResponse = (fieldId: string, value: any) => {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
   pointer-events: none;
   z-index: 10;
 }
