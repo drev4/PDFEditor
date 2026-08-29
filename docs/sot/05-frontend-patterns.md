@@ -122,34 +122,45 @@ expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields', mockFieldData)
 
 Do not assert on the internal shape of a composable's refs when the same thing can be asserted on what it caused.
 
-## 8. Visual design — `[NOT IMPLEMENTED]`
+## 8. Visual design
 
-**A full design exists and none of it is built.** The UI in `frontend/src` today is the original one: PrimeVue defaults, Tailwind's stock palette, gradients and glass in places. Everything in this section is target design, and nothing should be described elsewhere as though it ships.
+**Built** ([`features/0011`](../../features/0011-adopt-the-design-system.md)). The design that existed only as a canvas is now the running app: the stock Tailwind palette, `system-ui` type, the gradients and the glass are gone, and so is the "PDF Editor Pro" name, which appeared nowhere in the design or the product.
 
-**Source of truth for the design:** the *VuePDF Forms* canvas at <https://claude.ai/code/artifact/be7f6015-4f99-46aa-9a61-8c051d4637b4>. It is **not in this repository** — it is a published Claude Design canvas, and this section exists so the next session can find it rather than rediscovering it. It holds 11 artboards on four pages: **Landing** (desktop + phone), **Product** (Forms, Field editor, Responses, Public form + phone), **SaaS layer** (Plan & usage, Members & roles, Plan limit reached), and **System**.
+**Source of truth for the design:** the *VuePDF Forms* canvas at <https://claude.ai/code/artifact/be7f6015-4f99-46aa-9a61-8c051d4637b4>. It is **not in this repository** — it is a published Claude Design canvas. It holds 11 artboards on four pages: **Landing** (`Landing`, `LandingMobile`), **Product** (`Main`, `Editor`, `Responses`, `PublicForm`, `PublicFormMobile`), **SaaS layer** (`Plans`, `Members`, `LimitReached`), and **System**.
 
-The values, read out of the `System` artboard:
+Reading it is not obvious and is worth recording, because the first attempt fails: the artboards are lazily offloaded, so the published page looks like a 2.6 MB runtime shell. The artboard sources are in it, as JSON string values keyed by `<Name>.dc.html`. Read the artifact with the Artifact tool, which saves the page to a local file, then slice each value out and `json.loads` it — what comes back is the original artboard as plain inline-styled HTML.
+
+### Where the values live now
 
 | | |
 |---|---|
-| Type | **Instrument Sans** 400/500/600; **JetBrains Mono** 400/500 |
-| Ink / Muted / Faint / Line | `#191b21` / `#6a6f7b` / `#9ba1ac` / `#e7e8ec` |
-| Accent / Accent soft | `#3554d1` / `#eef1fd` |
-| Published / At limit | `#12704f` / `#8a5c0a` |
-| Type scale | 21/600/-0.015em title · 15/600 section · 13.5/500 row title · 13/400 body · 11/600/0.06em column label · mono 12 |
-| Controls | 36 px primary, 34 px secondary, 32 px compact |
-| Geometry | radius 10 / 7 / 999 (card / control / pill) · gutter 32 · sidebar 232 · table row 56 · mobile hit target 48 |
-| Elevation | paper and menus only |
+| Palette, type scale, radii, control heights, shadows | `frontend/tailwind.config.cjs` |
+| PrimeVue component tokens | `frontend/src/theme.ts` (`VuePDFPreset`), applied in `main.ts` |
+| `.num`, `.col-label`, `.pill` and the base layer | `frontend/src/style.css` |
 
-Three rules the canvas states, which are the ones easiest to lose in implementation:
+`tailwind.config.cjs` **replaces** `colors`, `fontFamily` and `fontSize` rather than extending them. That is deliberate — leaving the stock ramps reachable is how a screen ends up half in `slate-500` and half in `muted` — and it has a consequence worth knowing before editing any component: **an undefined utility is dropped by Tailwind silently.** There is no build error and no warning. `npm run build` passing says nothing about whether a class name still resolves; `grep`, or a check of the generated CSS, is the only signal.
 
-- **Accent is rationed** — one primary action per screen, the active nav item, the selected field. Everything else neutral, so a selection on the PDF canvas never competes with chrome.
-- **Numbers are always mono.** Counts, dates, ids and coordinates line up in a column and are never mistaken for prose.
-- **A field looks different in the two places it appears.** In the editor it is a bordered rectangle with a type tag, because the author is manipulating geometry; on the public form it drops to a single underline so the document still reads as a document.
+Colours are named by role, not by hue: `ink` / `muted` / `faint` / `disabled` for text, `accent` (+`.pressed`, `.soft`), `published`, `limit`, `danger`, `neutral` for status, `surface` (+`.subtle`, `.sunken`, `.track`), `line` (+`.strong`, `.soft`, `.paper`), and `field` (`.idle`, `.underline`, `.guide`). Type is named by role too — `title`, `section`, `row`, `body`, `meta`, `micro`, `label`, `mono` — so a screen cannot invent a fourteenth size.
 
-**This is not a rewrite of the component layer.** The canvas says so explicitly: *"Tailwind's default palette is replaced; PrimeVue Aura keeps the component behaviour."* Adopting it is a token and layout change, not a migration away from PrimeVue.
+### The three rules, and where each is enforced
 
-Tracked in [`docs/BACKLOG.md`](../BACKLOG.md); sequenced in the [build order](./10-saas-roadmap.md#build-order).
+- **Accent is rationed** — one primary action per screen, the active nav item, the selected field. It is the reason `FormFieldItem.vue` no longer gives each field type its own hue: five saturated colours over a document leave nothing for the selection to say with.
+- **Numbers are always mono.** The `.num` class in `style.css`, plus `frontend/src/utils/formatDate.ts`, which holds the three date shapes the design uses (`relativeTime`, `submittedAt`, `calendarDate`).
+- **A field looks different in the two places it appears.** `FormFieldItem.vue` is a bordered rectangle with a type tag; `PublicFormFieldItem.vue` drops to a single underline. They share no styling, on purpose.
+
+### Fonts are self-hosted, and have to be
+
+Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as same-origin assets, imported at the top of `style.css`. A `<link>` to `fonts.googleapis.com` is **blocked twice** by the SPA's own CSP — `style-src 'self' 'unsafe-inline'` rejects the stylesheet and `font-src 'self' data:` rejects the font files (`frontend/vite.config.ts`, and [07-security-and-privacy](./07-security-and-privacy.md)). It fails silently into the fallback font. Adopting the design required no CSP change at all, and should not be allowed to.
+
+### What the canvas has that the app does not
+
+Three things are drawn and deliberately not built, so that nobody reads the canvas as a description of the product:
+
+- **The organization switcher** in the sidebar. No endpoint returns an organization's name — `frontend/src/services/organization.ts` can list members and invitations and nothing else — so there is nothing to render.
+- **The plan card** in the sidebar and the `Plans` / `LimitReached` artboards. Plans do not exist; they are step 7 of the [build order](./10-saas-roadmap.md#build-order).
+- **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+The **landing page** is designed and unbuilt, and is a [parallel track](./10-saas-roadmap.md#parallel-track-the-landing-page) rather than a step in the chain.
 
 ## 9. What the frontend is missing
 

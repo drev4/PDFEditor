@@ -81,7 +81,7 @@ Form Saved Panel → Upload PDF → Select file → Upload
 ```
 ┌─────────────────────────────────────────────────────┐
 │ Header                                              │
-│ [Logo] PDF Editor Pro    [Upload PDF] [Logout]     │
+│ [Logo] VuePDF Forms    [Upload PDF] [Logout]       │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
 │  No documents:                                      │

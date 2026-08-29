@@ -1,6 +1,6 @@
 # 0011 — Adopt the design system across the product
 
-**Status:** in progress
+**Status:** done
 **Priority:** P2 (see [docs/BACKLOG.md](../docs/BACKLOG.md))
 **Branch:** `feature/0011-adopt-the-design-system`
 **Related:** [05-frontend-patterns §8](../docs/sot/05-frontend-patterns.md) · [10-saas-roadmap build order, step 6](../docs/sot/10-saas-roadmap.md#build-order) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [`features/0007`](0007-security-headers-and-csp.md)
@@ -96,3 +96,26 @@ Checkable when finished:
 > - In `docs/BACKLOG.md`: remove the P2 *Adopt the design system* row and the P3 *The members screen was built without the design* row. File anything you found and did not fix, with a priority and a why.
 > - Set this file to `**Status:** done` and add an Outcome section.
 > - Run the `ship-checklist` skill before opening the PR.
+
+## Outcome
+
+Done, in five commits, one per phase, so a regression is bisectable.
+
+**What shipped.** `frontend/tailwind.config.cjs` carries the canvas palette, type scale, radii, control heights and shadows, replacing Tailwind's `colors`, `fontFamily` and `fontSize` rather than extending them. `frontend/src/theme.ts` holds a `definePreset(Aura, …)` so PrimeVue's components and the hand-written markup cannot disagree. Instrument Sans and JetBrains Mono are bundled from `@fontsource/*` and the CSP in `vite.config.ts` was **not touched**. `AppShell.vue` is the 232px sidebar; `Main`, `Editor`, `Responses`, `PublicForm` and `Members` are built against their artboards; `BrandMark`, `StatusPill` and `utils/formatDate.ts` are the shared pieces. The brand is **VuePDF Forms**.
+
+**The four traps in the spec were all real**, and one more was not anticipated:
+
+- The Google Fonts route would have been blocked twice. Self-hosting avoided it entirely.
+- Replacing the palette did drop class names silently — and so did **replacing `theme.fontSize`**, which the spec did not call out. `text-sm` and its siblings stopped resolving with no error anywhere. That needed a second sweep, and then a check that reads the *built CSS* and asserts every class the markup uses is actually in it, because the build cannot fail on this. That check is `scratchpad`-only; if this recurs it is worth keeping in the repo.
+- `e2e/pdf-workflow.spec.ts:39` and `PageThumbnails.spec.ts:115` both went red exactly as predicted and moved in the same commits. A third the spec missed: `e2e/example.spec.ts` asserted `toHaveTitle(/vuepdf/)` — **case-sensitively** — so renaming the title to `VuePDF Forms` broke it.
+- No `:style` coordinate binding and no `DEFAULT_SCALE` was touched.
+
+**Three things on the canvas were deliberately not built**, because building them would have meant inventing data: the organization switcher (no endpoint returns an organization's name), the plan card (plans are step 7), and the canvas's role semantics — the `Members` artboard says a member sees "only the forms they created" and `backend/src/routes/forms.ts` scopes by organization and checks membership, not role. `MembersView.vue` states what the guards enforce. All three are filed in `docs/BACKLOG.md`.
+
+**Two incidental corrections.** The public form's header claimed answers were "Encrypted & Saved"; nothing encrypts them, and it now says "Progress saved". The confirmation screen called `new Date()` inside its template, so its "recorded at" time moved on every re-render.
+
+**Verification.** Frontend 30 specs / 250 tests, backend 12 / 115, integration 7 / 72, `vue-tsc` and backend `tsc --noEmit` clean.
+
+**The E2E suite is not verified, and the reason is not this change.** 25 of 41 tests failed on a `429` from the register limiter: `playwright.config.ts` sets `reuseExistingServer: !process.env.CI`, and a backend already running on `:3000` from an earlier `npm run dev` was adopted *without* the `RATE_LIMIT_*: 100000` overrides the config passes to a server it starts itself. Confirmed by `curl`-ing `POST /api/auth/register` directly: `429`. Filed in `docs/BACKLOG.md`, because a suite that fails this way looks exactly like an application bug. The suite needs a re-run against a backend started by Playwright itself.
+
+**Also not verified: the PDF round-trip by hand** — that a field placed in the editor lands in the same place in the embedded AcroForm. Nothing automated covers it (P3 row: *PDF round-trip test*), and the argument that it is unaffected is a code argument, not a test: no positioning code was touched. It should still be looked at once in the running app before this merges.
