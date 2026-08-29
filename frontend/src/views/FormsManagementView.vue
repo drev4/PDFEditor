@@ -175,6 +175,13 @@
       @unpublish="handleUnpublish"
     />
 
+    <LimitReachedDialog
+      :visible="limitReached !== null"
+      :message="limitReached?.message"
+      :form-title="limitReached?.formTitle"
+      @close="limitReached = null"
+    />
+
     <ConfirmDialog />
   </AppShell>
 </template>
@@ -190,11 +197,14 @@ import ConfirmDialog from 'primevue/confirmdialog'
 import AppShell from '@/layouts/AppShell.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import ShareFormModal from '@/components/forms/ShareFormModal.vue'
+import LimitReachedDialog from '@/components/plan/LimitReachedDialog.vue'
 import FileUploader from '@/components/ui/FileUploader.vue'
 import { useFormsStore } from '@/stores/forms.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
+import { usePlanStore } from '@/stores/plan.store'
+import { ApiError } from '@/services/api'
 import { relativeTime } from '@/utils/formatDate'
 import { type Form, type FormStatus } from '@/services/forms'
 
@@ -205,8 +215,11 @@ const formsStore = useFormsStore()
 const documentStore = useDocumentStore()
 const formFieldsStore = useFormFieldsStore()
 const formManagement = useFormManagement()
+const planStore = usePlanStore()
 
 const showShareModal = ref(false)
+/** Set when publishing came back `402`; drives the LimitReached dialog. */
+const limitReached = ref<{ message: string; formTitle: string | null } | null>(null)
 const selectedForm = ref<Form | null>(null)
 const newFormInput = ref<HTMLInputElement | null>(null)
 
@@ -329,7 +342,22 @@ async function handlePublish(formId: string) {
   try {
     await formsStore.updateFormStatus(formId, 'published')
     toast.add({ severity: 'success', summary: 'Published', detail: 'Form is now public', life: 3000 })
+    // Publishing moved a number the sidebar card shows.
+    planStore.refresh()
   } catch (error) {
+    // A 402 is a plan limit, not a failure: nothing broke and nothing was lost,
+    // the form is still a draft. It gets the LimitReached screen rather than a
+    // red toast saying the publish failed. Branching on the status, never on
+    // the message — the two rejections are distinguished by code on purpose.
+    if (error instanceof ApiError && error.status === 402) {
+      showShareModal.value = false
+      limitReached.value = {
+        message: error.message,
+        formTitle: formsStore.forms.find(f => f.id === formId)?.title ?? null
+      }
+      planStore.refresh()
+      return
+    }
     toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to publish', life: 3000 })
   }
 }
@@ -338,6 +366,8 @@ async function handleUnpublish(formId: string) {
   try {
     await formsStore.updateFormStatus(formId, 'draft')
     toast.add({ severity: 'success', summary: 'Unpublished', detail: 'Form is now draft', life: 3000 })
+    // Unpublishing is how a slot is freed, so the card must catch up.
+    planStore.refresh()
   } catch (error) {
     toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to unpublish', life: 3000 })
   }

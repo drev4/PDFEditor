@@ -137,6 +137,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Toast from 'primevue/toast'
 import ShareFormModal from './ShareFormModal.vue'
 import { type Form } from '@/services/forms'
+import { ApiError } from '@/services/api'
 import { useFormsStore } from '@/stores/forms.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
@@ -322,11 +323,15 @@ async function handlePublish(formId: string) {
       selectedForm.value = forms.value.find(f => f.id === formId) || null
     }
   } catch (err) {
+    // A plan limit is not a failure. The full LimitReached screen lives on the
+    // dashboard (FormsManagementView.vue); here the server's own sentence is at
+    // least accurate about what happened and what to do.
+    const isLimit = err instanceof ApiError && err.status === 402
     toast.add({
-      severity: 'error',
-      summary: 'Error',
-      detail: 'Failed to publish form',
-      life: 3000
+      severity: isLimit ? 'warn' : 'error',
+      summary: isLimit ? 'Plan limit reached' : 'Error',
+      detail: isLimit ? (err as ApiError).message : 'Failed to publish form',
+      life: isLimit ? 6000 : 3000
     })
   }
 }
