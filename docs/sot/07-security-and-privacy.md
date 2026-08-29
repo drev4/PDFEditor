@@ -116,7 +116,7 @@ What bounds it:
 | Bound to one address | Accepting while signed in as a different email is refused with `409`, not silently granted — a forwarded link must not put the wrong person inside a customer's organization |
 | Throttled | `POST /api/organizations/invitations/accept` is unauthenticated by design and carries a named per-IP limiter. Unknown, expired, revoked and already-accepted tokens all answer identically, so it is not an oracle |
 
-**What this does not do:** nothing notifies the invited person. If the inviter loses the link before sending it, the invitation is unusable and has to be revoked and reissued. An email provider is filed in [`docs/BACKLOG.md`](../BACKLOG.md); it wants the job queue that arrives at step 8 of the [build order](./10-saas-roadmap.md#build-order).
+**What this does not do:** nothing notifies the invited person. If the inviter loses the link before sending it, the invitation is unusable and has to be revoked and reissued. An email provider is filed in [`docs/BACKLOG.md`](../BACKLOG.md); it wants the job queue that arrives at step 9 of the [build order](./10-saas-roadmap.md#build-order).
 
 ### Two rejections, two codes
 

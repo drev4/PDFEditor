@@ -122,7 +122,36 @@ expect(api.post).toHaveBeenCalledWith('/forms/form-1/fields', mockFieldData)
 
 Do not assert on the internal shape of a composable's refs when the same thing can be asserted on what it caused.
 
-## 8. What the frontend is missing
+## 8. Visual design — `[NOT IMPLEMENTED]`
+
+**A full design exists and none of it is built.** The UI in `frontend/src` today is the original one: PrimeVue defaults, Tailwind's stock palette, gradients and glass in places. Everything in this section is target design, and nothing should be described elsewhere as though it ships.
+
+**Source of truth for the design:** the *VuePDF Forms* canvas at <https://claude.ai/code/artifact/be7f6015-4f99-46aa-9a61-8c051d4637b4>. It is **not in this repository** — it is a published Claude Design canvas, and this section exists so the next session can find it rather than rediscovering it. It holds 11 artboards on four pages: **Landing** (desktop + phone), **Product** (Forms, Field editor, Responses, Public form + phone), **SaaS layer** (Plan & usage, Members & roles, Plan limit reached), and **System**.
+
+The values, read out of the `System` artboard:
+
+| | |
+|---|---|
+| Type | **Instrument Sans** 400/500/600; **JetBrains Mono** 400/500 |
+| Ink / Muted / Faint / Line | `#191b21` / `#6a6f7b` / `#9ba1ac` / `#e7e8ec` |
+| Accent / Accent soft | `#3554d1` / `#eef1fd` |
+| Published / At limit | `#12704f` / `#8a5c0a` |
+| Type scale | 21/600/-0.015em title · 15/600 section · 13.5/500 row title · 13/400 body · 11/600/0.06em column label · mono 12 |
+| Controls | 36 px primary, 34 px secondary, 32 px compact |
+| Geometry | radius 10 / 7 / 999 (card / control / pill) · gutter 32 · sidebar 232 · table row 56 · mobile hit target 48 |
+| Elevation | paper and menus only |
+
+Three rules the canvas states, which are the ones easiest to lose in implementation:
+
+- **Accent is rationed** — one primary action per screen, the active nav item, the selected field. Everything else neutral, so a selection on the PDF canvas never competes with chrome.
+- **Numbers are always mono.** Counts, dates, ids and coordinates line up in a column and are never mistaken for prose.
+- **A field looks different in the two places it appears.** In the editor it is a bordered rectangle with a type tag, because the author is manipulating geometry; on the public form it drops to a single underline so the document still reads as a document.
+
+**This is not a rewrite of the component layer.** The canvas says so explicitly: *"Tailwind's default palette is replaced; PrimeVue Aura keeps the component behaviour."* Adopting it is a token and layout change, not a migration away from PrimeVue.
+
+Tracked in [`docs/BACKLOG.md`](../BACKLOG.md); sequenced in the [build order](./10-saas-roadmap.md#build-order).
+
+## 9. What the frontend is missing
 
 1. **A server-state library** (TanStack Query for Vue) for reads. Today every store hand-manages `loading` / `error` / caching, and there is no request deduplication or background refetch. `useAsyncAction` stays for writes; reads are where the manual approach is costing the most.
 2. **A field-scale contract with the backend.** See section 4 — the highest-risk implicit coupling in the repo.
