@@ -4,6 +4,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { PrismaClient } from '@prisma/client'
+import { passThroughTransaction } from './mock-transaction'
 
 vi.mock('../src/services/db', async () => {
   const { mockDeep } = await import('vitest-mock-extended')
@@ -51,6 +52,9 @@ describe('Author-supplied regex is bounded and cannot break the service', () => 
   beforeEach(() => {
     mockReset(prismaMock)
     prismaMock.response.create.mockResolvedValue({ id: 'resp-1', answers: [] } as any)
+    // Submitting writes inside a transaction since features/0012. This spec is
+    // about the regex engine, not about plan limits.
+    passThroughTransaction(prismaMock)
   })
 
   describe('a stored pattern that is not a valid regex', () => {

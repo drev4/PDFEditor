@@ -6,6 +6,7 @@ import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { verifyFormOwnership, callerCanReachForm } from '../middleware/formOwnership.js'
 import { requireOrganizationId } from '../middleware/membership.js'
+import { assertCanPublishForm, isOverResponseLimit } from '../services/entitlements.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
 import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
@@ -219,7 +220,15 @@ formsRouter.put('/:id', authenticate, async (req: AuthRequest, res, next) => {
       data.pdfUrl = canonicalPdfUrl(data.pdfUrl) ?? undefined
     }
 
-    await verifyFormOwnership(req, id)
+    const existing = await verifyFormOwnership(req, id)
+
+    // Publishing is what the plan meters, not creating — see
+    // `services/entitlements.ts`. This route can publish too, because
+    // `updateFormSchema` accepts `status`; gating only PATCH /:id/status would
+    // leave the limit reachable through the back door.
+    if (data.status === 'published') {
+      await assertCanPublishForm(existing.organizationId, id)
+    }
 
     const form = await prisma.form.update({
       where: { id },
@@ -243,7 +252,11 @@ formsRouter.patch('/:id/status', authenticate, async (req: AuthRequest, res, nex
       return res.status(400).json({ error: 'Invalid status' })
     }
 
-    await verifyFormOwnership(req, id)
+    const existing = await verifyFormOwnership(req, id)
+
+    if (status === 'published') {
+      await assertCanPublishForm(existing.organizationId, id)
+    }
 
     const form = await prisma.form.update({
       where: { id },
@@ -281,6 +294,19 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
     })
 
     if (!form || form.status !== 'published') {
+      throw new AppError(404, 'Form not found')
+    }
+
+    // An organization that has spent the month's responses cannot accept this
+    // one, so the form must be unavailable *before* anybody fills it in —
+    // enforcing the limit only at submit time means the respondent types
+    // everything and then loses it.
+    //
+    // The same `404` a closed form gets, and deliberately not a `402`: the
+    // person reading this is a respondent, not the customer. A `402` would be
+    // meaningless to them and would publish the customer's billing state to
+    // anyone holding the share link.
+    if (await isOverResponseLimit(form.organizationId)) {
       throw new AppError(404, 'Form not found')
     }
 

@@ -4,6 +4,7 @@ import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { compilePattern } from '../services/pattern-validator.js'
 import { responseRateLimit } from '../middleware/rateLimit.js'
+import { assertResponseWithinLimit } from '../services/entitlements.js'
 
 export const responsesRouter = Router()
 
@@ -144,31 +145,43 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
     })
 
     try {
-      const response = await prisma.response.create({
-        data: {
-          formId,
-          ipAddress,
-          userAgent,
-          answers: {
-            create: validAnswerEntries.map(([fieldId, value]) => {
-              // Ensure value is always a string and not undefined/null
-              let stringValue = ''
-              if (value === true || value === false) {
-                stringValue = String(value)
-              } else if (value !== null && value !== undefined) {
-                stringValue = String(value)
-              }
+      // One transaction, so the meter and the response cannot disagree.
+      //
+      // `assertResponseWithinLimit` increments the month's counter and throws
+      // when that increment goes past the plan — which rolls this whole
+      // transaction back, leaving neither a response nor an inflated count.
+      // Doing it the other way round (check, then write) lets two concurrent
+      // submissions both pass at `limit - 1`. Nothing here may catch that
+      // throw; it has to reach the transaction boundary.
+      const response = await prisma.$transaction(async tx => {
+        await assertResponseWithinLimit(tx, form.organizationId)
 
-              return {
-                fieldId,
-                value: stringValue
-              }
-            })
+        return tx.response.create({
+          data: {
+            formId,
+            ipAddress,
+            userAgent,
+            answers: {
+              create: validAnswerEntries.map(([fieldId, value]) => {
+                // Ensure value is always a string and not undefined/null
+                let stringValue = ''
+                if (value === true || value === false) {
+                  stringValue = String(value)
+                } else if (value !== null && value !== undefined) {
+                  stringValue = String(value)
+                }
+
+                return {
+                  fieldId,
+                  value: stringValue
+                }
+              })
+            }
+          },
+          include: {
+            answers: true
           }
-        },
-        include: {
-          answers: true
-        }
+        })
       })
 
       res.status(201).json({
@@ -177,7 +190,13 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
         message: 'Response submitted successfully'
       })
     } catch (prismaError) {
-      console.error('Prisma Error creating response:', prismaError)
+      // A rejected submission is this API answering correctly, not failing.
+      // Logging the plan-limit `AppError` here as a "Prisma Error" would print
+      // a fault every time a free form fills up — the exact noise
+      // `middleware/errorHandler.ts` exists to keep out of the log.
+      if (!(prismaError instanceof AppError)) {
+        console.error('Prisma Error creating response:', prismaError)
+      }
       throw prismaError // Will be caught by errorHandler
     }
   } catch (error) {
