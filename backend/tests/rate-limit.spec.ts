@@ -122,6 +122,10 @@ describe('Rate limiting', () => {
       prismaMock.user.create.mockResolvedValue({
         id: 'user-1', email: 'a@example.com', name: null, createdAt: new Date()
       } as any)
+      // Registration is transactional since features/0009.
+      prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock))
+      prismaMock.organization.create.mockResolvedValue({ id: 'org-1' } as any)
+      prismaMock.membership.create.mockResolvedValue({ id: 'membership-1' } as any)
 
       const responses = await hit(3, () =>
         request(app).post('/api/auth/register').send(payload())

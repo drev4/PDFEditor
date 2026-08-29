@@ -1,8 +1,8 @@
 # 0009 — Organizations own resources, users belong to them
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md)) — step 4 of the [build order](../docs/sot/10-saas-roadmap.md#build-order), which is what makes it next
-**Branch:** _(filled in when it moves to "in progress")_
+**Branch:** `feature/0009-organizations-own-resources`
 **Related:** [`10-saas-roadmap`](../docs/sot/10-saas-roadmap.md) · [`03-domain-model`](../docs/sot/03-domain-model.md) · [`04-backend-patterns`](../docs/sot/04-backend-patterns.md) · [`06-api-reference`](../docs/sot/06-api-reference.md) · [`07-security-and-privacy`](../docs/sot/07-security-and-privacy.md)
 
 ## Context
@@ -29,7 +29,7 @@ Plus `routes/forms.ts:256`, which destructures `userId` off the public form so i
 
 **1. Do not follow the roadmap's five-step deploy sequence as five merges.**
 
-[10-saas-roadmap](../docs/sot/10-saas-roadmap.md#migration-path) sequences this as five independently deployable steps: add the tables, backfill, add a nullable `Form.organizationId`, repoint the reads, make it required. That sequencing exists to keep a **running system with live customer data** working during a rolling deploy where old and new code overlap.
+[10-saas-roadmap](../docs/sot/10-saas-roadmap.md#migration-path-done) sequences this as five independently deployable steps: add the tables, backfill, add a nullable `Form.organizationId`, repoint the reads, make it required. That sequencing exists to keep a **running system with live customer data** working during a rolling deploy where old and new code overlap.
 
 There is no staging, no production and no customer data ([08-operations](../docs/sot/08-operations.md)). Spreading this over five merges buys nothing and costs something specific: the schema sits with a **nullable tenancy column that nothing enforces**, possibly for weeks, and a nullable `organizationId` is exactly the kind of column that becomes permanently nullable because someone is unsure whether it is safe to tighten. Do it as **one branch, in that order**, ending with the column `NOT NULL`. The ordering still matters — the backfill must run before the column is required, and you must see it work — but it is one migration sequence, not five PRs.
 
@@ -98,3 +98,49 @@ After the move, forms belong to an organization. Deleting a **user** must no lon
 > **Step 9 — verify.** `npm run test:backend`, `npm run test:integration`, `npm run test:frontend`, `npm run test:e2e`, `npx tsc --noEmit` in `backend/`, `npm run build --workspace=frontend`. Remember the integration suite runs against `vuepdf_test` and nothing migrates it locally — `migrate deploy` against it after Steps 3 and 4, or the suite fails with `relation does not exist` and it looks like a broken test. Then by hand: register two accounts, create a form in each, and confirm neither can reach the other's form by URL or by API.
 >
 > **Step 10 — document.** Run `sot-sync`. [03-domain-model](../docs/sot/03-domain-model.md): the new entities, the entity diagram, the **cascade map** — including what deleting a user now does and no longer does — and the indexes section. [10-saas-roadmap](../docs/sot/10-saas-roadmap.md): move what is now real out of the target design and into the documents that describe reality, and close step 4 in the build order. [07-security-and-privacy](../docs/sot/07-security-and-privacy.md): the authorization row now says membership, not ownership; add the tenancy boundary to the trust-boundary section; and state plainly that **roles are stored but not enforced**, in the style [`0007`](0007-security-headers-and-csp.md) and [`0008`](0008-session-hardening.md) used for their known limits. [06-api-reference](../docs/sot/06-api-reference.md) after re-reading the routes (`api-contract-guard`). [04-backend-patterns](../docs/sot/04-backend-patterns.md): how a tenancy check is written, so the next endpoint gets it right. [09-quality-and-testing](../docs/sot/09-quality-and-testing.md): the spec counts. Update `docs/BACKLOG.md` and file what was deferred — role enforcement at minimum. Set this file to `**Status:** done` and add an `## Outcome`.
+
+
+## Outcome
+
+**Done.** Verified on Node 22.22.0: backend 12 specs / 115 tests, integration **5 / 43**, frontend 29 / 241, E2E 7 / 38, plus `tsc --noEmit` on the backend and the frontend build.
+
+### One branch, three migrations, proven against populated tables
+
+Executed as one branch rather than five, per the spec. Three migrations: additive schema, an idempotent SQL backfill, then the contract.
+
+**The contract migration is hand-written, and had to be.** `prisma migrate dev` plans the `user_id` → `created_by_user_id` rename as `DROP COLUMN` + `ADD COLUMN`, which would have silently discarded who created every existing form. It also refuses to run non-interactively once it sees a destructive step, which is how this was noticed. `RENAME COLUMN` keeps the data.
+
+**The backfill was run against a database that already held users and forms**, in a scratch copy, because CI only ever applies migrations to an empty one:
+
+- 3 users → 3 organizations, 3 owner memberships, 4 forms all placed correctly, 0 orphaned, 0 misplaced.
+- Naming held for the awkward cases: a user with a name got it, a user with `NULL` got their email local part, and a user whose name was whitespace also got the email local part.
+- Re-running inserted 0 and updated 0 — it is idempotent.
+- Its guard fires: with one form left unattached it raises `Backfill incomplete: 1 form(s) have no organization` rather than letting the next migration fail on a `NOT NULL` constraint that explains nothing.
+- The `NOT NULL` itself was then seen refusing bad data, which is the second layer.
+
+### The cascade rewrite, verified rather than asserted
+
+This is the part of the change that alters existing behaviour, and it was checked on real rows:
+
+| Action | Before | Now |
+|---|---|---|
+| Delete a user | Destroyed their forms, fields and **every response ever collected** | Forms survive, `createdByUserId` → `NULL`, answers intact |
+| Delete an organization | n/a | Destroys its forms and responses — the largest blast radius in the schema, and deliberate |
+
+### Verified, not assumed
+
+- **Removing the membership filter fails all eight tenancy tests** and nothing else. The filter is load-bearing.
+- The tenancy suite was written and run **before** the migration, and passed — recorded honestly: it is a regression guard around the rewrite, not a bug reproduction, because the boundary already held through `userId`. Its value is precisely that it also passes after.
+- By hand against a running API: a second account gets `404` (not `403`) reading, deleting and exporting the first account's form; its form list is empty; and the form payload contains no `organizationId`, `createdByUserId` or `userId`.
+
+### Decisions the spec left open
+
+- **`Form.createdByUserId` is nullable, with `onDelete: SetNull`.** Losing the record of who made a form is the right price for not destroying the organization's data when a user is deleted; `Restrict` would have blocked user deletion forever.
+- **The wire format drops both ids.** `toApiForm` strips `organizationId` and `createdByUserId` from every form response. Nothing in the client used the old `userId`, tenancy is decided server-side, and internal ids no consumer needs are surface that later changes have to stay compatible with.
+- **Goal 5's grep is not literally empty.** `grep -rn 'userId: req.userId' backend/src` returns one line, in `requireOrganizationId` — a `Membership` lookup by user, not a `Form` ownership check. The intent of the goal holds; the wording was too literal.
+
+### Deferred and filed
+
+In [`docs/BACKLOG.md`](../docs/BACKLOG.md): **role enforcement** (`Membership.role` is stored and never read, so every member can do everything including delete the organization — harmless while every organization has one member, not harmless the moment invitations ship), and **an organization can outlive its last member** (deleting the last member leaves the organization and its forms unreachable, invisible and still holding respondent data; the rule needs deciding alongside account deletion, S8).
+
+Not touched, as scoped: invitations, plans, billing, any organization UI, and account deletion.

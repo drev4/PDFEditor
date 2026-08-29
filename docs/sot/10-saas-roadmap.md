@@ -1,8 +1,8 @@
 # SaaS roadmap — `[NOT IMPLEMENTED]`
 
-The entity designs, the entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
+The entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. The `Organization`/`Membership` design is now **built** ([`features/0009`](../../features/0009-organizations-own-resources.md)) and its section says so; reality lives in [03-domain-model](./03-domain-model.md). Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
 
-The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 3 are closed; step 4 is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
+The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 4 are closed; step 5 (member invitations) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
 
 The division of labour with the backlog: [`docs/BACKLOG.md`](../BACKLOG.md) answers **what is missing and how much it matters**; the build order answers **what is next**. When priority and the chain disagree, the chain wins — see [the inversion](#a-known-inversion-between-this-chain-and-the-backlog) at the end for the case that already exists.
 
@@ -10,9 +10,11 @@ Business rationale is in [01-product-and-market.md](./01-product-and-market.md).
 
 ## The structural decision: organizations own resources, users do not
 
-Today `Form.userId` points at a `User`, and every ownership check reads `where: { userId: req.userId }`.
+~~Target design.~~ **Built** ([`features/0009`](../../features/0009-organizations-own-resources.md)). `Organization`, `Membership` and `Form.organizationId` exist; every authorization check resolves a membership. The reality is described in [03-domain-model](./03-domain-model.md) and [04-backend-patterns §9](./04-backend-patterns.md) — this section is kept for the reasoning behind the shape, which is still the reasoning that governs what comes next.
 
-Target:
+What is **not** built: roles are stored and not enforced, and there is no way to add a second member to an organization. Both are below.
+
+The shape:
 
 ```
 Organization 1───* Membership *───1 User
@@ -35,9 +37,13 @@ This is worth doing before there is revenue, not after, and the reason is specif
 
 Role semantics, minimum viable: `owner` bills and can delete the organization; `admin` manages forms and members; `member` manages the forms they created.
 
-### Migration path
+### Migration path — done
 
-Sequenced so that each step is independently deployable and reversible:
+Executed in [`features/0009`](../../features/0009-organizations-own-resources.md) as **one branch**, not five deploys: the sequencing below exists to protect a running system with live data, and there was neither. The ordering was kept — additive schema, backfill, then contract — because the backfill has to be proven before the column can be required.
+
+Three migrations: `organizations_and_memberships` (additive), `backfill_personal_organizations` (idempotent SQL that raises if any form is left without an organization), and `form_owned_by_organization` (`NOT NULL`, plus a hand-written `RENAME COLUMN` — Prisma plans a rename as DROP + ADD, which would have discarded every form's creator).
+
+The original plan, kept because it is the right plan if this ever has to be redone against live data:
 
 1. Add `Organization` and `Membership`. Nothing reads them yet.
 2. Data migration: one personal `Organization` per existing `User`, with an `owner` `Membership`.
@@ -95,14 +101,14 @@ This is the whole build order, not only the SaaS part of it — the security and
 | 1 | ~~**Stable field ids and safe bulk save**~~ — done | Was an active data-loss bug, and is the prerequisite for every integration. [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) |
 | 2 | ~~**A gate that can be trusted**~~ — done | A red E2E suite gates nothing and a CI that never generated the Prisma client verifies nothing: without this, no step below could be *shown* to work. [`features/0003`](../../features/0003-e2e-suite-green-and-independent.md), [`features/0005`](../../features/0005-working-ci-and-enforced-node-version.md) |
 | 3 | ~~**Risk removal on the public surface**~~ — done | The cheapest risk removal available, and the first questions on any security review. Rate limiting ([`0002`](../../features/0002-rate-limiting-on-public-write-paths.md)), regex guard ([`0004`](../../features/0004-safe-author-supplied-regex.md)), signed PDF URLs ([`0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)), security headers and CSP ([`0007`](../../features/0007-security-headers-and-csp.md)), session hardening ([`0008`](../../features/0008-session-hardening.md)). **No High findings remain open** ([07-security](./07-security-and-privacy.md)) |
-| 4 | **`Organization` + `Membership`** with data migration, no visible behaviour change | The longest-lead schema change; do it while the data is small |
+| 4 | ~~**`Organization` + `Membership`** with data migration, no visible behaviour change~~ — done | The longest-lead schema change; done while the data was small. [`features/0009`](../../features/0009-organizations-own-resources.md) |
 | 5 | **Member invitations** | The first feature that makes B2B real rather than a table with one row |
 | 6 | **`Plan` + entitlements**, limits enforced, no charging yet | Validates the "limit reached" UX before money is involved |
 | 7 | **Stripe + `Subscription`** | Actual revenue |
 | 8 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear. Also brings the Redis that the shared rate-limit store needs — see the inversion below |
 | 9 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
 
-Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are now all closed**, which makes `Organization` + `Membership` the next thing to build — and it is the longest-lead schema change in this document, so it wants doing while the data is still small.
+Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so is step 4. Next is member invitations — the first feature that makes B2B real rather than a table with one row in it.
 
 ### A known inversion between this chain and the backlog
 

@@ -31,7 +31,8 @@ export interface Field {
 
 export interface Form {
   id: string
-  userId: string
+  // No owner id. Forms belong to an organization and the server decides who may
+  // reach one; the client is deliberately unaware that organizations exist.
   title: string
   description: string | null
   shareId: string

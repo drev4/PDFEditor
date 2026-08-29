@@ -18,7 +18,7 @@ beforeEach(async () => {
   // `refresh_tokens` is named explicitly rather than left to the cascade, so a
   // reader can see that sessions are cleared between tests too.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
   )
 })
 

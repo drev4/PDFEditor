@@ -42,8 +42,9 @@ Ordered as a dependency chain — see the build order in [10-saas-roadmap](./sot
 
 | Item | Why |
 |---|---|
-| `Organization` + `Membership`, migrate `Form.userId` → `Form.organizationId` | The longest-lead schema change; cheap now, a rewrite later. Specced as [`features/0009`](../features/0009-organizations-own-resources.md) — **next**, per the [build order](./sot/10-saas-roadmap.md#build-order) |
-| Member invitations and roles (`owner / admin / member`) | The first feature that makes B2B real |
+| Enforce `Membership.role` | `owner \| admin \| member` are stored and never read, so every member of an organization can do everything including delete it. Harmless while every organization has exactly one member; it stops being harmless the moment invitations ship, so do it with them or before | [07-security](./sot/07-security-and-privacy.md) · [`features/0009`](../features/0009-organizations-own-resources.md) |
+| An organization can outlive its last member | `Membership.user` cascades on user deletion, so deleting the last member leaves the organization and every form it owns with nobody able to reach them — invisible, undeletable through the app, and still holding respondent data. Needs a rule (block the delete, transfer ownership, or delete the organization) decided alongside account deletion (S8) | [03-domain-model](./sot/03-domain-model.md) · [`features/0009`](../features/0009-organizations-own-resources.md) |
+| Member invitations | The first feature that makes B2B real rather than a table with one row. `Organization` and `Membership` exist; what is missing is a way to add a second member. **Next**, per the [build order](./sot/10-saas-roadmap.md#build-order) |
 | `Plan` catalogue + entitlements service, `402` on limit reached | Validates limit UX before money is involved |
 | Stripe integration + `Subscription` | Revenue |
 | Per-file revocation for signed PDF URLs | Today revocation is all-or-nothing: rotate `JWT_SECRET` (invalidating every outstanding link) or delete the file. Withdrawing access to one PDF while leaving others valid needs a database-backed nonce or key version per file. Cheap to add alongside the uploads table above |

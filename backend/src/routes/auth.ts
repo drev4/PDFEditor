@@ -21,6 +21,7 @@ import {
   setRefreshCookie,
   clearRefreshCookie
 } from '../services/session-cookie.js'
+import { organizationSlug, personalOrganizationName } from '../services/organization.js'
 
 export const authRouter = Router()
 
@@ -77,9 +78,31 @@ authRouter.post('/register', registerRateLimit, async (req, res, next) => {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
-    const user = await prisma.user.create({
-      data: { email, passwordHash, name },
-      select: { id: true, email: true, name: true, createdAt: true }
+    // The account, its organization and the membership joining them are one
+    // atomic act. A user without an organization cannot create a form and has
+    // no way to repair itself, so a partial failure here would leave a signed-up
+    // customer with a broken account and no error to explain it.
+    //
+    // A B2C account is simply an organization with one member — there is no
+    // separate "personal account" concept and nothing downstream branches on it.
+    const user = await prisma.$transaction(async tx => {
+      const created = await tx.user.create({
+        data: { email, passwordHash, name },
+        select: { id: true, email: true, name: true, createdAt: true }
+      })
+
+      const organization = await tx.organization.create({
+        data: {
+          name: personalOrganizationName(name, email),
+          slug: organizationSlug(name || email)
+        }
+      })
+
+      await tx.membership.create({
+        data: { organizationId: organization.id, userId: created.id, role: 'owner' }
+      })
+
+      return created
     })
 
     const token = await startSession(res, user.id)

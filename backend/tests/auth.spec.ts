@@ -53,6 +53,11 @@ describe('Auth Routes', () => {
         createdAt: mockUser.createdAt
       }
       prismaMock.user.create.mockResolvedValue(userWithoutPassword as any)
+      // Registration creates the user, their organization and an owner
+      // membership in one transaction — see routes/auth.ts.
+      prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock))
+      prismaMock.organization.create.mockResolvedValue({ id: 'org-1' } as any)
+      prismaMock.membership.create.mockResolvedValue({ id: 'membership-1' } as any)
 
       const res = await request(app)
         .post('/api/auth/register')
