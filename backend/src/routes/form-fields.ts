@@ -6,9 +6,8 @@ import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { verifyFormOwnership, verifyFieldOwnership } from '../middleware/formOwnership.js'
 import { pdfProcessor, type ExtractedField } from '../services/pdf-processor.js'
 import { checkPattern } from '../services/pattern-validator.js'
-import fs from 'fs'
-import path from 'path'
 import { pdfFilenameFrom } from '../services/pdf-url.js'
+import { pdfStorage } from '../services/pdf-storage.js'
 
 export const formFieldsRouter = Router()
 
@@ -70,14 +69,12 @@ async function embedFieldsInPDF(form: { pdfUrl: string | null }, fieldsData: Emb
     const filename = pdfFilenameFrom(form.pdfUrl)
     if (!filename) return
 
-    const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
-
-    if (!fs.existsSync(pdfPath)) {
-      console.warn(`PDF file not found at path: ${pdfPath}`)
+    if (!(await pdfStorage().exists(filename))) {
+      console.warn(`PDF not found in storage: ${filename}`)
       return
     }
 
-    const pdfBuffer = fs.readFileSync(pdfPath)
+    const pdfBuffer = await pdfStorage().get(filename)
 
     const fieldsToEmbed: ExtractedField[] = fieldsData.map(field => {
       const validation = field.validation as ExtractedField['validation'] | null
@@ -97,7 +94,7 @@ async function embedFieldsInPDF(form: { pdfUrl: string | null }, fieldsData: Emb
     })
 
     const modifiedPdfBuffer = await pdfProcessor.embedFieldsInPDF(pdfBuffer, fieldsToEmbed)
-    fs.writeFileSync(pdfPath, modifiedPdfBuffer)
+    await pdfStorage().put(filename, modifiedPdfBuffer)
 
     console.log(`✓ Successfully embedded ${fieldsToEmbed.length} fields in PDF: ${filename}`)
   } catch (error) {

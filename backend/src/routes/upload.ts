@@ -1,27 +1,30 @@
 import { Router } from 'express'
-import { upload } from '../middleware/upload.js'
+import { upload, newPdfKey } from '../middleware/upload.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
-import fs from 'fs'
+import { pdfStorage } from '../services/pdf-storage.js'
+import { canonicalPdfUrl } from '../services/pdf-url.js'
 
 export const uploadRouter = Router()
 
 // POST /api/upload - Upload PDF file
+//
+// **Validate first, store second** (features/0016). The upload arrives in
+// memory rather than on disk, which turns out to be the better order anyway:
+// the old code wrote the file, read it back, and deleted it again when it was
+// not a PDF, so every corrupt or hostile upload became a file that had to be
+// cleaned up. Nothing is stored here until the bytes are known to be a PDF.
 uploadRouter.post('/', authenticate, upload.single('pdf'), async (req: AuthRequest, res, next) => {
   try {
     if (!req.file) {
       throw new AppError(400, 'No file uploaded')
     }
 
-    // Read the PDF file buffer
-    const pdfBuffer = fs.readFileSync(req.file.path)
+    const pdfBuffer = req.file.buffer
 
-    // Validate the PDF
     const isValid = await pdfProcessor.validatePDF(pdfBuffer)
     if (!isValid) {
-      // Delete the invalid file
-      fs.unlinkSync(req.file.path)
       throw new AppError(400, 'Invalid PDF file. The file is corrupted or not a valid PDF.')
     }
 
@@ -35,13 +38,18 @@ uploadRouter.post('/', authenticate, upload.single('pdf'), async (req: AuthReque
       // Continue even if extraction fails - some PDFs may not have form fields
     }
 
-    // Get the base URL from environment or default to localhost
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000'
-    const pdfUrl = `${baseUrl}/uploads/pdfs/${req.file.filename}`
+    const filename = newPdfKey()
+    await pdfStorage().put(filename, pdfBuffer)
+
+    // Through `canonicalPdfUrl`, never assembled here: the unsigned canonical
+    // URL is the only shape that may be persisted in `Form.pdfUrl`, and
+    // `services/pdf-url.ts` is the only place allowed to build one
+    // (features/0006).
+    const pdfUrl = canonicalPdfUrl(filename)
 
     res.status(201).json({
       url: pdfUrl,
-      filename: req.file.filename,
+      filename,
       size: req.file.size,
       fields: extractedFields // Return extracted fields to the frontend
     })

@@ -1,8 +1,8 @@
 # 0016 — Object storage for uploaded PDFs, behind the signed URL that already exists
 
-**Status:** backlog
+**Status:** in progress
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Object storage (S3/R2) for PDFs*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0016-object-storage-for-uploaded-pdfs`
 **Related:** [02-architecture](../docs/sot/02-architecture.md) · [04-backend-patterns §5, §8](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [08-operations](../docs/sot/08-operations.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [10-saas-roadmap](../docs/sot/10-saas-roadmap.md) · [`features/0006`](0006-signed-expiring-urls-for-uploaded-pdfs.md)
 
 ## Context

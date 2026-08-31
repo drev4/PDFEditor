@@ -15,6 +15,7 @@ import { billingRouter, webhookRouter } from './routes/billing.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
+import { pdfStorage } from './services/pdf-storage.js'
 
 dotenv.config()
 
@@ -103,7 +104,7 @@ app.use(cookieParser())
 // This route is deliberately unauthenticated: an anonymous respondent has to be
 // able to load the PDF of a published form. The capability is the signature, not
 // a session.
-app.get('/uploads/pdfs/:token/:filename', (req, res) => {
+app.get('/uploads/pdfs/:token/:filename', async (req, res) => {
   const invalidLink = { error: 'This link is invalid or has expired.' }
 
   // Never let anything but a filename this service could have issued reach the
@@ -119,8 +120,11 @@ app.get('/uploads/pdfs/:token/:filename', (req, res) => {
     return res.status(403).json(invalidLink)
   }
 
-  const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
-  if (!fs.existsSync(pdfPath)) {
+  // Through `services/pdf-storage.ts`, which is the only thing that knows where
+  // the bytes live (features/0016). This route no longer joins a path, and must
+  // not: on the `s3` driver there is no path to join.
+  const body = await pdfStorage().getStream(filename)
+  if (!body) {
     return res.status(404).json({ error: 'File not found' })
   }
 
@@ -156,7 +160,21 @@ app.get('/uploads/pdfs/:token/:filename', (req, res) => {
   // header. Nothing on this origin needs to frame a PDF.
   res.setHeader('X-Frame-Options', 'DENY')
 
-  return res.sendFile(pdfPath)
+  // Streamed rather than `res.sendFile`, because a storage driver has no local
+  // path to hand Express. One behaviour is lost with it and is recorded here
+  // rather than discovered later: `sendFile` advertises `Accept-Ranges` and
+  // answers range requests, so pdf.js could fetch a large document in parts.
+  // It now always fetches the whole file. Acceptable at a 10 MB upload cap, and
+  // the alternative — implementing ranges over a driver — is a feature, not a
+  // detail of this move.
+  body.on('error', () => {
+    // The headers are already sent by the time bytes start flowing, so there is
+    // no status left to change. Destroy the response rather than leaving the
+    // client hanging on a truncated document it might mistake for a whole one.
+    res.destroy()
+  })
+
+  return body.pipe(res)
 })
 
 // Anything else under /uploads — including every URL of the old unsigned shape —
