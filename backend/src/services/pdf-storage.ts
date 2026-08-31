@@ -2,6 +2,14 @@ import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
 import { Readable } from 'stream'
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand
+} from '@aws-sdk/client-s3'
+import { envBool } from '../config/env.js'
 
 /**
  * The one audited place where uploaded PDF **bytes** are read, written or
@@ -130,8 +138,9 @@ export class LocalPdfStorage implements PdfStorageDriver {
     const temporary = `${target}.${process.pid}.${Date.now()}.tmp`
 
     await fsp.writeFile(temporary, body)
+
     try {
-      await fsp.rename(temporary, target)
+      await renameWithRetry(temporary, target)
     } catch (error) {
       await fsp.unlink(temporary).catch(() => undefined)
       throw error
@@ -142,6 +151,7 @@ export class LocalPdfStorage implements PdfStorageDriver {
     return fsp.readFile(this.pathFor(key))
   }
 
+
   async getStream(key: string): Promise<Readable | null> {
     const file = this.pathFor(key)
     if (!(await this.exists(key))) return null
@@ -149,8 +159,16 @@ export class LocalPdfStorage implements PdfStorageDriver {
   }
 
   async exists(key: string): Promise<boolean> {
+    // Resolved **outside** the try, so an unsafe key throws instead of being
+    // reported as "not there". The catch below is for one question — is the
+    // file present — and swallowing a key-validation failure into `false` would
+    // send a caller down the silent "no PDF, skip the work" path with a name
+    // that should have stopped the request. The S3 driver rethrows non-404s for
+    // the same reason.
+    const file = this.pathFor(key)
+
     try {
-      await fsp.access(this.pathFor(key))
+      await fsp.access(file)
       return true
     } catch {
       return false
@@ -169,6 +187,168 @@ export class LocalPdfStorage implements PdfStorageDriver {
   }
 }
 
+/**
+ * The S3-compatible driver — AWS S3, Cloudflare R2, MinIO, anything speaking the
+ * same API.
+ *
+ * One driver for all of them rather than one per provider, because the
+ * difference between them is an endpoint and a credential, not a protocol.
+ * `forcePathStyle` is what makes MinIO work: AWS addresses buckets as
+ * `<bucket>.s3.amazonaws.com`, and a local MinIO has no wildcard DNS, so the
+ * bucket has to go in the path instead.
+ *
+ * **The client is not constructed until this driver is selected**, so a
+ * deployment on the `local` driver — which includes every test run — never
+ * builds an AWS client or looks for credentials. Same reasoning as the lazy
+ * Stripe client in `services/stripe.ts`: optional infrastructure must not be a
+ * boot requirement.
+ */
+export class S3PdfStorage implements PdfStorageDriver {
+  private readonly client: S3Client
+  private readonly bucket: string
+  private readonly prefix: string
+
+  constructor(config: {
+    bucket: string
+    region: string
+    endpoint?: string
+    accessKeyId?: string
+    secretAccessKey?: string
+    forcePathStyle?: boolean
+    prefix?: string
+  }) {
+    this.bucket = config.bucket
+    // Keys are namespaced so a bucket shared with anything else stays legible,
+    // and so a lifecycle rule can target this prefix alone.
+    this.prefix = config.prefix ?? 'pdfs/'
+
+    this.client = new S3Client({
+      region: config.region,
+      ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+      ...(config.forcePathStyle ? { forcePathStyle: true } : {}),
+      // Omitted entirely when not configured, so the SDK falls back to its own
+      // chain — instance roles, IRSA, `~/.aws/credentials`. A deployment on IAM
+      // should not have to invent an access key to satisfy this constructor.
+      ...(config.accessKeyId && config.secretAccessKey
+        ? {
+            credentials: {
+              accessKeyId: config.accessKeyId,
+              secretAccessKey: config.secretAccessKey
+            }
+          }
+        : {})
+    })
+  }
+
+  private objectKey(key: string): string {
+    return `${this.prefix}${assertKey(key)}`
+  }
+
+  async put(key: string, body: Buffer): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: this.objectKey(key),
+        Body: body,
+        // Recorded on the object, but **not** what the browser is told: the
+        // signed route sets its own headers on the way out (`app.ts`), because
+        // the bytes are attacker-supplied and the CSP, `nosniff` and
+        // `X-Frame-Options` that neutralise them must not depend on whoever
+        // uploaded the object having asked for them (features/0016, trap 3).
+        ContentType: 'application/pdf'
+      })
+    )
+  }
+
+  async get(key: string): Promise<Buffer> {
+    const result = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: this.objectKey(key) })
+    )
+
+    if (!result.Body) throw new Error(`Empty body for PDF "${key}"`)
+    return Buffer.from(await result.Body.transformToByteArray())
+  }
+
+  async getStream(key: string): Promise<Readable | null> {
+    try {
+      const result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: this.objectKey(key) })
+      )
+      return (result.Body as Readable) ?? null
+    } catch (error) {
+      if (isNotFound(error)) return null
+      throw error
+    }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    try {
+      await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucket, Key: this.objectKey(key) })
+      )
+      return true
+    } catch (error) {
+      if (isNotFound(error)) return false
+      // A credentials or network failure must not be reported as "the file is
+      // not there": the callers of `exists` skip their work silently when it
+      // answers false, so a misconfigured bucket would look like every form
+      // having lost its PDF.
+      throw error
+    }
+  }
+
+  async remove(key: string): Promise<void> {
+    // S3 delete is idempotent; a missing key is not an error, which matches the
+    // local driver's contract.
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: this.objectKey(key) })
+    )
+  }
+}
+
+/** S3 reports a missing object as 404/NoSuchKey/NotFound depending on the call. */
+function isNotFound(error: unknown): boolean {
+  const err = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+  return (
+    err?.$metadata?.httpStatusCode === 404 ||
+    err?.name === 'NoSuchKey' ||
+    err?.name === 'NotFound'
+  )
+}
+
+/**
+ * `rename`, retried briefly — because Windows refuses it while the destination
+ * is open.
+ *
+ * POSIX replaces an open file happily: readers keep the old inode and see a
+ * consistent document to the end. Windows returns `EPERM`/`EBUSY` instead, so
+ * on a developer machine an embed that lands while somebody is downloading the
+ * same PDF fails outright — which is not hypothetical, it is what the atomicity
+ * test in `tests/pdf-storage.spec.ts` reproduces on the first run.
+ *
+ * The reads it collides with are milliseconds long, so a short bounded retry
+ * clears it. This is a portability accommodation and not a lock: if the retries
+ * are exhausted the error propagates, and the caller (`embedFieldsInPDF`, which
+ * is best-effort by design) logs it and leaves the stored PDF as it was. The
+ * fields are already in the database either way, which is the copy that
+ * matters.
+ */
+async function renameWithRetry(from: string, to: string, attempts = 10): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fsp.rename(from, to)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      const transient = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES'
+
+      if (!transient || attempt >= attempts) throw error
+
+      await new Promise(resolve => setTimeout(resolve, 10 * attempt))
+    }
+  }
+}
+
 let driver: PdfStorageDriver | null = null
 
 /**
@@ -182,8 +362,51 @@ let driver: PdfStorageDriver | null = null
 export function pdfStorage(): PdfStorageDriver {
   if (driver) return driver
 
-  driver = new LocalPdfStorage()
+  driver = buildDriver()
   return driver
+}
+
+/**
+ * Builds the driver `PDF_STORAGE_DRIVER` names.
+ *
+ * **An unrecognised value refuses to boot**, and that is the opposite of how
+ * `resolvePlan` and `envInt` treat bad configuration. The difference is what
+ * the failure costs. A bad plan key degrades to the free plan: somebody is
+ * briefly on the wrong tier and a log line says so. A bad storage driver that
+ * silently fell back to `local` would accept uploads onto the container's disk
+ * and lose them at the next deploy — a data-loss default, not a conservative
+ * one. There is no safe direction to guess in, so it does not guess.
+ */
+function buildDriver(): PdfStorageDriver {
+  const requested = process.env.PDF_STORAGE_DRIVER?.trim() || 'local'
+
+  if (requested === 'local') return new LocalPdfStorage()
+
+  if (requested === 's3') {
+    const bucket = process.env.PDF_STORAGE_BUCKET?.trim()
+
+    if (!bucket) {
+      throw new Error(
+        'PDF_STORAGE_DRIVER=s3 requires PDF_STORAGE_BUCKET. Refusing to start ' +
+        'rather than fall back to local disk, which would accept uploads and ' +
+        'lose them on the next deploy.'
+      )
+    }
+
+    return new S3PdfStorage({
+      bucket,
+      region: process.env.PDF_STORAGE_REGION?.trim() || 'auto',
+      endpoint: process.env.PDF_STORAGE_ENDPOINT?.trim() || undefined,
+      accessKeyId: process.env.PDF_STORAGE_ACCESS_KEY_ID?.trim() || undefined,
+      secretAccessKey: process.env.PDF_STORAGE_SECRET_ACCESS_KEY?.trim() || undefined,
+      forcePathStyle: envBool('PDF_STORAGE_FORCE_PATH_STYLE', false),
+      prefix: process.env.PDF_STORAGE_PREFIX?.trim() || undefined
+    })
+  }
+
+  throw new Error(
+    `Unknown PDF_STORAGE_DRIVER="${requested}". Expected "local" or "s3".`
+  )
 }
 
 /** Only for tests, and for the driver selection added in step 3. */
