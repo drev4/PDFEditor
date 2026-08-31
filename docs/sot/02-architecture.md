@@ -47,7 +47,7 @@ Browser ── Vite dev server / static build (Vue SPA)
    └── HTTP ──> Express (single Node process, default port 3000)
                   ├── /api/*      JSON API
                   ├── /health     liveness probe
-                  ├── /uploads/*  express.static  ← serves raw PDFs, unauthenticated
+                  ├── /uploads/pdfs/:token/:filename  ← signed, expiring (0006)
                   └── Prisma ──> PostgreSQL (docker-compose in dev)
 
 Filesystem: backend/uploads/pdfs/  ← PDFs live on the local disk of this process
@@ -57,7 +57,7 @@ Three properties of this topology are load-bearing and each is a constraint on s
 
 1. **PDFs live on the local filesystem of the API process.** `middleware/upload.ts` writes to `process.cwd()/uploads/pdfs`, and `app.ts` serves that directory statically. The API therefore cannot be run as more than one replica, and cannot be redeployed on ephemeral disk without losing every uploaded PDF. This is the single biggest blocker to a real deployment. See [08-operations.md](./08-operations.md).
 2. **PDF processing is synchronous and inline in the request.** `extractFieldsFromPDF` on upload and `embedFieldsInPDF` on bulk save both run inside the HTTP handler. A large or pathological PDF blocks the Node event loop for every other request, not just its own.
-3. **The static `/uploads` mount has no authorization.** Anyone who has a PDF URL can fetch it, forever, with no token. Filenames are `nanoid(12)-<timestamp>.pdf`, which is unguessable in practice but is still an object-capability URL with no expiry and no revocation. Recorded as a finding in [07-security-and-privacy.md](./07-security-and-privacy.md).
+3. **Reading a PDF is a capability carried in the URL, not a session.** The `express.static` mount is gone ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)): the only way to the bytes is `GET /uploads/pdfs/:token/:filename`, whose token `services/pdf-url.ts` mints per read and which expires after `UPLOAD_URL_TTL_SECONDS`. It is deliberately unauthenticated, because an anonymous respondent has to load the PDF of a published form. What is still open is *per-file* revocation — withdrawing one document today means rotating `JWT_SECRET`, which invalidates every outstanding link ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
 ## Data flows
 
