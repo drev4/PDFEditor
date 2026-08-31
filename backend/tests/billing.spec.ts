@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import request from 'supertest'
+import Stripe from 'stripe'
 import { PrismaClient } from '@prisma/client'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { app } from '../src/app'
@@ -10,7 +11,14 @@ import {
   planKeyForStatus,
   subscriptionStateFrom
 } from '../src/services/stripe'
-import { subscription, TEST_PRICE_PRO, TEST_CUSTOMER } from './fixtures/stripe-events'
+import {
+  subscription,
+  checkoutCompletedEvent,
+  subscriptionEvent,
+  TEST_PRICE_PRO,
+  TEST_CUSTOMER,
+  TEST_SUBSCRIPTION
+} from './fixtures/stripe-events'
 
 vi.mock('../src/services/db', async () => {
   const { mockDeep } = await import('vitest-mock-extended')
@@ -37,7 +45,8 @@ vi.mock('../src/middleware/auth', () => ({
 const stripeCalls = {
   createCustomer: vi.fn(),
   createCheckoutSession: vi.fn(),
-  createPortalSession: vi.fn()
+  createPortalSession: vi.fn(),
+  retrieveSubscription: vi.fn()
 }
 
 vi.mock('stripe', async () => {
@@ -48,6 +57,7 @@ vi.mock('stripe', async () => {
     customers = { create: stripeCalls.createCustomer } as any
     checkout = { sessions: { create: stripeCalls.createCheckoutSession } } as any
     billingPortal = { sessions: { create: stripeCalls.createPortalSession } } as any
+    subscriptions = { retrieve: stripeCalls.retrieveSubscription } as any
   }
 
   return { default: MockStripe }
@@ -73,6 +83,7 @@ describe('stripe billing', () => {
     stripeCalls.createCustomer.mockReset()
     stripeCalls.createCheckoutSession.mockReset()
     stripeCalls.createPortalSession.mockReset()
+    stripeCalls.retrieveSubscription.mockReset()
   })
 
   afterEach(() => {
@@ -212,6 +223,23 @@ describe('stripe billing', () => {
       expect(prismaMock.subscription.upsert).toHaveBeenCalled()
     })
 
+    it('creates the customer under an idempotency key scoped to the organization', async () => {
+      asRole('owner')
+      prismaMock.subscription.findUnique.mockResolvedValue(null)
+      prismaMock.user.findUnique.mockResolvedValue({ email: 'o@example.com', name: null } as any)
+      stripeCalls.createCustomer.mockResolvedValue({ id: 'cus_new' })
+      stripeCalls.createCheckoutSession.mockResolvedValue({ url: 'https://checkout.stripe.test/s' })
+
+      await request(app).post('/api/billing/checkout')
+
+      // Reading the stored customer and writing it back is not atomic, so two
+      // concurrent calls can both find none. The key makes Stripe replay the
+      // first response instead of minting a second customer — which is the
+      // difference between one subscription and two.
+      const options = stripeCalls.createCustomer.mock.calls[0]?.[1]
+      expect(options?.idempotencyKey).toBe('vuepdf-customer-org-1')
+    })
+
     it('takes the organization from the membership and never from the body', async () => {
       asRole('owner')
       prismaMock.subscription.findUnique.mockResolvedValue(null)
@@ -310,6 +338,131 @@ describe('stripe billing', () => {
       expect(response.status).toBe(200)
       expect(response.body).toEqual({ url: 'https://portal.stripe.test/s' })
       expect(stripeCalls.createPortalSession.mock.calls[0]?.[0].customer).toBe('cus_existing')
+    })
+  })
+
+  /**
+   * The purchase event itself, and the one handler branch the database-backed
+   * suite cannot reach.
+   *
+   * `checkout.session.completed` carries only the subscription **id**, so the
+   * handler has to read the subscription back from Stripe — a real network call
+   * mid-webhook. `tests/integration/billing.spec.ts` has no Stripe API to call,
+   * so it uses `customer.subscription.*` events throughout and this branch would
+   * otherwise never run in CI at all. It happens to be redundant in production
+   * (Stripe fires `customer.subscription.created` alongside it, and that would
+   * activate the plan anyway) but that redundancy is incidental, not a design.
+   */
+  describe('checkout.session.completed', () => {
+    /**
+     * Signs an event the way Stripe does, over the raw bytes.
+     *
+     * `generateTestHeaderString` is the SDK's own signer and is local HMAC, so
+     * this exercises the real verification path — the mock above replaces only
+     * the calls that would reach the network.
+     */
+    function deliver(event: unknown) {
+      const payload = JSON.stringify(event)
+      const signature = new Stripe(process.env.STRIPE_SECRET_KEY!).webhooks.generateTestHeaderString({
+        payload,
+        secret: process.env.STRIPE_WEBHOOK_SECRET!
+      })
+
+      return request(app)
+        .post('/api/billing/webhook')
+        .set('stripe-signature', signature)
+        .set('Content-Type', 'application/json')
+        .send(payload)
+    }
+
+    beforeEach(() => {
+      // Not a duplicate, and the organization resolves.
+      prismaMock.stripeEvent.create.mockResolvedValue({} as any)
+      prismaMock.organization.findUnique.mockResolvedValue({ id: 'org-1' } as any)
+      prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock))
+    })
+
+    it('reads the subscription back from Stripe and reconciles it', async () => {
+      stripeCalls.retrieveSubscription.mockResolvedValue(
+        subscription({ organizationId: 'org-1' })
+      )
+
+      const response = await deliver(checkoutCompletedEvent('org-1'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ received: true, processed: true })
+      expect(stripeCalls.retrieveSubscription).toHaveBeenCalledWith(TEST_SUBSCRIPTION)
+
+      // The plan is written from what the retrieved subscription says, not from
+      // the fact that a checkout completed. State-setting, never incremental.
+      expect(prismaMock.organization.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'org-1' }, data: { planKey: 'pro' } })
+      )
+      expect(prismaMock.subscription.upsert).toHaveBeenCalled()
+    })
+
+    it('ignores a completed checkout that bought no subscription', async () => {
+      const event: any = checkoutCompletedEvent('org-1')
+      // A one-off payment. This application sells none, so there is nothing to
+      // do — and it must not be an error, or Stripe retries it forever.
+      event.data.object.subscription = null
+      event.data.object.mode = 'payment'
+
+      const response = await deliver(event)
+
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ received: true, processed: false })
+      expect(stripeCalls.retrieveSubscription).not.toHaveBeenCalled()
+      expect(prismaMock.organization.update).not.toHaveBeenCalled()
+    })
+
+    it('falls back to client_reference_id when the metadata is gone', async () => {
+      const event: any = checkoutCompletedEvent('org-1')
+      // Stripe echoes `client_reference_id` on the session; metadata is what
+      // survives onto objects the session creates. Checkout sets both, and this
+      // is the path that uses the other one.
+      event.data.object.metadata = {}
+      stripeCalls.retrieveSubscription.mockResolvedValue(
+        subscription({ organizationId: null })
+      )
+
+      const response = await deliver(event)
+
+      expect(response.body).toEqual({ received: true, processed: true })
+      expect(prismaMock.organization.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { planKey: 'pro' } })
+      )
+    })
+
+    it('answers 200 without writing when the organization cannot be resolved', async () => {
+      prismaMock.organization.findUnique.mockResolvedValue(null)
+      prismaMock.subscription.findFirst.mockResolvedValue(null)
+      stripeCalls.retrieveSubscription.mockResolvedValue(
+        subscription({ organizationId: 'org-gone' })
+      )
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const response = await deliver(checkoutCompletedEvent('org-gone'))
+
+      // A 5xx would make Stripe retry forever an event that will never resolve.
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ received: true, processed: false })
+      expect(prismaMock.organization.update).not.toHaveBeenCalled()
+      expect(logged).toHaveBeenCalled()
+    })
+
+    it('does not re-enter the handler for an event id already seen', async () => {
+      // `claimEvent` treats any insert failure as "already processed" — the
+      // realistic one being the primary-key collision on Stripe's event id.
+      prismaMock.stripeEvent.create.mockRejectedValue(new Error('unique violation'))
+
+      const response = await deliver(
+        subscriptionEvent('customer.subscription.updated', subscription({ organizationId: 'org-1' }))
+      )
+
+      expect(response.body).toEqual({ received: true, processed: false })
+      expect(stripeCalls.retrieveSubscription).not.toHaveBeenCalled()
+      expect(prismaMock.organization.update).not.toHaveBeenCalled()
     })
   })
 

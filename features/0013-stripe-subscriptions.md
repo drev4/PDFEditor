@@ -1,6 +1,6 @@
 # 0013 — Stripe subscriptions: Free ↔ Pro, and a plan that comes from a payment
 
-**Status:** in progress
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Stripe integration + `Subscription`*)
 **Branch:** `feature/0013-stripe-subscriptions`
 **Related:** [10-saas-roadmap](../docs/sot/10-saas-roadmap.md#build-order) (step 8) · [03-domain-model](../docs/sot/03-domain-model.md) · [04-backend-patterns §10](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md)
@@ -186,4 +186,56 @@ The canvas draws €12 and €39, and the backlog records that **no one has agre
 
 ## Outcome
 
-*(filled in when the work is finished)*
+Shipped on `feature/0013-stripe-subscriptions`. Free ↔ Pro, end to end, with the plan derived from what Stripe says.
+
+### What shipped
+
+All 22 goals. `Subscription` and `StripeEvent` exist; `backend/src/services/stripe.ts` is the only module importing the Stripe SDK and the only writer of `Organization.planKey`; `routes/billing.ts` has the three handlers; the webhook is mounted above `express.json()`; `GET /api/organizations/entitlements` carries a `subscription` block with no Stripe identifier; Settings and `LimitReachedDialog.vue` have owner-only purchase controls and no rendered price.
+
+**Goal 12 held literally.** `getEntitlements`, `effectivePlan`, `planFor`, `assertCanPublishForm`, `assertResponseWithinLimit` and `isOverResponseLimit` have no behavioural change — only comments that were describing a future that has now happened. That was the point of step 7's shape, and it is checkable: `grep -rn "planKey" backend/src` finds exactly one write (`services/stripe.ts`) and the rest reads.
+
+### What did not ship, and why
+
+- **The manual Stripe test-mode verification (steps 1–4 of the prompt) has not been run.** There is no Stripe CLI and no Stripe account on this machine. Buying with `4242 4242 4242 4242`, closing the tab before the redirect, `stripe events resend`, and the cancel-with-forms-published check all still need doing against a real test-mode account. **Nothing here has been proven against live Stripe** — only against Stripe's own SDK, its own signature implementation, and a real PostgreSQL.
+- **Goal 21 is not met as written.** The fixtures in `backend/tests/fixtures/stripe-events.ts` are hand-built, not captured with `stripe trigger`, for the same reason. The mitigation is real but is not the same thing: every payload is typed as the SDK's own declarations with no casts, and a new `npm run typecheck:tests` compiles them — which immediately caught three missing required fields on `SubscriptionItem`. What it cannot catch is a field Stripe *populates* differently from what its types allow. This is disclosed at the top of the fixture file rather than hidden.
+- **`assertCanInvite` and `Plan.hasBranding` are still not wired**, as scoped. The reason for the first *moved*: it was waiting for "a plan that can be bought", and what it actually needs is **Team**, because Pro has one seat too. Its backlog row was re-pointed accordingly.
+
+### Decisions Stripe's actual behaviour forced
+
+1. **`current_period_end` is on the subscription *item*, not the subscription**, in API version `2025-08-27.basil`. This spec assumed otherwise. Reading it where the spec said would have stored `null` for every customer while failing nothing — a display bug that looks like a Stripe outage. `subscriptionStateFrom` reads it off the item, and both suites assert the real value.
+2. **The status map needed two statuses this spec did not list.** `incomplete` (the first payment never went through) and `paused` (Stripe is not billing them) both resolve to free. Rather than extend a denylist, `PAID_STATUSES` is an **allowlist** — `active`, `trialing`, `past_due` — so a status Stripe adds later falls to free rather than being assumed paid. Same discipline as `OVERRIDE_ENVIRONMENTS` in `plans.ts`.
+3. **`Subscription` needed nullable subscription columns.** Goal 1 listed them as present, but "reuse the stored `stripeCustomerId`" requires storing the customer at the *first Checkout attempt* — before any subscription exists. So `stripeSubscriptionId`, `priceId` and `currentPeriodEnd` are nullable, and the entitlements payload reports `subscription: null` until a real one exists, so an abandoned checkout does not put "Manage billing" in front of somebody who never paid.
+4. **An unrecognised price resolves to free, loudly.** The spec did not say what `planKeyForStatus` should do with a paid status on a price this deployment does not know. It refuses to guess which tier was bought and logs an error naming `STRIPE_PRICE_PRO` — the only realistic way to reach it is that variable being wrong, and guessing "they paid for something" would make the misconfiguration invisible.
+5. **A Stripe idempotency key on `customers.create`**, added after review. The read-then-write in `/checkout` is not atomic, so two concurrent calls could both mint a customer. The key is scoped to the organization, so Stripe replays the first response instead. The residual — two Checkout *sessions* opened and both completed — is narrower and is filed in `docs/BACKLOG.md` rather than left unsaid.
+
+### On the test order
+
+**The integration tests were not written before the reconciler**, contrary to the prompt. Since a test written afterwards proves nothing on its own, the property was established a different way: the implementation was deliberately broken three times and the suite re-run.
+
+| Deliberate break | Integration failures |
+|---|---|
+| Idempotency check removed from `handleStripeEvent` | 1 |
+| Webhook mounted **below** `express.json()` | **9 of 12** |
+| `current_period_end` read off the subscription, not the item | 2 |
+
+Dropping `checkout.session.completed` from `HANDLED_EVENTS` fails 3 of the mocked suite's 26. Every break was reverted and the suites confirmed green.
+
+The integration suite posts **genuinely signed events over HTTP** using the SDK's `generateTestHeaderString`, rather than calling `handleStripeEvent` directly — which is the only reason the mount-ordering break is detectable at all.
+
+### Review
+
+`saas-readiness-reviewer` found two Medium issues and both were fixed in this branch: the checkout customer race (idempotency key + backlog row) and the entirely untested `checkout.session.completed` path (five tests added, verified to fail against a broken handler). It confirmed no data-loss path, no authorization gap, no card data, and no Stripe identifier reaching the client.
+
+### Test output
+
+```
+npm run test:backend       14 specs / 174 tests passed
+npm run test:integration    10 specs / 111 tests passed   (real PostgreSQL)
+npm run test:frontend       38 specs / 313 tests passed
+npm run test:e2e            50 passed
+npm run build --workspace=frontend    ✓ built
+cd backend && npx tsc --noEmit        clean
+cd backend && npm run typecheck:tests clean
+```
+
+`npm run lint` was not run: it lints nothing in this repository.

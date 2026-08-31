@@ -85,12 +85,28 @@ billingRouter.post('/checkout', authenticate, async (req: AuthRequest, res, next
         select: { email: true, name: true }
       })
 
-      const customer = await stripe.customers.create({
-        email: user?.email,
-        name: user?.name ?? undefined,
-        // So an event that lost its session metadata can still be attributed.
-        metadata: { organizationId }
-      })
+      const customer = await stripe.customers.create(
+        {
+          email: user?.email,
+          name: user?.name ?? undefined,
+          // So an event that lost its session metadata can still be attributed.
+          metadata: { organizationId }
+        },
+        // The read above and the write below are not atomic, so two concurrent
+        // calls — a double click, two tabs, a direct API caller — can both find
+        // no customer and both create one. The idempotency key closes that
+        // window at Stripe's end rather than ours: Stripe replays the first
+        // response for the same key, so both requests get the *same* customer
+        // and `rememberCustomer` stores the same id twice.
+        //
+        // It is scoped to the organization, not to the request, because the
+        // whole point is that two different requests for one organization must
+        // not produce two customers. Stripe honours a key for 24 hours; past
+        // that the stored row is what prevents a second customer, and the only
+        // way to get one is for the row to be missing 24 hours later, which
+        // means no checkout was ever completed.
+        { idempotencyKey: `vuepdf-customer-${organizationId}` }
+      )
 
       customerId = customer.id
       await rememberCustomer(organizationId, customerId)
