@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import request from 'supertest'
 import type Stripe from 'stripe'
 import { app } from '../../src/app.js'
@@ -331,6 +331,35 @@ describe('stripe subscriptions', () => {
       expect(
         await prisma.form.findUniqueOrThrow({ where: { id: draft.id } })
       ).toMatchObject({ status: 'draft' })
+    })
+  })
+
+  describe('an event serialised by a different API version', () => {
+    it('is still reconciled, still answers 200, and says so in the log', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const event = subscriptionEvent(
+        'customer.subscription.created',
+        subscription({ organizationId })
+      ) as Stripe.Event & { api_version: string }
+
+      // What the account actually sends today: newer than the version
+      // `services/stripe.ts` pins. Verified live on 2026-08-31.
+      event.api_version = '2026-08-26.dahlia'
+
+      const response = await deliver(event)
+
+      // Refusing would make Stripe retry until it disabled the endpoint,
+      // turning a cosmetic drift into a total billing outage. So: processed.
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ received: true, processed: true })
+      expect((await stateOf(organizationId)).planKey).toBe('pro')
+
+      // And loud, because the failure this guards against is silence.
+      const messages = logged.mock.calls.map(call => String(call[0])).join(' ')
+      expect(messages).toContain('2026-08-26.dahlia')
+
+      logged.mockRestore()
     })
   })
 

@@ -7,6 +7,16 @@ export function usePublicForm() {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
+  /**
+   * Whether to render the "Made with VuePDF" mark (features/0014).
+   *
+   * Decided by the server from the owner's plan and passed through untouched —
+   * nothing here re-derives it, because the client is given no plan to derive
+   * it from. Starts `true` so a form that has not loaded, or one whose payload
+   * lacks the flag, keeps the mark.
+   */
+  const showBranding = ref(true)
+
   const fields = computed(() => form.value?.fields || [])
   const pdfUrl = computed(() => form.value?.pdfUrl || null)
   const title = computed(() => form.value?.title || '')
@@ -17,7 +27,9 @@ export function usePublicForm() {
     error.value = null
 
     try {
-      form.value = await formsService.getPublic(shareId)
+      const published = await formsService.getPublic(shareId)
+      form.value = published.form
+      showBranding.value = published.showBranding
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 404) {
         error.value = 'Form not found or not published'
@@ -36,10 +48,12 @@ export function usePublicForm() {
     form.value = null
     error.value = null
     isLoading.value = false
+    showBranding.value = true
   }
 
   return {
     form,
+    showBranding,
     fields,
     pdfUrl,
     title,

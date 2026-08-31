@@ -100,7 +100,7 @@ The role rules and the `404` / `403` split are in [07-security-and-privacy](./07
 | PUT | `/forms/:id` | Bearer + ownership | Partial `{title?, description?, status?, pdfUrl?, settings?}`. **`402`** when `status: 'published'` would exceed the plan's published-form limit |
 | PATCH | `/forms/:id/status` | Bearer + ownership | `{status: 'draft' \| 'published' \| 'closed'}`. **`402`** when publishing would exceed the plan's limit |
 | DELETE | `/forms/:id` | Bearer + ownership | **Cascades to fields and every response.** Irreversible, no soft delete, no export prompt |
-| GET | `/forms/public/:shareId` | — | Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`**. Answers `404` — not `402` — when the owning organization has spent the month's responses, so the form is unavailable before anyone fills it in |
+| GET | `/forms/public/:shareId` | — | `200 {form, showBranding}`. Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`**, and carries nothing about the owner's plan except `showBranding` — see below. Answers `404` — not `402` — when the owning organization has spent the month's responses, so the form is unavailable before anyone fills it in |
 | GET | `/forms/:id/responses` | Bearer + ownership | Query `limit`, `offset`. Returns `{responses, fields, pagination: {total, limit, offset}}`. `fields` includes **archived** fields, so an answer to a removed question keeps a labelled column |
 | GET | `/forms/:id/responses/export` | Bearer + ownership | CSV download, `Content-Disposition: attachment`, UTF-8 BOM, built by `csv-exporter.ts`. Columns include **archived** fields, under their original label |
 
@@ -256,6 +256,12 @@ TTL is configuration — [08-operations](./08-operations.md#configuration).
 404  { error: "..." }                                 AppError
 500  { error: "Internal server error" }               never leaks the underlying message
 ```
+
+**`GET /forms/public/:shareId` returns `showBranding: boolean`** ([`features/0014`](../../features/0014-close-the-subscription-surface.md)) — whether the public form must carry the "Made with VuePDF" mark, derived from `Plan.hasBranding` on the owner's plan.
+
+**That boolean is the only thing about the owner's plan in that payload, and the constraint is deliberate.** The endpoint is anonymous: anyone holding a share link receives it. Sending the plan, or the entitlements object, and letting the client decide would publish the customer's billing state to every respondent — undoing the reason this same handler answers `404` rather than `402` when the month's responses are spent. There is no plan name, no limit, no usage, no subscription and no organization id, and `backend/tests/integration/branding.spec.ts` asserts their absence rather than only the flag's presence. It does reveal paid-versus-not, which is unavoidable, because the mark is visible either way.
+
+A client that receives no `showBranding` at all must **show** the mark. `frontend/src/services/forms.ts` defaults it to `true` for that reason: the failure mode of guessing the other way is silently giving away the paid tier's only visible benefit.
 
 `402 Payment Required` means a **plan limit**, and `403` means a **permission failure**. They are never collapsed, so a client can show "upgrade your plan" versus "you do not have access" without parsing a message string. Today `402` is emitted by `PUT /forms/:id` and `PATCH /forms/:id/status` only ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)); it is never sent to an unauthenticated caller. Note that the billing routes emit `403` and never `402`: refusing someone who is not an owner is a permission failure, not a plan limit.
 

@@ -217,6 +217,30 @@ export async function assertCanInvite(organizationId: string): Promise<void> {
 }
 
 /**
+ * Whether this organization's public forms must carry the "Made with VuePDF"
+ * mark (features/0014).
+ *
+ * Deliberately **not** `getEntitlements`. That returns plan *and* usage, which
+ * costs three more queries and a `UsageCounter` lookup, and the caller here is
+ * `GET /api/forms/public/:shareId` — anonymous, uncached, and hit once per
+ * respondent per view. One boolean does not justify four queries.
+ *
+ * Returns the negation of `Plan.hasBranding`, which reads as *has its own
+ * branding*: a plan with the entitlement gets to remove our mark. The double
+ * negative is why this function is named for what the caller renders rather
+ * than for what the plan grants.
+ *
+ * Through `effectivePlan` like every other limit check, so `DEV_PLAN_KEY` still
+ * governs it — and note the consequence, because it will otherwise be reported
+ * as a bug: `DEV_PLAN` has `hasBranding: true`, so with the override on the
+ * mark disappears from every local form.
+ */
+export async function mustShowBranding(organizationId: string): Promise<boolean> {
+  const plan = await planFor(organizationId)
+  return !plan.hasBranding
+}
+
+/**
  * Whether this organization has spent the month's responses.
  *
  * The read-only twin of `assertResponseWithinLimit`, for

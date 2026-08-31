@@ -57,6 +57,25 @@ interface FormResponse {
   form: Form
 }
 
+/**
+ * What the anonymous endpoint returns, which is a form **plus one boolean**.
+ *
+ * `showBranding` is the only thing about the owner's plan that crosses this
+ * boundary (features/0014). Anyone holding a share link receives this payload,
+ * so it deliberately carries no plan name, no limit, no usage and no
+ * organization id — the same reason the response limit answers `404` there
+ * instead of `402`.
+ */
+export interface PublicForm {
+  form: Form
+  showBranding: boolean
+}
+
+interface PublicFormResponse {
+  form: Form
+  showBranding?: boolean
+}
+
 export interface CreateFormData {
   title: string
   description?: string
@@ -101,8 +120,14 @@ export const formsService = {
     await api.delete(`/forms/${id}`)
   },
 
-  async getPublic(shareId: string): Promise<Form> {
-    const response = await api.get<FormResponse>(`/forms/public/${shareId}`)
-    return response.form
+  async getPublic(shareId: string): Promise<PublicForm> {
+    const response = await api.get<PublicFormResponse>(`/forms/public/${shareId}`)
+    return {
+      form: response.form,
+      // Absent means shown. The safe direction for a missing flag is to keep
+      // the mark: an older server, a proxy that drops it, or a shape change
+      // must never silently give away the paid tier's benefit.
+      showBranding: response.showBranding ?? true
+    }
   }
 }

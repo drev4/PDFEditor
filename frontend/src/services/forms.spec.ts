@@ -86,12 +86,24 @@ describe('Forms Service', () => {
 
   describe('getPublic', () => {
     it('should fetch public form by shareId', async () => {
-      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm, showBranding: false })
 
-      const form = await formsService.getPublic('share-123')
+      const published = await formsService.getPublic('share-123')
 
       expect(api.get).toHaveBeenCalledWith('/forms/public/share-123')
-      expect(form.shareId).toBe('share-123')
+      expect(published.form.shareId).toBe('share-123')
+      expect(published.showBranding).toBe(false)
+    })
+
+    it('keeps the mark when the server does not say (features/0014)', async () => {
+      // An older server, a proxy that drops the field, a shape change. The safe
+      // direction for a missing flag is to show the mark: the failure mode of
+      // guessing the other way is silently giving away the paid tier's benefit.
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+
+      const published = await formsService.getPublic('share-123')
+
+      expect(published.showBranding).toBe(true)
     })
   })
 })

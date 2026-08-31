@@ -4,6 +4,7 @@ import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, type AuthRequest } from '../middleware/auth.js'
 import { requireRole } from '../middleware/membership.js'
+import { withOrganizationLock } from '../services/organization-lock.js'
 import {
   constructWebhookEvent,
   handleStripeEvent,
@@ -63,75 +64,107 @@ billingRouter.post('/checkout', authenticate, async (req: AuthRequest, res, next
     const price = proPriceId()
     const stripe = stripeClient()
 
-    const existing = await subscriptionFor(organizationId)
+    // Everything from here is serialised per organization (features/0014).
+    //
+    // Reading the stored customer and writing it back are two steps, and a
+    // double click puts a second request between them: both read "no customer",
+    // both create one, and both open a Checkout Session. Two sessions that are
+    // each paid is one organization with two live subscriptions, of which this
+    // application can only ever see one — `Subscription.organizationId` is
+    // unique — while the other keeps billing, invisible to "Manage billing".
+    //
+    // See `services/organization-lock.ts` for why this is not `SELECT … FOR
+    // UPDATE` (there is no row to lock on a first checkout) and for what this
+    // lock does not cover.
+    const url = await withOrganizationLock(organizationId, async () => {
+      const existing = await subscriptionFor(organizationId)
 
-    // A second subscription for an organization that already has a live one is
-    // a customer paying twice for one product. The portal is where an existing
-    // subscription is changed.
-    if (existing?.stripeSubscriptionId && isPaidStatus(existing.status)) {
-      throw new AppError(
-        400,
-        'This organization already has an active subscription. Manage it in the billing portal.'
-      )
-    }
+      // A second subscription for an organization that already has a live one is
+      // a customer paying twice for one product. The portal is where an existing
+      // subscription is changed.
+      if (existing?.stripeSubscriptionId && isPaidStatus(existing.status)) {
+        throw new AppError(
+          400,
+          'This organization already has an active subscription. Manage it in the billing portal.'
+        )
+      }
 
-    // Reuse the customer if there is one. A fresh customer per attempt is how
-    // one organization ends up with two Stripe customers and two invoices.
-    let customerId = existing?.stripeCustomerId
+      // Reuse the customer if there is one. A fresh customer per attempt is how
+      // one organization ends up with two Stripe customers and two invoices.
+      let customerId = existing?.stripeCustomerId
 
-    if (!customerId) {
-      const user = await prisma.user.findUnique({
-        where: { id: req.userId! },
-        select: { email: true, name: true }
+      if (!customerId) {
+        const user = await prisma.user.findUnique({
+          where: { id: req.userId! },
+          select: { email: true, name: true }
+        })
+
+        const customer = await stripe.customers.create(
+          {
+            email: user?.email,
+            name: user?.name ?? undefined,
+            // So an event that lost its session metadata can still be attributed.
+            metadata: { organizationId }
+          },
+          // The read above and the write below are not atomic, so two concurrent
+          // calls — a double click, two tabs, a direct API caller — can both find
+          // no customer and both create one. The idempotency key closes that
+          // window at Stripe's end rather than ours: Stripe replays the first
+          // response for the same key, so both requests get the *same* customer
+          // and `rememberCustomer` stores the same id twice.
+          //
+          // It is scoped to the organization, not to the request, because the
+          // whole point is that two different requests for one organization must
+          // not produce two customers. Stripe honours a key for 24 hours; past
+          // that the stored row is what prevents a second customer, and the only
+          // way to get one is for the row to be missing 24 hours later, which
+          // means no checkout was ever completed.
+          { idempotencyKey: `vuepdf-customer-${organizationId}` }
+        )
+
+        customerId = customer.id
+        await rememberCustomer(organizationId, customerId)
+      }
+
+      // An open session this organization already has. Serialising concurrent
+      // requests is not enough on its own: two checkouts a minute apart also
+      // produce two sessions, and Stripe keeps one open for 24 hours. Handing
+      // back the existing one means there is only ever a single session that can
+      // be paid, which is the actual protection against being billed twice.
+      const open = await stripe.checkout.sessions.list({
+        customer: customerId,
+        status: 'open',
+        limit: 1
       })
 
-      const customer = await stripe.customers.create(
-        {
-          email: user?.email,
-          name: user?.name ?? undefined,
-          // So an event that lost its session metadata can still be attributed.
-          metadata: { organizationId }
-        },
-        // The read above and the write below are not atomic, so two concurrent
-        // calls — a double click, two tabs, a direct API caller — can both find
-        // no customer and both create one. The idempotency key closes that
-        // window at Stripe's end rather than ours: Stripe replays the first
-        // response for the same key, so both requests get the *same* customer
-        // and `rememberCustomer` stores the same id twice.
-        //
-        // It is scoped to the organization, not to the request, because the
-        // whole point is that two different requests for one organization must
-        // not produce two customers. Stripe honours a key for 24 hours; past
-        // that the stored row is what prevents a second customer, and the only
-        // way to get one is for the row to be missing 24 hours later, which
-        // means no checkout was ever completed.
-        { idempotencyKey: `vuepdf-customer-${organizationId}` }
-      )
+      const reusable = open.data[0]
+      if (reusable?.url) {
+        return reusable.url
+      }
 
-      customerId = customer.id
-      await rememberCustomer(organizationId, customerId)
-    }
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer: customerId,
+        line_items: [{ price, quantity: 1 }],
+        // Both, deliberately. `client_reference_id` is what Stripe echoes on the
+        // session; `metadata` is what survives onto objects the session creates.
+        client_reference_id: organizationId,
+        metadata: { organizationId },
+        // Copied onto the subscription, so every later
+        // `customer.subscription.*` event names the organization without a lookup.
+        subscription_data: { metadata: { organizationId } },
+        success_url: frontendUrl('/dashboard/settings?checkout=complete'),
+        cancel_url: frontendUrl('/dashboard/settings?checkout=cancelled')
+      })
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      line_items: [{ price, quantity: 1 }],
-      // Both, deliberately. `client_reference_id` is what Stripe echoes on the
-      // session; `metadata` is what survives onto objects the session creates.
-      client_reference_id: organizationId,
-      metadata: { organizationId },
-      // Copied onto the subscription, so every later
-      // `customer.subscription.*` event names the organization without a lookup.
-      subscription_data: { metadata: { organizationId } },
-      success_url: frontendUrl('/dashboard/settings?checkout=complete'),
-      cancel_url: frontendUrl('/dashboard/settings?checkout=cancelled')
+      if (!session.url) {
+        throw new AppError(502, 'Stripe did not return a checkout URL.')
+      }
+
+      return session.url
     })
 
-    if (!session.url) {
-      throw new AppError(502, 'Stripe did not return a checkout URL.')
-    }
-
-    res.json({ url: session.url })
+    res.json({ url })
   } catch (error) {
     next(error)
   }
