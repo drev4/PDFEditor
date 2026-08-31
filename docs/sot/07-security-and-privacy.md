@@ -32,7 +32,9 @@ Anonymous internet
   ├── POST /api/auth/register          rate limited per IP
   ├── POST /api/responses              writes to the database, no auth, rate limited per IP
   ├── GET  /api/forms/public/:shareId  reads a form, no auth, mutates viewCount, no throttle
-  └── GET  /uploads/pdfs/<sig>/<file>  reads one uploaded PDF, no auth, signature-gated, expiring, no throttle
+  ├── GET  /uploads/pdfs/<sig>/<file>  reads one uploaded PDF, no auth, signature-gated, expiring, no throttle
+  └── POST /api/billing/webhook        writes subscriptions and plans, no session,
+                                       Stripe-signature-gated, RAW body, no throttle (argued below)
 
 Authenticated user (access token)
   ├── /api/auth/me, /api/upload               the caller themselves
@@ -46,9 +48,15 @@ Server-side, no boundary
   └── PDF processing, filesystem writes
 ```
 
-These are the whole external attack surface. The three write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and the PDF route now requires a signature this service issued, which bounds who can call it at all.
+These are the whole external attack surface. Three of the four write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and the PDF route now requires a signature this service issued, which bounds who can call it at all.
 
 **Author-supplied regex is compiled by RE2, and degrades to no constraint.** A `pattern` that the engine cannot compile — one stored before validation existed, or an engine that failed to load — is logged and treated as *no pattern constraint*, never thrown. Throwing would restore the 500 this fixed; rejecting would punish a respondent for the author's mistake. `pattern` is a formatting convenience that nothing downstream trusts, so unconstrained is the right degradation — but do not read the field as a guaranteed-enforced rule.
+
+**`POST /api/billing/webhook` has no rate limiter, and rule 2 below requires that to be argued in writing** ([`features/0013`](../../features/0013-stripe-subscriptions.md)). The argument is that the signature is a strictly *stronger* gate than a limiter, not a weaker one: an unsigned or forged request is rejected before any work at the cost of one HMAC, so there is no expensive path behind it to protect, and there is no enumeration to slow down because the endpoint returns nothing an attacker can learn from. What a limiter *would* throttle is **Stripe's own retries** — and every dropped retry is a subscription state this application never learns about: a customer who paid and did not get the plan, or one who cancelled and kept it. The failure mode of adding the limiter is worse than the failure mode it prevents. `backend/tests/billing.spec.ts` asserts that 40 unsigned requests all answer `400` and none answers `429`, so the absence is deliberate and stays deliberate.
+
+Two more things about that route are security-relevant and easy to break. **It must stay mounted above `express.json()`** — Stripe signs the exact bytes it sent, so a parsed-and-restringified body fails every signature check, silently and totally, leaving an endpoint that answers while activating nobody. And **it answers `200` to anything it verified but did not act on** — a duplicate, an unknown event type, an unresolvable organization — because any other status makes Stripe retry forever and eventually disable the endpoint, which would take every real customer's subscription updates down with it. See [04-backend-patterns §10a](./04-backend-patterns.md).
+
+**No card data is stored anywhere in this system, and none ever reaches this origin.** Checkout and the Customer Portal are hosted by Stripe; the application holds only opaque Stripe identifiers (`cus_…`, `sub_…`, `price_…`) in `subscriptions`. There is no PAN, no last four digits, no expiry and no card token. That is a deliberate architectural choice rather than a gap — Stripe Elements or any in-app card form would move the PCI surface onto this origin, and deciding otherwise is a security decision, not a UI one. None of those identifiers is exposed to the client either: `GET /api/organizations/entitlements` returns only `status`, `currentPeriodEnd` and `cancelAtPeriodEnd`.
 
 **`UsageCounter` is not personal data**, and the judgement is recorded here so the next reader does not have to make it again. It holds an organization id, a `YYYY-MM` string and a count. It says nothing about who submitted, from where, or what they answered — a count of submissions per tenant per month is business telemetry about a customer *organization*, not about a person, and it is not linkable to a respondent. It therefore adds no row to the data inventory and nothing to an erasure request. Note the direction this cuts: because it is not personal data, it is also **not deleted** by a respondent-facing erasure, which is the correct outcome for a billing meter.
 
@@ -176,17 +184,21 @@ Needed for any privacy policy, DPA or security questionnaire, so it is maintaine
 | Form and field definitions | Account holder | `forms`, `fields` | Contract | Until the form is deleted |
 | Answer values | **Respondent** | `answers` | The form author's basis; we are the processor | Indefinite |
 | IP address, user agent | **Respondent** | `responses` | Legitimate interest (anti-abuse) — **but not documented, not disclosed, and not currently used for anti-abuse** | Indefinite |
+| Stripe customer and subscription identifiers | Account holder (the paying organization) | `subscriptions` | Contract | Until the organization is deleted (`onDelete: Cascade`) |
+| Stripe event ids | — | `stripe_events` | Legitimate interest (correct billing) | Indefinite, and deliberately not linked to an organization — see [03-domain-model](./03-domain-model.md) |
+
+**Neither Stripe row is card data.** `subscriptions` holds `stripe_customer_id`, `stripe_subscription_id`, `price_id`, a status string and two dates. The name on the card, the card number, the billing address and the invoice history are all held by **Stripe**, which is therefore a subprocessor and belongs on the subprocessor list this product does not yet have (see below). `stripe_events` holds an event id, an event type and a timestamp, and describes no person at all.
 
 The last row is the weakest position in this table. Data collected for a stated purpose that the system does not actually implement is hard to defend. Either use it for abuse prevention and say so, or stop collecting it. Deciding this is cheap now and expensive after the first enterprise review.
 
 ## Roles and responsibilities
 
-For form responses the customer is the data controller and this product is the processor. That means the roadmap eventually needs a DPA, subprocessor list, breach-notification path and documented retention. None exists yet. This is not premature for B2B — it is the second page of every procurement questionnaire.
+For form responses the customer is the data controller and this product is the processor. That means the roadmap eventually needs a DPA, subprocessor list, breach-notification path and documented retention. None exists yet — and the subprocessor list is now overdue rather than hypothetical, because **Stripe is a subprocessor** as of [`features/0013`](../../features/0013-stripe-subscriptions.md). This is not premature for B2B — it is the second page of every procurement questionnaire.
 
 ## Rules for new code
 
 1. **Every new route declares its authentication and authorization explicitly.** A route with neither is a deliberate, reviewed decision, not an omission.
-2. **Every new public endpoint ships with rate limiting.** Add a named limiter in `middleware/rateLimit.ts` and apply it at the route, the way `authenticate` is applied. Its limit and window come from the environment, so the test suites and CI can set their own without weakening the production default.
+2. **Every new public endpoint ships with rate limiting, or an argument in this document for why not.** Add a named limiter in `middleware/rateLimit.ts` and apply it at the route, the way `authenticate` is applied. Its limit and window come from the environment, so the test suites and CI can set their own without weakening the production default. There is exactly one endpoint without one — the Stripe webhook — and its argument is above; copy that standard of proof, including a test that the absence is intentional, or add the limiter.
 3. **New personal data added to a model updates the inventory above in the same PR.** A field that appears in the schema but not in this table cannot be answered for in an audit.
 4. **Never log a whole request, error or entity object.** Log identifiers and the fields you actually need.
 5. **User-supplied code-like input** — regex, templates, formulas, file names — is untrusted input with a resource cost, not just a value to validate. Compile it through one audited helper (`services/pattern-validator.ts` is the model), never at the call site, and remember that a synchronous evaluator **cannot** be bounded by a timeout on the same thread.

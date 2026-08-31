@@ -12,10 +12,14 @@
  * changing the canvas — a limit the product enforces and a limit the design
  * promises must be the same limit.
  *
- * **Prices are deliberately absent.** The canvas draws €0 / €12 / €39, and
- * docs/BACKLOG.md records that nobody has actually decided them. There is no
- * billing in this product, so a price here would be a number the code states
- * and the business has not agreed to.
+ * **Prices are deliberately absent, and stayed absent when billing arrived.**
+ * The canvas draws €0 / €12 / €39 and docs/BACKLOG.md records that nobody has
+ * decided them. features/0013 did not add a price field here: the amount lives
+ * in Stripe and nowhere else, the application stores only a *price id* in
+ * configuration (`STRIPE_PRICE_PRO`), and the customer sees the real figure on
+ * Stripe's own Checkout page. A constant here would turn an undecided number
+ * into a fact, and would be wrong the first time there is a promotion or a
+ * second currency.
  */
 
 export type PlanKey = 'free' | 'pro' | 'team'
@@ -65,9 +69,11 @@ export interface Plan {
    * its public forms. Named as the roadmap names it; read it as *has its own
    * branding*, not *has our branding*.
    *
-   * Not enforced here — `PublicFormView.vue` still always shows the mark. With
-   * no way to be on a paid plan there is nothing to turn it off for, so wiring
-   * it would be unobservable and untestable. Step 8.
+   * Not enforced here — `PublicFormView.vue` still always shows the mark.
+   * features/0013 made Pro buyable, so for the first time there *is* somebody
+   * to turn it off for, but removing the mark is a change to the public form
+   * with its own tests and folding it into the billing diff would have made
+   * that diff unreviewable. Its row in docs/BACKLOG.md is still open.
    */
   hasBranding: boolean
   /** Not enforced: there is no public API. Step 10 of the build order. */
@@ -101,7 +107,10 @@ export const PLANS: Readonly<Record<PlanKey, Readonly<Plan>>> = Object.freeze({
     maxResponsesPerMonth: 25000,
     // The canvas prices Team as "€39 / month + €6 per seat", so the seat count
     // is bought rather than fixed — there is no number to put here until a
-    // `Subscription` says how many were paid for. `null` until step 8.
+    // `Subscription` says how many were paid for. features/0013 shipped Free ↔
+    // Pro only and deliberately left Team out, precisely because per-seat
+    // quantity billing has to stay in step with `Membership`; this stays `null`
+    // until that change.
     seats: null,
     hasBranding: true,
     hasApiAccess: true
@@ -149,6 +158,13 @@ export function isWithin(used: number, limit: number | null): boolean {
 //
 // The successor is per-environment configuration — a staging deployment that
 // simply runs on a real plan — not a flag that has to be remembered.
+//
+// **It interacts with billing, and the direction matters.** `effectivePlan`
+// returns the override *before* it looks at the stored `planKey`, so the
+// override wins over a real Stripe subscription. Testing billing with
+// `DEV_PLAN_KEY` set therefore shows the plan working whether or not the
+// webhook did anything — which is exactly the false positive this whole feature
+// is written to avoid. Leave it empty when verifying billing (features/0013).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**

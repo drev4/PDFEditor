@@ -8,9 +8,13 @@ import { api } from './api'
  * `-1` or `Infinity` invites a comparison that accidentally works, and
  * `Infinity` does not survive JSON at all.
  *
- * There is no price here and no billing identifier. There is no billing in this
- * product yet — the prices drawn on the design canvas are not a decision anyone
- * has taken (`docs/BACKLOG.md`), so no screen may render one as if they were.
+ * **There is no price here and no Stripe identifier, and there must never be.**
+ * The amount lives in Stripe and nowhere else (`features/0013`, trap 7): nobody
+ * has decided the real numbers (`docs/BACKLOG.md`), so no screen may render one
+ * from a constant as if they had. The Stripe customer and subscription ids are
+ * credentials for a third-party API and nothing on screen needs them — every
+ * billing action goes through `services/billing.ts`, which asks the server for a
+ * URL and lets the server resolve the organization from the session.
  */
 export interface Plan {
   /**
@@ -33,9 +37,30 @@ export interface PlanUsage {
   seats: number
 }
 
+/**
+ * What the customer has bought, or `null` if nothing.
+ *
+ * `null` covers both "never opened checkout" and "opened checkout and did not
+ * finish": the server reports a subscription only once one actually exists at
+ * Stripe, so a "Manage billing" button is never offered to somebody who has
+ * never paid.
+ *
+ * `status` is Stripe's own string, passed through. It is **not** what decides
+ * the plan — the server did that, and `plan` above is the answer. It is here so
+ * a screen can say "we are retrying your card" rather than silently showing Pro.
+ */
+export interface Subscription {
+  status: string
+  /** ISO 8601, or `null`. When the current paid period ends. */
+  currentPeriodEnd: string | null
+  /** `true` when the customer has cancelled and keeps the plan until then. */
+  cancelAtPeriodEnd: boolean
+}
+
 export interface Entitlements {
   plan: Plan
   usage: PlanUsage
+  subscription: Subscription | null
 }
 
 export const planService = {

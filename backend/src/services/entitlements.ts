@@ -26,7 +26,12 @@ import { PLANS, effectivePlan, isWithin, type Plan } from './plans.js'
  *
  * Nothing here knows that a billing provider exists, and nothing here may ever
  * import one. Domain routes ask this service a question about limits;
- * `SubscriptionService` will be the only thing that knows about Stripe.
+ * `services/stripe.ts` is the only thing that knows about Stripe, and a grep
+ * for `from 'stripe'` finds it and nothing else (features/0013).
+ *
+ * **This file was not changed by features/0013**, which is the point of it: the
+ * plan still comes from `Organization.planKey` through `effectivePlan`, and all
+ * billing did was become the one thing allowed to write that column.
  */
 
 /**
@@ -128,9 +133,16 @@ async function readResponseUsage(organizationId: string): Promise<number> {
 /**
  * Everything the plan screen and the sidebar card need, in one call.
  *
- * The single place that turns a stored `planKey` into a plan. When step 8
- * derives the plan from a `Subscription` instead, this function changes and
- * nothing else does.
+ * The single place that turns a stored `planKey` into a plan — and it stayed
+ * that way when billing arrived. features/0013 made `planKey` *derived* rather
+ * than replacing it: `services/stripe.ts` writes it from what Stripe says, and
+ * this still reads it. The alternative, joining `Subscription` here, would put
+ * a billing table in the path of every limit check and leave `planKey` sitting
+ * there being wrong.
+ *
+ * The subscription's own status and period end are added to the API response by
+ * `routes/organizations.ts`, not here: they are something a screen displays,
+ * not something a limit is computed from.
  */
 export async function getEntitlements(organizationId: string): Promise<Entitlements> {
   const [plan, publishedForms, responsesThisPeriod, seats] = await Promise.all([
@@ -179,15 +191,17 @@ export async function assertCanPublishForm(
  * `POST /api/organizations/invitations` yet.**
  *
  * The canvas gives Free and Pro one seat each; only Team has several, and Team
- * cannot be bought because there is no billing (step 8). Enforcing this today
- * would therefore answer `402` to *every* invitation from *every* account,
- * making the whole of features/0010 unreachable — that is not validating the
- * limit UX, it is deleting a shipped feature. The alternative, inventing a seat
- * count for Free that the design does not state, would put a product decision
- * nobody has taken into the code.
+ * still cannot be bought — features/0013 shipped Free ↔ Pro only, because Team
+ * is priced per seat and that quantity has to be kept in step with
+ * `Membership`. So enforcing this today would still answer `402` to *every*
+ * invitation from *every* account, making the whole of features/0010
+ * unreachable — that is not validating the limit UX, it is deleting a shipped
+ * feature. The alternative, inventing a seat count for Free that the design
+ * does not state, would put a product decision nobody has taken into the code.
  *
- * So it waits for the plan that makes it meaningful. Step 8 wires it in one
- * line; the row in docs/BACKLOG.md is what remembers to.
+ * So it waits for the plan that makes it meaningful, which is now the Team
+ * plan rather than "billing" in general. The row in docs/BACKLOG.md is what
+ * remembers to.
  */
 export async function assertCanInvite(organizationId: string): Promise<void> {
   const plan = await planFor(organizationId)

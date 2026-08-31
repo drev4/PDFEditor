@@ -58,6 +58,13 @@ export default defineConfig({
                 // absent: dotenv does not overwrite a key that is already
                 // present, and an absent key it would happily fill in.
                 DEV_PLAN_KEY: '',
+                // Same reasoning for Stripe: `dotenv.config()` would otherwise
+                // hand this suite a developer's real keys. Empty means billing
+                // is off, so `/api/billing/*` answers 503 and nothing in this
+                // suite can reach Stripe (features/0013).
+                STRIPE_SECRET_KEY: '',
+                STRIPE_WEBHOOK_SECRET: '',
+                STRIPE_PRICE_PRO: '',
             },
         },
         {

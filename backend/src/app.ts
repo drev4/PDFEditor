@@ -11,6 +11,7 @@ import { formFieldsRouter } from './routes/form-fields.js'
 import { uploadRouter } from './routes/upload.js'
 import { responsesRouter } from './routes/responses.js'
 import { organizationsRouter } from './routes/organizations.js'
+import { billingRouter, webhookRouter } from './routes/billing.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
@@ -70,6 +71,23 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true
 }))
+// ─────────────────────────────────────────────────────────────────────────────
+// DO NOT MOVE THIS BELOW `express.json()`.
+//
+// The Stripe webhook is the only route in this application whose caller is
+// authenticated by a signature over the **raw request bytes**. `express.json()`
+// consumes the stream and hands the handler a parsed object; re-serialising it
+// does not reproduce Stripe's bytes, so `stripe.webhooks.constructEvent` fails
+// on every single event.
+//
+// The breakage is silent and total: the endpoint still answers, `stripe listen`
+// in development can still appear to work, and in deployment every event is
+// rejected as an invalid signature — which means subscriptions are bought and
+// never activated, and cancelled and never applied. It is mounted here, above
+// the JSON parser, and `routes/billing.ts` gives it `express.raw` of its own.
+// ─────────────────────────────────────────────────────────────────────────────
+app.use('/api/billing', webhookRouter)
+
 app.use(express.json())
 // The refresh token travels in an httpOnly cookie (finding S4). Only the auth
 // routes read it; everything else authenticates with a Bearer header.
@@ -158,5 +176,7 @@ app.use('/api/forms', formFieldsRouter)
 app.use('/api/upload', uploadRouter)
 app.use('/api/responses', responsesRouter)
 app.use('/api/organizations', organizationsRouter)
+// The webhook is NOT here — see the raw-body mount above `express.json()`.
+app.use('/api/billing', billingRouter)
 
 app.use(errorHandler)

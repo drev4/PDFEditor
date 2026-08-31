@@ -1,0 +1,24 @@
+{
+  // Type checking for `tests/`, which the build's tsconfig deliberately excludes
+  // (`rootDir: ./src`, `include: ["src/**/*"]` — test files must not land in
+  // `dist/`).
+  //
+  // It exists for one reason: `tests/fixtures/stripe-events.ts` claims to be
+  // checked against the Stripe SDK's own type declarations, and without this
+  // file nothing checked it. A fixture typed as `Stripe.Subscription` that
+  // nobody compiles is a hand-written object with a comment on it.
+  //
+  // Scope is `tests/fixtures/` only, not the whole suite. The existing specs do
+  // not type-check today — vitest's `Mock` type does not satisfy Express's
+  // `NextFunction` in `middleware-errorHandler.spec.ts`, among others — and
+  // fixing that is a separate change with nothing to do with billing. Widening
+  // the `include` below is the way to take it on.
+  //
+  // Run with `npm run typecheck:tests` in `backend/`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "tests/fixtures/**/*"]
+}

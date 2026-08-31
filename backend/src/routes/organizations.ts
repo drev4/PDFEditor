@@ -10,6 +10,7 @@ import { invitationRateLimit } from '../middleware/rateLimit.js'
 import { issueRefreshToken } from '../services/refresh-token.js'
 import { setRefreshCookie } from '../services/session-cookie.js'
 import { getEntitlements } from '../services/entitlements.js'
+import { subscriptionFor } from '../services/stripe.js'
 import {
   createInvitation,
   findRedeemable,
@@ -39,12 +40,15 @@ const acceptSchema = z.object({
 //
 // Not owner-only: the sidebar card and the plan screen are visible to everyone
 // in the organization, and a member who cannot see why publishing was refused
-// has no way to understand the product. It carries no billing identifiers and
-// no organization id — only what the plan allows and what has been used.
+// has no way to understand the product. It carries no organization id and no
+// Stripe identifier — only what the plan allows, what has been used, and (since
+// features/0013) the subscription's status and period end, which are things a
+// screen displays rather than things a limit is computed from.
 organizationsRouter.get('/entitlements', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { organizationId } = await requireMembership(req)
     const { plan, usage } = await getEntitlements(organizationId)
+    const subscription = await subscriptionFor(organizationId)
 
     res.json({
       plan: {
@@ -54,7 +58,24 @@ organizationsRouter.get('/entitlements', authenticate, async (req: AuthRequest, 
         maxResponsesPerMonth: plan.maxResponsesPerMonth,
         seats: plan.seats
       },
-      usage
+      usage,
+      // Only what a screen has to render, and **no Stripe identifier**
+      // (features/0013). The customer and subscription ids are credentials for
+      // a third-party API; the client never needs them, because every billing
+      // action goes through `POST /api/billing/*`, which resolves the
+      // organization from the caller's own membership.
+      //
+      // `null` until a subscription actually exists at Stripe. A row created by
+      // an abandoned checkout holds a customer id and nothing bought, and
+      // reporting that as a subscription would put "Manage billing" in front of
+      // someone who never completed a payment.
+      subscription: subscription?.stripeSubscriptionId
+        ? {
+            status: subscription.status,
+            currentPeriodEnd: subscription.currentPeriodEnd,
+            cancelAtPeriodEnd: subscription.cancelAtPeriodEnd
+          }
+        : null
     })
   } catch (error) {
     next(error)

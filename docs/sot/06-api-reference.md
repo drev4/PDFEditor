@@ -47,7 +47,7 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| GET | `/organizations/entitlements` | Bearer, any member | — | `200 {plan: {key, name, maxPublishedForms, maxResponsesPerMonth, seats}, usage: {publishedForms, responsesThisPeriod, seats}}` · `404` if the caller is in no organization |
+| GET | `/organizations/entitlements` | Bearer, any member | — | `200 {plan: {key, name, maxPublishedForms, maxResponsesPerMonth, seats}, usage: {publishedForms, responsesThisPeriod, seats}, subscription: {status, currentPeriodEnd, cancelAtPeriodEnd} \| null}` · `404` if the caller is in no organization |
 | GET | `/organizations/members` | Bearer, any member | — | `200 {members: [{id, email, name, role, joinedAt}]}` · `404` if the caller is in no organization |
 | PATCH | `/organizations/members/:userId` | Bearer, **owner** | `{role}` | `200 {member}` · `400` if it would leave no owner · `403` wrong role · `404` not a member of this organization |
 | DELETE | `/organizations/members/:userId` | Bearer, **owner** | — | `204` · `400` if it would leave no owner · `403` · `404` |
@@ -56,9 +56,31 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 | DELETE | `/organizations/invitations/:id` | Bearer, **owner/admin** | — | `204` · `404` |
 | POST | `/organizations/invitations/accept` | — | `{token, password?, name?}` | `200 {organizationId}` when signed in · `201 {user, token, organizationId}` for a new account · `400` invalid/expired/revoked/used or missing password · `401` the account exists, sign in first · `409` signed in as a different address · `429` |
 
-**`/organizations/entitlements` is readable by any member, not just an owner.** The sidebar plan card and the plan screen are visible to everyone in the organization, and a member who cannot see why publishing was refused has no way to understand the product. It carries no organization id and no billing identifier. `null` in any limit means **unlimited** — the same representation the backend catalogue uses, because `Infinity` does not survive JSON and a sentinel like `-1` invites a comparison that accidentally works.
+**`/organizations/entitlements` is readable by any member, not just an owner.** The sidebar plan card and the plan screen are visible to everyone in the organization, and a member who cannot see why publishing was refused has no way to understand the product. It carries no organization id. `null` in any limit means **unlimited** — the same representation the backend catalogue uses, because `Infinity` does not survive JSON and a sentinel like `-1` invites a comparison that accidentally works.
 
-**`POST /organizations/invitations` does not check the seat limit yet.** `assertCanInvite` exists and is tested, and is deliberately not wired: the design gives Free and Pro one seat each, only Team has more, and Team cannot be bought because there is no billing. Enforcing it today would answer `402` to every invitation from every account. See [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) and the row in [`docs/BACKLOG.md`](../BACKLOG.md).
+**`subscription` carries no Stripe identifier and no amount** ([`features/0013`](../../features/0013-stripe-subscriptions.md)). `stripeCustomerId`, `stripeSubscriptionId` and `priceId` are credentials for a third-party API and never leave the server; nothing on screen needs them, because every billing action goes through `POST /billing/*`, which resolves the organization from the caller's own membership. No price is in this payload either — the amount lives in Stripe and the customer sees it on Stripe's own pages. `status` is Stripe's own string and is **not** what decides the plan: the server already did that, and `plan.key` is the answer. It is `null` until a subscription actually exists at Stripe, so a row left behind by an abandoned checkout does not put "Manage billing" in front of somebody who never paid.
+
+**`POST /organizations/invitations` does not check the seat limit yet.** `assertCanInvite` exists and is tested, and is deliberately not wired: the design gives Free and Pro one seat each, only Team has more, and Team still cannot be bought — [`features/0013`](../../features/0013-stripe-subscriptions.md) shipped Free ↔ Pro only, because Team is priced per seat and that quantity has to be kept in step with `Membership`. Enforcing it today would still answer `402` to every invitation from every account. See the row in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+## Billing — `routes/billing.ts`
+
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| POST | `/billing/checkout` | Bearer, **owner** | — | `200 {url}` — a Stripe Checkout URL · `400` the organization already has an active subscription · `403` wrong role · `404` the caller is in no organization · `503` billing is not configured on this server |
+| POST | `/billing/portal` | Bearer, **owner** | — | `200 {url}` — a Stripe Customer Portal URL · `403` · `404` no billing account, or the caller is in no organization · `503` |
+| POST | `/billing/webhook` | **Stripe signature** over the raw body | Stripe's event JSON | `200 {received: true, processed}` · `400 {error: "Invalid signature"}` · `503` if no `STRIPE_WEBHOOK_SECRET` is set |
+
+**Neither `checkout` nor `portal` takes an organization.** It comes from the caller's membership. A body parameter would be an authorization decision made by the client, and both routes send someone to a page that spends money.
+
+**`checkout` reuses the stored Stripe customer.** Minting a fresh one on a second attempt is how one organization ends up with two Stripe customers and two invoices for one product. The customer id is written before Checkout opens, which is why `Subscription` exists with null subscription columns.
+
+**Coming back from Checkout proves nothing.** `success_url` is `/dashboard/settings?checkout=complete` — a URL anyone can visit, which a customer who closes the tab never visits at all. The plan moves only when the webhook says Stripe took the money. The Settings screen says activation is in progress and re-reads entitlements; it writes nothing.
+
+**Cancelling, resuming, changing the card and reading invoices all happen in Stripe's portal.** This product builds none of those screens, and no card number ever reaches this origin — which is what keeps the PCI surface Stripe's.
+
+**`/billing/webhook` is the only unauthenticated route in this API with no rate limiter**, and the reason is argued in [04-backend-patterns §10a](./04-backend-patterns.md) and [07-security-and-privacy](./07-security-and-privacy.md). It answers `200` to duplicates, to event types it does not handle, and to events naming an organization it cannot resolve — anything else makes Stripe retry forever and eventually disable the endpoint. `processed` in the body says whether anything was written.
+
+**Status drives the plan.** `active`, `trialing` and `past_due` keep the paid plan — Stripe retries a failed payment for days, and cutting a customer off the moment a card expires is premature. Everything else, including statuses this code has never heard of, resolves to free. See `planKeyForStatus` in `services/stripe.ts`.
 
 **`link` is returned exactly once.** The server stores only a SHA-256 of the token and cannot reproduce it, and **nothing emails it** — the inviter copies the link and delivers it themselves. A client that discards this value has created an invitation nobody can accept.
 
@@ -235,8 +257,8 @@ TTL is configuration — [08-operations](./08-operations.md#configuration).
 500  { error: "Internal server error" }               never leaks the underlying message
 ```
 
-`402 Payment Required` means a **plan limit**, and `403` means a **permission failure**. They are never collapsed, so a client can show "upgrade your plan" versus "you do not have access" without parsing a message string. Today `402` is emitted by `PUT /forms/:id` and `PATCH /forms/:id/status` only ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)); it is never sent to an unauthenticated caller.
+`402 Payment Required` means a **plan limit**, and `403` means a **permission failure**. They are never collapsed, so a client can show "upgrade your plan" versus "you do not have access" without parsing a message string. Today `402` is emitted by `PUT /forms/:id` and `PATCH /forms/:id/status` only ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)); it is never sent to an unauthenticated caller. Note that the billing routes emit `403` and never `402`: refusing someone who is not an owner is a permission failure, not a plan limit.
 
 ## Not implemented
 
-No public/machine API, no API keys, no webhooks, no billing or plan-change endpoint, no endpoint returning an organization's name, no pagination beyond `/forms/:id/responses`, no bulk response deletion, no account deletion, no data export beyond per-form CSV. The last two are GDPR obligations, tracked in [07-security-and-privacy.md](./07-security-and-privacy.md).
+No public/machine API, no API keys, no outgoing webhooks, no endpoint returning an organization's name, no pagination beyond `/forms/:id/responses`, no bulk response deletion, no account deletion, no data export beyond per-form CSV. The last two are GDPR obligations, tracked in [07-security-and-privacy.md](./07-security-and-privacy.md). Billing exists as of [`features/0013`](../../features/0013-stripe-subscriptions.md), but only Free ↔ Pro: there is no endpoint that buys **Team**, because it is priced per seat.
