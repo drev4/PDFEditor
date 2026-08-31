@@ -110,8 +110,32 @@ export class LocalPdfStorage implements PdfStorageDriver {
     return path.join(this.directory, assertKey(key))
   }
 
+  /**
+   * Written to a temporary name and renamed into place.
+   *
+   * `writeFile` truncates and then fills, so a concurrent reader — the signed
+   * download route, or another request's embed — can observe a half-written
+   * document and treat a truncated PDF as a real one. `rename` within one
+   * directory is atomic on POSIX and on NTFS, so a reader sees either the whole
+   * old document or the whole new one and never something in between.
+   *
+   * This matters more after features/0016 than before it: the same interface is
+   * about to be backed by an object store, where a `PUT` is atomic per object,
+   * and the local driver should not be the one with weaker guarantees.
+   */
   async put(key: string, body: Buffer): Promise<void> {
-    await fsp.writeFile(this.pathFor(key), body)
+    const target = this.pathFor(key)
+    // Same directory, so the rename cannot cross a filesystem boundary — which
+    // is the one case where it would stop being atomic.
+    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`
+
+    await fsp.writeFile(temporary, body)
+    try {
+      await fsp.rename(temporary, target)
+    } catch (error) {
+      await fsp.unlink(temporary).catch(() => undefined)
+      throw error
+    }
   }
 
   async get(key: string): Promise<Buffer> {
