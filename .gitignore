@@ -69,3 +69,10 @@ poc/*.pdf
 # Uploaded files
 backend/uploads/**/*
 !backend/uploads/**/.gitkeep
+
+# Copias de .env. El patron `.env` de arriba NO las cubre — un fichero llamado
+# `.env.backup-...` se commitea tan tranquilamente como cualquier otro, con el
+# JWT_SECRET y la contraseña de la base de datos dentro.
+.env.backup*
+.env.*.backup
+*.env.bak
