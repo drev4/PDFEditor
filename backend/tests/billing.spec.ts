@@ -6,9 +6,11 @@ import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import {
+  assertKnownApiVersion,
   isPaidStatus,
   planKeyForPrice,
   planKeyForStatus,
+  resetAnnouncements,
   subscriptionStateFrom
 } from '../src/services/stripe'
 import {
@@ -46,7 +48,8 @@ const stripeCalls = {
   createCustomer: vi.fn(),
   createCheckoutSession: vi.fn(),
   createPortalSession: vi.fn(),
-  retrieveSubscription: vi.fn()
+  retrieveSubscription: vi.fn(),
+  listCheckoutSessions: vi.fn()
 }
 
 vi.mock('stripe', async () => {
@@ -55,7 +58,12 @@ vi.mock('stripe', async () => {
 
   class MockStripe extends Real {
     customers = { create: stripeCalls.createCustomer } as any
-    checkout = { sessions: { create: stripeCalls.createCheckoutSession } } as any
+    checkout = {
+      sessions: {
+        create: stripeCalls.createCheckoutSession,
+        list: stripeCalls.listCheckoutSessions
+      }
+    } as any
     billingPortal = { sessions: { create: stripeCalls.createPortalSession } } as any
     subscriptions = { retrieve: stripeCalls.retrieveSubscription } as any
   }
@@ -84,6 +92,11 @@ describe('stripe billing', () => {
     stripeCalls.createCheckoutSession.mockReset()
     stripeCalls.createPortalSession.mockReset()
     stripeCalls.retrieveSubscription.mockReset()
+    stripeCalls.listCheckoutSessions.mockReset()
+    // No session already open, unless a test says otherwise. `/checkout` now
+    // hands back an open session rather than opening a second one
+    // (features/0014).
+    stripeCalls.listCheckoutSessions.mockResolvedValue({ data: [] })
   })
 
   afterEach(() => {
@@ -463,6 +476,59 @@ describe('stripe billing', () => {
       expect(response.body).toEqual({ received: true, processed: false })
       expect(stripeCalls.retrieveSubscription).not.toHaveBeenCalled()
       expect(prismaMock.organization.update).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * The API version an event arrives in, which this application does not
+   * control (features/0014).
+   *
+   * `constructEvent` verifies the signature, never the shape. A payload
+   * serialised by a version this code was not written against verifies
+   * perfectly and reconciles wrong — which is exactly how `current_period_end`
+   * moving onto the subscription item would have stored `null` for every
+   * customer while failing nothing.
+   */
+  describe('the event API version', () => {
+    beforeEach(() => {
+      resetAnnouncements()
+    })
+
+    it('says nothing when the version matches', () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      expect(assertKnownApiVersion('2025-08-27.basil')).toBe(true)
+      expect(logged).not.toHaveBeenCalled()
+    })
+
+    it('complains, names both versions, and still lets the event through', () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      expect(assertKnownApiVersion('2026-08-26.dahlia')).toBe(false)
+
+      const message = String(logged.mock.calls[0]?.[0])
+      expect(message).toContain('2026-08-26.dahlia')
+      expect(message).toContain('2025-08-27.basil')
+    })
+
+    it('complains once per version, not once per event', () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      // A permanent misconfiguration printing on every webhook is a log nobody
+      // reads — the same reason `services/plans.ts` announces once.
+      assertKnownApiVersion('2026-08-26.dahlia')
+      assertKnownApiVersion('2026-08-26.dahlia')
+      assertKnownApiVersion('2026-08-26.dahlia')
+
+      expect(logged).toHaveBeenCalledTimes(1)
+    })
+
+    it('treats a missing version as nothing to say', () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      expect(assertKnownApiVersion(null)).toBe(true)
+      expect(assertKnownApiVersion(undefined)).toBe(true)
+      expect(logged).not.toHaveBeenCalled()
     })
   })
 

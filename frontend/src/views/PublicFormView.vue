@@ -103,8 +103,14 @@
         </div>
       </main>
 
-      <!-- The mark. A plan entitlement (Plan.hasBranding) once plans exist;
-           until then every form is on the free tier, so it is always shown. -->
+      <!-- The mark, now a real plan entitlement (features/0014).
+           `showBranding` is decided by the server from `Plan.hasBranding` and
+           passed through; nothing here re-derives it, because the client is
+           deliberately given no plan to derive it from — this endpoint is
+           anonymous, and what the owner pays is not the respondent's business.
+           Note that DEV_PLAN_KEY=dev grants the entitlement, so the mark
+           disappears in local development. That is the override working, not a
+           bug. -->
       <footer
         class="flex items-center h-[52px] flex-shrink-0 px-6 bg-surface border-t border-line"
       >
@@ -113,7 +119,10 @@
           required {{ requiredLeft === 1 ? 'field' : 'fields' }} left
         </span>
         <div class="flex-grow" />
-        <div class="flex items-center gap-1.5 h-[26px] px-2.5 rounded-pill border border-line">
+        <div
+          v-if="showBranding"
+          class="flex items-center gap-1.5 h-[26px] px-2.5 rounded-pill border border-line"
+        >
           <div class="flex items-center justify-center w-3.5 h-3.5 rounded-chip bg-ink text-white flex-shrink-0">
             <i class="pi pi-file text-[8px]" />
           </div>
@@ -150,7 +159,8 @@ const route = useRoute()
 const router = useRouter()
 const documentStore = useDocumentStore()
 
-const { form, fields, pdfUrl, title, description, isLoading, error, loadForm } = usePublicForm()
+const { form, showBranding, fields, pdfUrl, title, description, isLoading, error, loadForm } =
+  usePublicForm()
 const { isSubmitting, error: submitError, validationErrors: submitValidationErrors, submit } = useResponseSubmit()
 const { errors: clientErrors, validateField, validate } = useFormValidation()
 const responsesStore = usePublicResponsesStore()

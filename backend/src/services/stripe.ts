@@ -32,11 +32,70 @@ import { DEFAULT_PLAN_KEY, type PlanKey } from './plans.js'
  * start sending this code a shape it has never seen. `current_period_end` is
  * the live example: it used to sit on the subscription and in this version it
  * is on the subscription *item* — see `subscriptionStateFrom`.
+ *
+ * **This pins only the requests this application sends.** Events Stripe sends
+ * *us* are serialised in the version of the webhook endpoint's own
+ * configuration, or the account default when the endpoint pins none — and
+ * `stripe listen` uses the account default unless given `--api-version`.
+ * Verified on 2026-08-31: the test account sends `2026-08-26.dahlia` while this
+ * constant says `basil`, and it worked only because the one field that had
+ * moved is read from the right place. `assertKnownApiVersion` below is what
+ * makes the next such drift visible instead of silent; pinning the endpoint is
+ * the other half, and it is configuration (docs/sot/08-operations.md).
  */
 const STRIPE_API_VERSION = '2025-08-27.basil' as const
 
 let client: Stripe | null = null
 let clientKey: string | null = null
+
+/** So a permanent condition does not print on every webhook. */
+const announced = new Set<string>()
+
+function announceOnce(message: string): void {
+  if (announced.has(message)) return
+  announced.add(message)
+  console.error(message)
+}
+
+/** Only for tests, which assert the first occurrence of a message. */
+export function resetAnnouncements(): void {
+  announced.clear()
+}
+
+/**
+ * Says something when an event arrives in a version this code was not written
+ * against — and then lets it through.
+ *
+ * `constructEvent` verifies the **signature**, never the shape. A payload
+ * serialised by a different API version verifies perfectly and reconciles
+ * wrong, which is how `current_period_end` moving onto the subscription item
+ * would have stored `null` for every customer while failing nothing.
+ *
+ * **A mismatch is deliberately not fatal.** Refusing the event would answer
+ * non-`200`, Stripe would retry it forever and eventually disable the endpoint
+ * — turning a cosmetic version drift into a total billing outage, and breaking
+ * the rule that anything verified gets a `200`
+ * (docs/sot/04-backend-patterns.md §10a). The failure this guards against is
+ * silence, so the fix is noise, not refusal.
+ *
+ * Once per distinct version, not once per event: a permanent misconfiguration
+ * printing on every webhook is a log nobody reads.
+ */
+export function assertKnownApiVersion(eventApiVersion: string | null | undefined): boolean {
+  if (!eventApiVersion || eventApiVersion === STRIPE_API_VERSION) return true
+
+  announceOnce(
+    `Stripe sent an event serialised with API version "${eventApiVersion}", but this ` +
+    `code is written against "${STRIPE_API_VERSION}". The event is being processed ` +
+    `anyway — refusing it would make Stripe retry until it disabled the endpoint — ` +
+    `but any field Stripe has moved between those versions is now being read from ` +
+    `the wrong place, silently. Pin the API version on the webhook endpoint ` +
+    `(docs/sot/08-operations.md) or update STRIPE_API_VERSION and re-check ` +
+    `subscriptionStateFrom.`
+  )
+
+  return false
+}
 
 /** `true` when this deployment has been given a Stripe secret key. */
 export function billingConfigured(): boolean {
@@ -378,6 +437,10 @@ export interface HandledEvent {
  * infinite loop that eventually disables the endpoint.
  */
 export async function handleStripeEvent(event: Stripe.Event): Promise<HandledEvent> {
+  // Before anything else, and never a reason to stop: see the function's own
+  // comment for why a version mismatch is logged rather than refused.
+  assertKnownApiVersion(event.api_version)
+
   if (!(await claimEvent(event.id, event.type))) {
     return { processed: false, reason: 'duplicate' }
   }

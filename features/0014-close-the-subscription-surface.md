@@ -1,8 +1,8 @@
 # 0014 — Close the subscription surface: the mark, the webhook's API version, and the checkout race
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — three rows: *`Plan.hasBranding` is not enforced*, *The webhook receives events in the account's API version*, *Two completed Checkout sessions could still produce two Stripe subscriptions*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0014-close-the-subscription-surface`
 **Related:** [03-domain-model](../docs/sot/03-domain-model.md) · [04-backend-patterns §10a](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [08-operations](../docs/sot/08-operations.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md) · [`features/0013`](0013-stripe-subscriptions.md)
 
 ## Context
@@ -143,4 +143,49 @@ That last clause is the catch: on the very first checkout **there is no `Subscri
 
 ## Outcome
 
-*(filled in when the work is finished)*
+All three shipped. Two of the three goals had to be widened once the code was open, and both are recorded below rather than quietly redefined.
+
+### What shipped
+
+**The mark.** `mustShowBranding(organizationId)` in `services/entitlements.ts` — a narrow read through `effectivePlan`, not `getEntitlements`, which would have added four queries to an anonymous endpoint for one boolean. `GET /api/forms/public/:shareId` returns `showBranding`; `PublicFormView.vue` renders the mark on it. `getPublic` in the SPA defaults a missing flag to `true`.
+
+**The API version.** `assertKnownApiVersion` compares `event.api_version` to the pinned constant, logs once per distinct version, and processes the event regardless.
+
+**The checkout race.** `services/organization-lock.ts` serialises the handler per organization, plus reuse of an already-open Checkout Session.
+
+`services/plans.ts` unchanged. `getEntitlements`, `assertCanPublishForm`, `assertResponseWithinLimit` and `isOverResponseLimit` unchanged. `Organization.planKey` still has one writer.
+
+### Where this went beyond the spec, and why
+
+**Goal 10 was aimed slightly short.** It asked that two concurrent checkouts produce exactly one `stripe.customers.create`. Writing the test made it clear that the idempotency key from 0013 *already* makes Stripe return the same customer to both calls — the test only saw two because the mock ignores the key. So a duplicate customer was never the real exposure. The real one is **two open Checkout Sessions, both paid**, which no lock on customer creation touches: the second subscription would bill forever while being invisible to "Manage billing", since `Subscription.organizationId` is unique and only one row can survive. The handler now also lists open sessions and hands back the existing one, so there is only ever a single session that can be paid. The lock is still worth having — it stops this application asking twice — but on its own it would have closed the cheaper half.
+
+**The lock is in-process, and that is a real limitation, not an oversight.** Both database options fail here for reasons written out in `services/organization-lock.ts`: `SELECT … FOR UPDATE` locks nothing on a first checkout because there is no row yet, which is the exact case the race matters in; and a transaction-scoped advisory lock would have to be held across a network call to Stripe, tying a pooled connection to Stripe's latency and turning a Stripe timeout into a stuck transaction. So it covers same-process concurrency — the double click, which is the realistic threat — and the Stripe idempotency key covers the cross-replica case. A genuinely distributed lock wants the Redis that step 9 brings. **Goal 11 is met**: no Stripe call happens inside a database transaction.
+
+### Tests
+
+`tests/integration/billing-checkout.spec.ts` (real PostgreSQL, mocked Stripe SDK — the combination is the point, since the race is between two database reads and the handler calls Stripe between them). Written **before** the fix and watched fail: two customers created, and the surviving row holding `cus_concurrent_2`, the loser's write. `customers.create` carries a deliberate 120 ms delay, without which the two requests never overlap and the test passes against the broken code.
+
+`tests/integration/branding.spec.ts` asserts free shows the mark, Pro does not, an unknown stored plan degrades to showing it, and — the assertion that matters most — that the payload contains no plan, no usage, no subscription, no organization id and no plan name.
+
+`tests/integration/billing.spec.ts` gained an end-to-end case: an event stamped `2026-08-26.dahlia` still reconciles, still answers `200`, and is logged.
+
+`tests/billing.spec.ts` gained the version map's unit tests, including that it complains once per version rather than once per event.
+
+### Test output
+
+```
+npm run test:backend       14 specs / 178 tests passed
+npm run test:integration   12 specs / 123 tests passed   (real PostgreSQL)
+npm run test:frontend      38 specs / 314 tests passed
+npm run build --workspace=frontend    ✓ built
+cd backend && npx tsc --noEmit        clean
+cd backend && npm run typecheck:tests clean
+```
+
+`npm run test:e2e` could not run in the session that finished this work: port 3000 was held by a development server Playwright needed to start its own on. It must be run before the PR.
+
+The manual checks in the execution prompt — the mark present on a free form and absent on a Pro one, with the network payload still saying nothing about the plan — have **not** been run.
+
+### Also filed
+
+`docs/BACKLOG.md` lost the three rows this closed. Nothing new was filed: the residual on the checkout race is now genuinely closed by the open-session reuse, and the cross-replica lock limitation is documented in the code rather than as a backlog item, because the answer to it is step 9's Redis and not a change here.

@@ -6,7 +6,7 @@ import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { verifyFormOwnership, callerCanReachForm } from '../middleware/formOwnership.js'
 import { requireOrganizationId } from '../middleware/membership.js'
-import { assertCanPublishForm, isOverResponseLimit } from '../services/entitlements.js'
+import { assertCanPublishForm, isOverResponseLimit, mustShowBranding } from '../services/entitlements.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
 import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
@@ -317,7 +317,21 @@ formsRouter.get('/public/:shareId', async (req, res, next) => {
 
     // `toApiForm` strips the owning organization and the creator from every
     // response, so nothing extra is needed here for the anonymous case.
-    res.json({ form: toApiForm(form) })
+    //
+    // `showBranding` is the ONLY thing about the owner's plan that may appear
+    // in this payload, and it is one boolean on purpose (features/0014). The
+    // tempting version — sending the plan, or the entitlements object, and
+    // letting the client decide — would publish the customer's billing state to
+    // anyone holding a share link, which is the exact rule the rest of this
+    // handler enforces: the response limit answers `404` rather than `402`
+    // precisely so a respondent learns nothing about how the owner pays.
+    //
+    // It does reveal paid-versus-not, which is unavoidable: the mark is visible.
+    // It reveals no plan name, no limit, no usage and no organization.
+    res.json({
+      form: toApiForm(form),
+      showBranding: await mustShowBranding(form.organizationId)
+    })
   } catch (error) {
     next(error)
   }
