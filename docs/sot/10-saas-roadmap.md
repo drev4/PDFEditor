@@ -2,7 +2,7 @@
 
 The entitlements shape, the public-API section and white-labeling are **target design — none of them exist in the code**. The `Organization`/`Membership` design is now **built** ([`features/0009`](../../features/0009-organizations-own-resources.md)) and its section says so; reality lives in [03-domain-model](./03-domain-model.md). Their job is to keep each piece that does get built compatible with the pieces that come after, so that arriving at B2B does not mean rewriting what B2C shipped.
 
-The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 7 are closed; step 8 (Stripe + `Subscription`) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
+The [build order](#build-order) at the end is the exception, and it is different in kind: it tracks **real state**. Steps 0 to 8 are closed; step 9 (object storage + job queue) is next, so the `[NOT IMPLEMENTED]` tag on this title applies to the design sections above it, not to that table.
 
 The division of labour with the backlog: [`docs/BACKLOG.md`](../BACKLOG.md) answers **what is missing and how much it matters**; the build order answers **what is next**. When priority and the chain disagree, the chain wins — see [the inversion](#a-known-inversion-between-this-chain-and-the-backlog) at the end for the case that already exists.
 
@@ -72,7 +72,7 @@ async function assertCanCreateForm(organizationId: string) {
 Two rules:
 
 - **`402 Payment Required` for a plan limit, `403 Forbidden` for a permission failure.** They are different rejections and the frontend must be able to show "upgrade your plan" versus "you do not have access" without parsing a message string.
-- **Nothing in `routes/forms.ts` imports anything from the billing provider.** Domain routes ask the entitlements service a question about limits; only `SubscriptionService` knows Stripe exists.
+- **Nothing in `routes/forms.ts` imports anything from the billing provider.** Domain routes ask the entitlements service a question about limits; only `services/stripe.ts` knows Stripe exists. This held through step 8 and is checkable: `grep -rn "from 'stripe'" backend/src` finds one file.
 
 Response-per-month limits need a usage counter that does not require counting rows on every request. Design it as a monthly aggregate updated on write, and treat it as the same measurement the invoice will be based on — a metering number that disagrees with the invoice is worse than no number.
 
@@ -89,7 +89,7 @@ The B2B buyer eventually wants responses in their own system rather than in our 
 
 ## White-labeling
 
-Removing the "Made with VuePDF" mark is a **plan entitlement** (`Plan.hasBranding`), never a user setting — that is what makes the free tier a distribution channel ([01](./01-product-and-market.md)).
+Removing the "Made with VuePDF" mark is a **plan entitlement** (`Plan.hasBranding`), never a user setting — that is what makes the free tier a distribution channel ([01](./01-product-and-market.md)). The entitlement is in the catalogue and, since step 8, an organization can genuinely be on a plan that has it — but nothing reads it yet: `PublicFormView.vue` still always shows the mark. That is the one thing step 8 unblocked and deliberately did not do.
 
 Custom domains for public form links (`forms.customer.com`) are a much larger project: per-tenant TLS provisioning, domain ownership verification, and routing. Do not start it before a customer has said they will pay for it.
 
@@ -109,11 +109,13 @@ This is the whole build order, not only the SaaS part of it — the security and
 | 5 | ~~**Member invitations**~~ — done | The first feature that makes B2B real rather than a table with one row. Shipped with role enforcement, because neither is safe alone. [`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md) |
 | 6 | ~~**Adopt the design system** across the product~~ — done | The reason for putting it before step 7 held: the canvas already contained the **Plan & usage** and **Plan limit reached** screens, so step 7 builds them once, in a system that now exists. What shipped — and the three things on the canvas deliberately left unbuilt — is in [05-frontend-patterns §8](./05-frontend-patterns.md). [`features/0011`](../../features/0011-adopt-the-design-system.md) |
 | 7 | ~~**`Plan` + entitlements**, limits enforced, no charging yet~~ — done | Validated the "limit reached" UX before money is involved, and it paid off immediately: the canvas meters *published* forms rather than created ones, which is a different check in a different handler than this table assumed. [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) |
-| 8 | **Stripe + `Subscription`** | Actual revenue |
+| 8 | ~~**Stripe + `Subscription`**~~ — done, **Free ↔ Pro only** | Actual revenue. The plan is now derived from what Stripe says: `Organization.planKey` kept its place as the thing every limit check reads, and gained exactly one writer — the webhook. `getEntitlements`, `effectivePlan` and `assertCanPublishForm` were not changed at all, which was the point of building them that way in step 7. **Team is not in it**: it is priced per seat, which means keeping a Stripe quantity in step with `Membership`, and that is its own change with its own failure modes. [`features/0013`](../../features/0013-stripe-subscriptions.md) |
 | 9 | **Object storage + job queue** | Required to run more than one replica; pull earlier if PDF timeouts appear. Also brings the Redis that the shared rate-limit store needs — see the inversion below |
 | 10 | **Public API + API keys + webhooks** | Only possible once step 1 is done |
 
-Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so are steps 4, 5, 6 and 7. Next is Stripe and `Subscription` — the limits, the `402`, the meter and the screens exist and are in use, so the only new thing is the payment. Two checks are already written and waiting for it: the seat limit (`assertCanInvite`) and `Plan.hasBranding`, neither of which can mean anything until a plan can be bought.
+Steps 0 through 3 are correctness and safety, not features. They come first because everything after them assumes the product does not lose data, does not fall over when pointed at, and can be verified. **They are all closed**, and so are steps 4 through 8. Next is step 9, object storage and the job queue.
+
+Two things the closing of step 8 did *not* unblock as cleanly as this table expected. **`Plan.hasBranding` is now enforceable for the first time** — there is finally somebody to turn the mark off for — but removing it is a change to the public form with its own tests, and folding it into the billing diff would have made that diff unreviewable; its backlog row stays open. **`assertCanInvite` is still not wired**, and the reason moved rather than disappeared: it was waiting for "a plan that can be bought", and what it actually needs is *Team*, because Free and Pro both have one seat and enforcing the limit today would still answer `402` to every invitation from every account.
 
 ### Parallel track — the landing page
 

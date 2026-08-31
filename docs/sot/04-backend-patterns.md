@@ -179,7 +179,28 @@ The frontend shows "upgrade your plan" for one and "you do not have access" for 
 
 **One function resolves a plan, and it is `effectivePlan`.** `resolvePlan` maps a stored key to a catalogue entry and stays pure; `effectivePlan` is that plus the temporary `DEV_PLAN_KEY` override ([08-operations](./08-operations.md)). Every limit check calls the latter, so the override has exactly one way in and one way out — and so that deleting it later is a local edit rather than a hunt.
 
-Finally, the boundary that survives into step 8: **nothing in `routes/` imports anything from a billing provider.** Domain routes ask the entitlements service a question about limits; only `SubscriptionService` will ever know Stripe exists.
+Finally, the boundary, which survived step 8: **nothing in `routes/` imports anything from a billing provider except `routes/billing.ts`.** Domain routes ask the entitlements service a question about limits; `services/stripe.ts` is the only module that imports the Stripe SDK, and `grep -rn "from 'stripe'" backend/src` finds it and nothing else.
+
+## 10a. A webhook is not like any other route here
+
+`POST /api/billing/webhook` breaks four of this document's own rules, and every one of them is deliberate ([`features/0013`](../../features/0013-stripe-subscriptions.md)). If you are adding a second webhook, copy this shape rather than the shape in §12.
+
+**1. It reads a raw body, and its mounting position is load-bearing.** Stripe signs the exact bytes it sent. `express.json()` consumes the stream and hands the handler a parsed object, and re-serialising it does not reproduce those bytes — so under the global parser *every* signature check fails. The webhook router is therefore mounted in `app.ts` **above** `app.use(express.json())` with `express.raw({ type: 'application/json' })` of its own, behind a comment saying so. The failure it prevents is silent and total: the endpoint still answers, and every subscription is bought and never activated. `tests/integration/billing.spec.ts` posts genuinely-signed events over HTTP, which is what makes the ordering testable at all — nine of its twelve tests fail if the mount is moved.
+
+**2. The signature is the whole authentication.** No session, no Bearer token, no CSRF guard. `constructWebhookEvent` verifies before anything reads the body as data, throws `400` on failure, and says nothing about *why* — the difference between a stale timestamp, a wrong secret and a forged digest is useful to an attacker and useless to Stripe, which retries either way.
+
+**3. It carries no rate limiter, and §7 requires that to be argued.** The argument: the signature is a strictly stronger gate than a limiter — an unsigned request is rejected before any work, at the cost of one HMAC, so there is no expensive path to protect. A limiter would instead throttle *Stripe's own retries*, and every dropped retry is a subscription state this application never learns about — a customer who paid and did not get the plan, or one who cancelled and kept it. The failure mode of the limiter is worse than the one it prevents. `tests/billing.spec.ts` asserts that 40 unsigned requests all get `400` and none gets `429`, so the absence cannot be "fixed" by accident.
+
+**4. It answers `200` to almost everything, including things it ignored.** Duplicates, event types it does not handle, and events naming an organization it cannot resolve all get `200`. Any other status makes Stripe retry, and retrying an event that will never resolve is a loop that ends with Stripe disabling the endpoint — taking every real customer's subscription updates with it. Only an unverifiable request gets `400`.
+
+And two properties of the handler itself, which are what make it correct under Stripe's actual delivery guarantees (**at least once, and unordered**):
+
+- **Idempotent.** `claimEvent` inserts `event.id` into `stripe_events`, whose primary key *is* Stripe's id, and treats the collision as "already processed". Insert-and-catch, not read-then-insert: two concurrent deliveries of the same event both pass a read check.
+- **State-setting, never incremental.** The handler reads the subscription object *on the event* and writes what it says — status, price, period end — and derives `Organization.planKey` from that, in one transaction. It never performs "upgrade the organization" as an action. A state-setting handler is naturally safe under replay and reordering; an incremental one is not, and no amount of idempotency machinery rescues it.
+
+**Nothing outside `services/stripe.ts` writes `Organization.planKey`.** `grep -rn "planKey" backend/src` finds one write and the rest reads. That is what makes the plan derived rather than duplicated, and it is why `getEntitlements`, `effectivePlan`, `assertCanPublishForm` and `isOverResponseLimit` were not changed by billing at all.
+
+**A billing event never touches customer data.** `services/stripe.ts` does not write to `Form` or `Response`, and must not: an organization dropping to free with five published forms keeps all five, because those URLs are live and were given to respondents. The limit refuses the *sixth*. Downgrading refuses new state and destroys none of the old.
 
 ## 11. Response headers are global, except where a route earns an exception
 
@@ -205,3 +226,4 @@ Ordered by impact on being able to sell this, not by effort. Each has an entry i
 4. **A job queue** (BullMQ + Redis) for PDF extraction and embedding, so a large document cannot block the event loop or time out a request.
 5. **Shared request/response types between backend and frontend**, generated from the Zod schemas. The frontend currently redeclares the shapes by hand in `frontend/src/services/`, and the two can diverge silently — which is exactly how the API documentation drifted before.
 6. ~~**Stable field ids.**~~ Done — see [03-domain-model.md](./03-domain-model.md).
+7. ~~**Billing.**~~ Done for Free ↔ Pro — see §10a. **Not** done: the Team plan, which is priced per seat and needs the Stripe quantity kept in step with `Membership`.

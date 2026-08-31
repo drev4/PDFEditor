@@ -38,10 +38,13 @@ model Organization {
   /// migration, and an unknown value here resolves to the free plan rather than
   /// crashing (`resolvePlan`).
   ///
-  /// This is the source of truth *until step 8 of the build order*. When
-  /// `Subscription` arrives, the plan is derived from the subscription and this
-  /// column becomes its cache or disappears — either way `getEntitlements` is
-  /// the only thing that reads it, so the change is one function wide.
+  /// **Derived, with exactly one writer** (features/0013). Every read still
+  /// goes through this column — `getEntitlements` and `assertCanPublishForm`
+  /// were not changed — but the only thing that *writes* it is
+  /// `reconcileSubscription` in `services/stripe.ts`, driven by the Stripe
+  /// webhook, plus the `@default("free")` that registration relies on. Keeping
+  /// the read here rather than joining `Subscription` is what stops there being
+  /// two answers to "which plan is this?".
   planKey     String       @default("free") @map("plan_key")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
@@ -49,6 +52,7 @@ model Organization {
   memberships Membership[]
   invitations Invitation[]
   usageCounters UsageCounter[]
+  subscription  Subscription?
 
   @@map("organizations")
 }
@@ -265,4 +269,88 @@ enum FieldType {
   checkbox
   radio
   dropdown
+}
+
+/// The organization's relationship with Stripe, and the **only** entity in this
+/// schema that knows Stripe exists (features/0013).
+///
+/// One row per organization, created the first time an owner opens Checkout —
+/// which is why `stripeSubscriptionId`, `priceId` and `currentPeriodEnd` are
+/// nullable. At that moment there is a Stripe *customer* and no subscription
+/// yet, and the customer id has to be stored right then: minting a second
+/// customer for the same organization on the next attempt is how somebody ends
+/// up with two subscriptions and two invoices.
+///
+/// **`Organization.planKey` is derived from this row and has exactly one
+/// writer** — `reconcileSubscription` in `services/stripe.ts`, driven by the
+/// webhook. Nothing else may write `plan_key`. Reading the plan still goes
+/// through `Organization.planKey` and `effectivePlan`, so no limit check joins
+/// this table and no second source of truth exists (features/0013, trap 4).
+///
+/// **No card data.** `stripe_customer_id` and `stripe_subscription_id` are
+/// opaque Stripe identifiers; there is no PAN, no last four digits and no
+/// expiry here, because Checkout and the Customer Portal are hosted by Stripe
+/// and no card ever reaches this origin. See docs/sot/07-security-and-privacy.md.
+///
+/// `onDelete: Cascade`: deleting an organization deletes its billing record.
+/// The subscription at Stripe is **not** cancelled by that — Stripe is a
+/// separate system and nothing here can roll it back. See the cascade map in
+/// docs/sot/03-domain-model.md.
+model Subscription {
+  id             String @id @default(uuid())
+  /// One per organization. A second row would be a second answer to "what did
+  /// this customer buy".
+  organizationId String @unique @map("organization_id")
+  /// The Stripe customer. Present from the first Checkout attempt onward.
+  stripeCustomerId     String  @map("stripe_customer_id")
+  /// Null until a subscription actually exists at Stripe — i.e. until the
+  /// webhook says the checkout completed.
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id")
+  /// Stripe's own subscription status, stored verbatim. Not an enum: Stripe
+  /// adds statuses, and a value this schema has not heard of must be storable
+  /// so that `planKeyForStatus` can decide about it, rather than failing the
+  /// webhook. The status→plan map lives in `services/stripe.ts` and is the only
+  /// thing that interprets this string.
+  status               String  @default("incomplete")
+  /// The Stripe price the subscription is on. What `planKeyForStatus` turns
+  /// into a plan key. **No amount is stored** — the price lives in Stripe and
+  /// nowhere else (features/0013, trap 7).
+  priceId              String? @map("price_id")
+  /// End of the paid period, as reported by Stripe. Displayed, never enforced:
+  /// the plan comes from `status`, not from comparing this to the clock.
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  /// True when the customer has cancelled and keeps the plan until the period
+  /// ends. The normal cancellation path; a mid-period drop to free only ever
+  /// comes from a payment that finally failed.
+  cancelAtPeriodEnd    Boolean @default(false) @map("cancel_at_period_end")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+/// Every Stripe event this application has already processed.
+///
+/// It exists because **Stripe delivers at least once, not exactly once**: an
+/// event is retried when the endpoint is slow or errors, and the same
+/// `event.id` can arrive several times. The primary key *is* Stripe's event id,
+/// so a replay collides on insert and is ignored instead of re-running the
+/// handler.
+///
+/// Rows for event types this application does not handle are recorded too — the
+/// webhook answers `200` to everything it verified, and the record is what says
+/// it was seen rather than lost.
+///
+/// Not related to `Organization`: an event can arrive for a customer this
+/// application cannot resolve, and losing the idempotency record because the
+/// organization was deleted would let that event be reprocessed forever.
+model StripeEvent {
+  /// Stripe's `event.id` (`evt_…`), not a uuid of ours. That is the whole point.
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("stripe_events")
 }

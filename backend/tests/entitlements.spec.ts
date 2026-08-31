@@ -270,7 +270,11 @@ describe('plan limits', () => {
           maxResponsesPerMonth: 50,
           seats: 1
         },
-        usage: { publishedForms: 1, responsesThisPeriod: 12, seats: 1 }
+        usage: { publishedForms: 1, responsesThisPeriod: 12, seats: 1 },
+        // Added by features/0013. `null` for an organization that has never
+        // bought anything, which is every organization until a webhook says
+        // otherwise.
+        subscription: null
       })
     })
 
@@ -288,18 +292,49 @@ describe('plan limits', () => {
       expect(res.body.usage.responsesThisPeriod).toBe(0)
     })
 
-    it('exposes no billing-shaped field', async () => {
+    /**
+     * This used to assert that nothing billing-shaped appeared at all, which
+     * was right while there was no billing. features/0013 gives the payload a
+     * `subscription` block deliberately — the plan screen has to be able to say
+     * "renews on the 1st" and "cancels at the period end".
+     *
+     * What must still never appear is a **Stripe identifier**. Those are
+     * credentials for a third-party API, nothing on screen needs them, and
+     * every billing action goes through `POST /api/billing/*`, which resolves
+     * the organization from the caller's own membership rather than from
+     * anything the client was handed.
+     */
+    it('exposes no Stripe identifier and no price', async () => {
       prismaMock.membership.findFirst.mockResolvedValue(membership as any)
       onPlan('free')
       prismaMock.form.count.mockResolvedValue(0)
       prismaMock.usageCounter.findUnique.mockResolvedValue(null)
       prismaMock.membership.count.mockResolvedValue(1)
       prismaMock.invitation.count.mockResolvedValue(0)
+      prismaMock.subscription.findUnique.mockResolvedValue({
+        organizationId: 'org-1',
+        stripeCustomerId: 'cus_secret',
+        stripeSubscriptionId: 'sub_secret',
+        priceId: 'price_secret',
+        status: 'active',
+        currentPeriodEnd: new Date('2026-02-01T00:00:00Z'),
+        cancelAtPeriodEnd: false
+      } as any)
 
       const res = await request(app).get('/api/organizations/entitlements')
 
+      expect(res.body.subscription).toEqual({
+        status: 'active',
+        currentPeriodEnd: '2026-02-01T00:00:00.000Z',
+        cancelAtPeriodEnd: false
+      })
+
       const body = JSON.stringify(res.body)
-      expect(body).not.toMatch(/stripe|customer|price|subscription/i)
+      expect(body).not.toContain('cus_')
+      expect(body).not.toContain('sub_')
+      expect(body).not.toContain('price_')
+      // And no amount: the price lives in Stripe and nowhere else.
+      expect(body).not.toMatch(/stripeCustomerId|stripeSubscriptionId|priceId/i)
     })
 
     it('404s a caller who is in no organization', async () => {

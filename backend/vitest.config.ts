@@ -27,6 +27,19 @@ export default defineConfig({
             // and four of them failed before this line existed. Empty rather
             // than absent: dotenv does not overwrite a key already present.
             DEV_PLAN_KEY: '',
+            // Stripe credentials are pinned for the same reason `DEV_PLAN_KEY`
+            // is: `src/app.ts` calls `dotenv.config()`, so a developer's real
+            // `.env` reaches every suite. Without these three lines a live
+            // `STRIPE_SECRET_KEY` would be the one the tests construct a client
+            // with. They are deliberately not valid keys — nothing here makes a
+            // network call. Signature verification and
+            // `generateTestHeaderString` are local HMAC over
+            // `STRIPE_WEBHOOK_SECRET`, and `STRIPE_PRICE_PRO` has to match the
+            // fixture in `tests/fixtures/stripe-events.ts` or every subscription
+            // resolves to free.
+            STRIPE_SECRET_KEY: 'sk_test_0013_suite',
+            STRIPE_WEBHOOK_SECRET: 'whsec_test_0013_suite',
+            STRIPE_PRICE_PRO: 'price_test_pro_0013',
         },
         setupFiles: ['./tests/setup.ts'],
         coverage: {
