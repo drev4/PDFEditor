@@ -31,6 +31,46 @@ afterAll(() => {
   if (fs.existsSync(ON_DISK)) fs.unlinkSync(ON_DISK)
 })
 
+describe('the signed PDF route survives a storage failure', () => {
+  // Found by `saas-readiness-reviewer` on features/0016 and reproduced before
+  // it was fixed. The route became `async` when the bytes moved behind a
+  // storage driver, and Express 4 does **not** catch a rejected promise from an
+  // async handler — so a driver that throws produced an unhandled rejection,
+  // which Node 22 turns into `process.exit(1)`.
+  //
+  // The blast radius is what makes this worth its own test: the route is
+  // unauthenticated, the `s3` driver rethrows anything that is not a 404
+  // (expired credentials, a throttled request, a restarted MinIO, a network
+  // blip), and one shared Node process serves every customer. One
+  // organization's transient storage error would have taken the API down for
+  // all of them.
+  //
+  // The local driver cannot reproduce it — its `exists`/`getStream` swallow
+  // filesystem errors into `false`/`null` — which is exactly why the rest of
+  // the suite passed while this was live.
+  it('answers 500 instead of taking the process down', async () => {
+    const { setPdfStorage, LocalPdfStorage } = await import('../src/services/pdf-storage')
+
+    const exploding = new LocalPdfStorage()
+    exploding.getStream = async () => {
+      throw Object.assign(new Error('storage is unreachable'), { name: 'CredentialsProviderError' })
+    }
+    setPdfStorage(exploding)
+
+    try {
+      const res = await request(app).get(signedPath())
+
+      expect(res.status).toBe(500)
+      // The client is told nothing about the storage backend: which provider,
+      // which bucket and which credential failed are useful to an attacker and
+      // useless to a respondent.
+      expect(JSON.stringify(res.body)).not.toMatch(/bucket|credential|s3|aws|minio/i)
+    } finally {
+      setPdfStorage(null)
+    }
+  })
+})
+
 describe('security headers (S5)', () => {
   describe('API responses', () => {
     it('sets nosniff and a referrer policy, and does not advertise Express', async () => {

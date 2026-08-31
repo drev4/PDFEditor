@@ -1,8 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { pdfProcessor } from '../services/pdf-processor.js'
-import fs from 'fs'
-import path from 'path'
 import { pdfFilenameFrom } from '../services/pdf-url.js'
+import { pdfStorage } from '../services/pdf-storage.js'
 
 const prisma = new PrismaClient()
 
@@ -100,17 +99,17 @@ async function migrateExistingForms(options: { dryRun?: boolean; formId?: string
         if (!filename) {
           throw new Error(`Unrecognised PDF URL: ${form.pdfUrl}`)
         }
-        const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
-
-        // Verificar que el archivo existe
-        if (!fs.existsSync(pdfPath)) {
-          throw new Error(`PDF file not found: ${pdfPath}`)
+        // A traves del servicio de almacenamiento, no del disco: este script es
+        // el unico sitio que toca los PDF sin que ninguna prueba lo cubra, asi
+        // que es el que se rompe en silencio si se queda atras (features/0016).
+        if (!(await pdfStorage().exists(filename))) {
+          throw new Error(`PDF not found in storage: ${filename}`)
         }
 
         console.log(`   📄 PDF: ${filename}`)
 
         // Leer el PDF
-        const pdfBuffer = fs.readFileSync(pdfPath)
+        const pdfBuffer = await pdfStorage().get(filename)
         console.log(`   📖 PDF leído: ${(pdfBuffer.length / 1024).toFixed(2)} KB`)
 
         // Verificar si ya tiene campos embebidos
@@ -155,13 +154,17 @@ async function migrateExistingForms(options: { dryRun?: boolean; formId?: string
 
         // Guardar el PDF modificado (solo si no es dry-run)
         if (!dryRun) {
-          // Hacer backup del PDF original
-          const backupPath = pdfPath.replace('.pdf', '.backup.pdf')
-          fs.copyFileSync(pdfPath, backupPath)
-          console.log(`   💾 Backup creado: ${path.basename(backupPath)}`)
+          // Backup del original, con guion y no con punto: la clave de
+          // almacenamiento es `[A-Za-z0-9_-]+.pdf` en `pdf-storage.ts` y en
+          // `pdf-url.ts`, asi que `x.backup.pdf` no es un nombre que este
+          // servicio pueda emitir ni servir. Un solo alfabeto en los tres
+          // sitios (features/0016).
+          const backupKey = filename.replace(/\.pdf$/, '-backup.pdf')
+          await pdfStorage().put(backupKey, pdfBuffer)
+          console.log(`   💾 Backup creado: ${backupKey}`)
 
           // Guardar PDF modificado
-          fs.writeFileSync(pdfPath, modifiedPdfBuffer)
+          await pdfStorage().put(filename, modifiedPdfBuffer)
           console.log(`   💾 PDF actualizado: ${filename}`)
         } else {
           console.log(`   🔍 DRY RUN: No se modificó el archivo`)

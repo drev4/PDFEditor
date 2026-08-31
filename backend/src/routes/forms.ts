@@ -10,8 +10,7 @@ import { assertCanPublishForm, isOverResponseLimit, mustShowBranding } from '../
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
 import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
-import fs from 'fs'
-import path from 'path'
+import { pdfStorage } from '../services/pdf-storage.js'
 
 export const formsRouter = Router()
 
@@ -126,11 +125,9 @@ async function syncFieldsFromPDF(formId: string, pdfUrl: string) {
   const filename = pdfFilenameFrom(pdfUrl)
   if (!filename) return null
 
-  const pdfPath = path.join(process.cwd(), 'uploads', 'pdfs', filename)
+  if (!(await pdfStorage().exists(filename))) return null
 
-  if (!fs.existsSync(pdfPath)) return null
-
-  const pdfBuffer = fs.readFileSync(pdfPath)
+  const pdfBuffer = await pdfStorage().get(filename)
   const extractedFields = await pdfProcessor.extractFieldsFromPDF(pdfBuffer)
 
   if (extractedFields.length === 0) return null
