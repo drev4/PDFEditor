@@ -81,19 +81,25 @@ test.describe('The shell', () => {
   });
 
   test('reaches every destination the sidebar offers', async ({ page }) => {
-    const sidebar = page.locator('[data-testid="app-sidebar"]');
+    // The `nav` landmark, not the whole sidebar. The sidebar also holds the plan
+    // card and the account row, both of which are links, and scoping to the
+    // whole thing made this test depend on whether the plan had finished
+    // loading when the click happened — which passed locally and failed in CI.
+    // Destinations are what this test is about, so it should look where the
+    // destinations are.
+    const nav = page.locator('[data-testid="app-sidebar"]').getByRole('navigation');
 
-    await sidebar.getByRole('link', { name: 'Responses' }).click();
+    await nav.getByRole('link', { name: 'Responses' }).click();
     await expect(page).toHaveURL(/\/dashboard\/responses/);
 
-    await sidebar.getByRole('link', { name: 'Members' }).click();
+    await nav.getByRole('link', { name: 'Members' }).click();
     await expect(page).toHaveURL(/\/dashboard\/team/);
     await expect(page.locator('[data-testid="members-table"]')).toBeVisible();
 
-    await sidebar.getByRole('link', { name: 'Settings' }).click();
+    await nav.getByRole('link', { name: 'Settings' }).click();
     await expect(page).toHaveURL(/\/dashboard\/settings/);
 
-    await sidebar.getByRole('link', { name: 'Forms' }).click();
+    await nav.getByRole('link', { name: 'Forms' }).click();
     await expect(page).toHaveURL(/\/dashboard$/);
   });
 

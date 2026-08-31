@@ -182,9 +182,27 @@ cd backend && npx tsc --noEmit        clean
 cd backend && npm run typecheck:tests clean
 ```
 
-`npm run test:e2e` could not run in the session that finished this work: port 3000 was held by a development server Playwright needed to start its own on. It must be run before the PR.
+`npm run test:e2e` — **50 passed**, after fixing a failure it exposed. See below.
 
 The manual checks in the execution prompt — the mark present on a free form and absent on a Pro one, with the network payload still saying nothing about the plan — have **not** been run.
+
+### A CI failure this change did not cause, and did fix
+
+The `0013` pipeline failed on `e2e/form-management.spec.ts › reaches every destination the sidebar offers`, and it had nothing to do with billing:
+
+```
+strict mode violation: locator('[data-testid="app-sidebar"]')
+  .getByRole('link', { name: 'Responses' }) resolved to 2 elements
+```
+
+The second element was the **plan card**. `PlanCard.vue` is a `RouterLink` wrapping a `UsageMeter` labelled "Responses", so the link's accessible name is assembled from its contents — *"Free Plan Responses 412 / 2,000"* — and collides with the sidebar's own *Responses* destination.
+
+It passed locally and failed in CI because the card renders only once the plan has loaded (`v-if="planStore.plan"`), so whether it exists at the moment of the click is a race, and the runner lost it. Reproduced locally by forcing the card to be present before the click, which fails on the old code and passes on the new.
+
+Fixed in **both** places, because the test was not the only thing wrong:
+
+- `PlanCard.vue` gets `aria-label="Plan and usage"`. This is the real defect: without it a screen reader announces a wall of numbers instead of where the link goes. Fixing accessibility is what removes the ambiguity at source.
+- The test scopes to the `nav` landmark instead of the whole sidebar. The sidebar also holds the account row; a test about *destinations* should look where the destinations are, and then no future card can break it either.
 
 ### Also filed
 
