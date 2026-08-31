@@ -1,4 +1,4 @@
-import express from 'express'
+import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import cookieParser from 'cookie-parser'
@@ -105,6 +105,27 @@ app.use(cookieParser())
 // able to load the PDF of a published form. The capability is the signature, not
 // a session.
 app.get('/uploads/pdfs/:token/:filename', async (req, res) => {
+  // **Everything below is inside this try, and it must stay that way.** The
+  // handler became `async` when the bytes moved behind a storage driver
+  // (features/0016), and Express 4 does not catch a rejected promise from an
+  // async handler — it becomes an unhandled rejection, which Node 22 turns into
+  // `process.exit(1)`. This route is unauthenticated and the `s3` driver
+  // rethrows anything that is not a 404, so one organization's expired
+  // credential or throttled request would have taken the API down for every
+  // customer sharing the process. Found by review, reproduced, and covered by
+  // `tests/security-headers.spec.ts`.
+  try {
+    return await servePdf(req, res)
+  } catch (error) {
+    // Logged in full here, and described to nobody: which provider, bucket or
+    // credential failed is useful to an attacker and useless to a respondent,
+    // who can only try again.
+    console.error('Failed to serve an uploaded PDF:', error)
+    return res.status(500).json({ error: 'Unable to read this file right now.' })
+  }
+})
+
+async function servePdf(req: Request<{ token: string; filename: string }>, res: Response) {
   const invalidLink = { error: 'This link is invalid or has expired.' }
 
   // Never let anything but a filename this service could have issued reach the
@@ -175,7 +196,7 @@ app.get('/uploads/pdfs/:token/:filename', async (req, res) => {
   })
 
   return body.pipe(res)
-})
+}
 
 // Anything else under /uploads — including every URL of the old unsigned shape —
 // is gone. Answered here rather than by Express's default so the client gets

@@ -230,10 +230,24 @@ Two of those checks failed on the first run and **both were the verification scr
 
 `storage:migrate` was exercised for real: a dry run correctly refused to green-light a switch because one referenced file was missing from disk, a real run copied and verified by read-back, and a second run copied nothing.
 
+### What the readiness review caught, and it was Critical
+
+`saas-readiness-reviewer` found one real defect, introduced by this feature and missed by every one of its tests: **the signed PDF route became `async` and had no `try`/`catch`.**
+
+Express 4 — 4.22.2 here — does not catch a rejected promise from an async handler, and there is no `process.on('unhandledRejection')` anywhere in the backend, so Node 22 turns one into `process.exit(1)`. Verified empirically rather than taken on trust: a minimal Express 4 app with the same shape dies with exit code 1 on this repo's Node.
+
+The blast radius is what makes it Critical rather than a tidy-up. The route is **unauthenticated**, the `s3` driver deliberately rethrows anything that is not a 404 — an expired credential, a throttled request, a restarted MinIO, a network blip — and one shared Node process serves every customer. One organization's transient storage error would have taken the whole API down for all of them.
+
+Why the suite missed it: the `local` driver cannot produce it. Its `exists` and `getStream` swallow filesystem errors into `false` and `null`, so the only driver that can reach the rethrow is the one no test exercises. The `local`-by-default decision that keeps the suites offline is also what hid this.
+
+Fixed by extracting the body into `servePdf` and wrapping the handler, answering `500` with a message that names no provider, bucket or credential. The regression test is in `tests/security-headers.spec.ts`; against the unfixed route it produced an Unhandled Rejection and a request that never completed, which is what a crash looks like from inside vitest.
+
+The review was otherwise clean on data loss, authorization, tenancy, privacy, tests and docs.
+
 ### Test output
 
 ```
-npm run test:backend        15 passed (15 files) / 203 passed (203)
+npm run test:backend        15 passed (15 files) / 204 passed (204)
 npm run test:integration    14 passed (14 files) / 140 passed (140)
 npm run test:frontend       38 passed (38 files) / 321 passed (321)
 npm run test:e2e            50 passed
@@ -242,7 +256,7 @@ cd backend && npx tsc --noEmit          clean
 cd backend && npm run typecheck:tests   clean
 ```
 
-Step 1's requirement held: **the whole suite passed with no test modified** after the six call sites moved, which is the proof the refactor changed nothing observable. The new tests came afterwards. Backend went 187 → 203 and integration 139 → 140.
+Step 1's requirement held: **the whole suite passed with no test modified** after the six call sites moved, which is the proof the refactor changed nothing observable. The new tests came afterwards. Backend went 187 → 204 and integration 139 → 140.
 
 `npm audit` reports 15 high findings on the backend workspace both with and without `@aws-sdk/client-s3` — they are pre-existing and this dependency added none.
 
