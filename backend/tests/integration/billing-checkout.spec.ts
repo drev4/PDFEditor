@@ -20,7 +20,8 @@ import { createUser } from './helpers.js'
 const stripeCalls = {
   createCustomer: vi.fn(),
   createCheckoutSession: vi.fn(),
-  listCheckoutSessions: vi.fn()
+  listCheckoutSessions: vi.fn(),
+  expireCheckoutSession: vi.fn()
 }
 
 vi.mock('stripe', async () => {
@@ -32,7 +33,8 @@ vi.mock('stripe', async () => {
     checkout = {
       sessions: {
         create: stripeCalls.createCheckoutSession,
-        list: stripeCalls.listCheckoutSessions
+        list: stripeCalls.listCheckoutSessions,
+        expire: stripeCalls.expireCheckoutSession
       }
     } as any
   }
@@ -64,6 +66,8 @@ describe('concurrent checkout', () => {
     stripeCalls.createCustomer.mockReset()
     stripeCalls.createCheckoutSession.mockReset()
     stripeCalls.listCheckoutSessions.mockReset()
+    stripeCalls.expireCheckoutSession.mockReset()
+    stripeCalls.expireCheckoutSession.mockResolvedValue({ id: 'cs_open', status: 'expired' })
 
     const account = await createUser()
     authHeader = account.authHeader
@@ -126,12 +130,22 @@ describe('concurrent checkout', () => {
     expect(stripeCalls.createCheckoutSession).toHaveBeenCalledTimes(2)
   })
 
+  /** An open session for a given price, shaped the way `expand: ['data.line_items']` returns one. */
+  function openSession(priceId: string) {
+    return {
+      id: 'cs_open',
+      url: 'https://checkout.stripe.test/already-open',
+      status: 'open',
+      line_items: { data: [{ price: { id: priceId } }] }
+    }
+  }
+
   it('hands back the session already open instead of opening a second one', async () => {
     // Serialising concurrent requests does not help two checkouts a minute
     // apart, and Stripe keeps a session open for 24 hours. Two open sessions
     // that each get paid is the actual way to end up billed twice.
     stripeCalls.listCheckoutSessions.mockResolvedValue({
-      data: [{ id: 'cs_open', url: 'https://checkout.stripe.test/already-open', status: 'open' }]
+      data: [openSession(process.env.STRIPE_PRICE_PRO!)]
     })
 
     const response = await checkout()
@@ -139,6 +153,32 @@ describe('concurrent checkout', () => {
     expect(response.status).toBe(200)
     expect(response.body.url).toBe('https://checkout.stripe.test/already-open')
     expect(stripeCalls.createCheckoutSession).not.toHaveBeenCalled()
+    expect(stripeCalls.expireCheckoutSession).not.toHaveBeenCalled()
+  })
+
+  it('does not hand back a session for a different plan — it expires it and opens the right one', async () => {
+    // features/0015. With two buyable plans, reusing blindly sends somebody who
+    // pressed "Team" to a Stripe page that charges them for Pro: a correct
+    // looking page for the wrong product, and money taken for something they
+    // did not choose. The old session is expired rather than left open, so the
+    // property that matters holds — there is never more than one session that
+    // can be paid.
+    stripeCalls.listCheckoutSessions.mockResolvedValue({
+      data: [openSession(process.env.STRIPE_PRICE_PRO!)]
+    })
+
+    const response = await request(app)
+      .post('/api/billing/checkout')
+      .set('Authorization', authHeader)
+      .send({ plan: 'team' })
+
+    expect(response.status).toBe(200)
+    expect(response.body.url).toBe('https://checkout.stripe.test/session')
+    expect(stripeCalls.expireCheckoutSession).toHaveBeenCalledWith('cs_open')
+    expect(stripeCalls.createCheckoutSession).toHaveBeenCalledTimes(1)
+    expect(stripeCalls.createCheckoutSession.mock.calls[0]?.[0]).toMatchObject({
+      line_items: [{ price: process.env.STRIPE_PRICE_TEAM }]
+    })
   })
 
   it('opens a new session once the old one is no longer open', async () => {

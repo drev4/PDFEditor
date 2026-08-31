@@ -179,6 +179,15 @@ The frontend shows "upgrade your plan" for one and "you do not have access" for 
 
 **One function resolves a plan, and it is `effectivePlan`.** `resolvePlan` maps a stored key to a catalogue entry and stays pure; `effectivePlan` is that plus the temporary `DEV_PLAN_KEY` override ([08-operations](./08-operations.md)). Every limit check calls the latter, so the override has exactly one way in and one way out — and so that deleting it later is a local edit rather than a hunt.
 
+**Every limit comes from the catalogue — except one, and the exception is contained on purpose.** Team's seats are **bought rather than declared** ([`features/0015`](../../features/0015-team-plan-and-purchased-seats.md)): the customer sets the quantity in Stripe's portal, so no constant in `plans.ts` can know it. `seatLimitFor` in `entitlements.ts` is the single function that resolves it, and the containment is worth stating precisely, because the general version of this would dissolve the property that makes §10 work:
+
+- It applies to **one plan family**, `PER_SEAT_PLANS` in `plans.ts`, currently just `team`. Every other plan's seat limit, and every other limit of every plan, still comes wholly from the frozen catalogue.
+- It reads **one column**, `Subscription.quantity`, which is what Stripe *reported*. `entitlements.ts` still does not import Stripe and still does not know a webhook exists.
+- The catalogue value stops being the answer and becomes a **floor**: the limit is `max(floor, quantity)`. Every unreadable case — no subscription, `null`, `0`, a quantity below the floor — degrades **downward** to the floor, never to `null`, because `null` means unlimited and would give the product away. Same discipline as `resolvePlan`.
+- **Nothing here writes a quantity.** The only quantity this application sends Stripe is the opening one on a Checkout line item, and `adjustable_quantity` lets the buyer change it on Stripe's own page. Pushing a quantity on every invitation was rejected: seats include pending invitations, an invitation expires on a clock, and there is no scheduler — so the quantity would drift from the truth with no code running, silently, for every organization that ever let an invitation lapse.
+
+The consequence for the product, stated so nobody re-litigates it by accident: **adding a person to a full plan is two steps, buy then invite**, and `assertCanInvite` answers `402` in between. And **a downgrade removes nobody** — an organization that drops from eight seats to one keeps all eight memberships and every pending invitation, and only the ninth invitation is refused. The same rule as published forms, and sharper: unpublishing is reversible in a click, a removed membership loses the record of who was here and since when.
+
 Finally, the boundary, which survived step 8: **nothing in `routes/` imports anything from a billing provider except `routes/billing.ts`.** Domain routes ask the entitlements service a question about limits; `services/stripe.ts` is the only module that imports the Stripe SDK, and `grep -rn "from 'stripe'" backend/src` finds it and nothing else.
 
 ## 10a. A webhook is not like any other route here

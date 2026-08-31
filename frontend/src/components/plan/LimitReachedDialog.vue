@@ -16,7 +16,7 @@
       </div>
 
       <h2 class="text-section">
-        You've reached the form limit on {{ planStore.plan?.name ?? 'your plan' }}
+        {{ heading }}
       </h2>
 
       <p class="mt-2 text-body text-muted">
@@ -25,6 +25,13 @@
 
       <div v-if="planStore.plan" class="grid grid-cols-2 gap-5 mt-5">
         <UsageMeter
+          v-if="limit === 'seats'"
+          label="Members"
+          :used="planStore.usage?.seats ?? 0"
+          :limit="planStore.plan.seats"
+        />
+        <UsageMeter
+          v-else
           label="Published forms"
           :used="planStore.usage?.publishedForms ?? 0"
           :limit="planStore.plan.maxPublishedForms"
@@ -44,7 +51,27 @@
         which is the only place it is true (trap 7).
       -->
       <p class="mt-5 pt-4 border-t border-line text-meta text-faint">
-        <template v-if="canUpgrade">
+        <template v-if="limit === 'seats'">
+          <!--
+            Seats are **bought, not billed after the fact** (features/0015): the
+            owner sets the number in Stripe's portal and the invitation is sent
+            afterwards. So there is no "add a seat" button here to press - the
+            honest thing to say is where the number is changed, and by whom.
+          -->
+          <template v-if="isOwner && planStore.hasSubscription">
+            Seats are added in the billing portal. Buy one there, then send this
+            invitation again - nobody is removed and nothing is lost meanwhile.
+          </template>
+          <template v-else-if="isOwner">
+            Upgrading adds seats for the people you want to invite. You'll see the
+            price on the next screen, before anything is charged.
+          </template>
+          <template v-else>
+            Only an owner of this organization can buy seats. Ask them to add one,
+            and this invitation will go through unchanged.
+          </template>
+        </template>
+        <template v-else-if="canUpgrade">
           Upgrading publishes as many forms as you need. You'll see the price on
           the next screen, before anything is charged.
         </template>
@@ -71,14 +98,27 @@
     <template #footer>
       <div class="flex items-center justify-end gap-2">
         <Button label="Not now" text severity="secondary" @click="$emit('close')" />
-        <Button label="Manage forms" severity="secondary" outlined @click="$emit('close')" />
+        <Button
+          v-if="limit !== 'seats'"
+          label="Manage forms"
+          severity="secondary"
+          outlined
+          @click="$emit('close')"
+        />
         <!--
-          Owner only, agreeing with `POST /api/billing/checkout`, which answers
-          403 to anyone else. Offering a button that is guaranteed to fail is
-          worse than not offering it.
+          Owner only, agreeing with `POST /api/billing/checkout` and
+          `/portal`, both of which answer 403 to anyone else. Offering a button
+          that is guaranteed to fail is worse than not offering it.
         -->
         <Button
-          v-if="canUpgrade"
+          v-if="limit === 'seats' && isOwner && planStore.hasSubscription"
+          label="Add seats"
+          data-testid="add-seats-from-limit"
+          :loading="planStore.billingRedirecting"
+          @click="planStore.openBillingPortal()"
+        />
+        <Button
+          v-else-if="canUpgrade"
           label="Upgrade"
           data-testid="upgrade-from-limit"
           :loading="planStore.billingRedirecting"
@@ -110,13 +150,26 @@ import UsageMeter from './UsageMeter.vue'
  * The backend owns the limit; a second copy of the sentence in the frontend is
  * a second thing to keep in step.
  */
-const props = defineProps<{
-  visible: boolean
-  /** The `402` message from the API. */
-  message?: string | null
-  /** The form that stayed a draft, named the way the canvas names it. */
-  formTitle?: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    /** The `402` message from the API. */
+    message?: string | null
+    /** The form that stayed a draft, named the way the canvas names it. */
+    formTitle?: string | null
+    /**
+     * Which limit was hit (features/0015).
+     *
+     * `forms` is the original `LimitReached` artboard and stays the default, so
+     * every existing call site means exactly what it did. `seats` is the same
+     * screen for an invitation that came back `402`: same reasoning — a limit is
+     * not a failure — and a different action, because seats are bought in the
+     * portal rather than by upgrading.
+     */
+    limit?: 'forms' | 'seats'
+  }>(),
+  { message: null, formTitle: null, limit: 'forms' }
+)
 
 defineEmits<{ close: [] }>()
 
@@ -148,7 +201,24 @@ onMounted(() => {
  */
 const canUpgrade = computed(() => isOwner.value && planStore.plan?.key === 'free')
 
+const heading = computed(() => {
+  const planName = planStore.plan?.name ?? 'your plan'
+
+  return props.limit === 'seats'
+    ? `${planName} doesn't have a seat for this person yet`
+    : `You've reached the form limit on ${planName}`
+})
+
 const explanation = computed(() => {
+  // The server's sentence, always preferred: it is the one that knows the real
+  // numbers, and a second copy here is a second thing to keep in step.
+  if (props.limit === 'seats') {
+    return (
+      props.message ??
+      'This organization has no free seat, so the invitation was not sent. Nobody was removed.'
+    )
+  }
+
   if (props.message) {
     return props.formTitle
       ? `${props.message} “${props.formTitle}” stays a draft until then.`

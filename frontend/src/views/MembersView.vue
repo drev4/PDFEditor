@@ -17,8 +17,14 @@
         </RouterLink>
       </header>
 
+      <!--
+        The seat limit is deliberately absent from this banner. A 402 is the plan
+        refusing, not the request breaking, so it gets the LimitReached screen
+        below instead of a red alert saying something went wrong
+        (features/0015) - the same treatment a publish limit gets.
+      -->
       <p
-        v-if="store.error"
+        v-if="store.error && seatLimitReached === null"
         class="mx-gutter mt-5 px-4 py-3 rounded-card border border-danger bg-danger-soft text-body text-danger"
         role="alert"
         data-testid="members-error"
@@ -225,6 +231,13 @@
         </div>
       </section>
     </div>
+
+    <LimitReachedDialog
+      limit="seats"
+      :visible="seatLimitReached !== null"
+      :message="seatLimitReached"
+      @close="seatLimitReached = null"
+    />
   </AppShell>
 </template>
 
@@ -235,10 +248,17 @@ import AppShell from '@/layouts/AppShell.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import { useOrganizationStore } from '@/stores/organization.store'
+import { usePlanStore } from '@/stores/plan.store'
+import LimitReachedDialog from '@/components/plan/LimitReachedDialog.vue'
+import { ApiError } from '@/services/api'
 import type { Member, MembershipRole } from '@/services/organization'
 
 const store = useOrganizationStore()
 const authStore = useAuthStore()
+const planStore = usePlanStore()
+
+/** The `402` message from inviting; drives the LimitReached dialog. */
+const seatLimitReached = ref<string | null>(null)
 const inviteEmail = ref('')
 const inviteRole = ref<MembershipRole>('member')
 const copied = ref(false)
@@ -272,7 +292,13 @@ const roleReference = [
   },
 ]
 
-onMounted(() => store.load())
+onMounted(() => {
+  store.load()
+  // The dialog renders the seats meter, and this screen is where somebody
+  // discovers the limit. Loading it here means the numbers are already right
+  // when the 402 arrives, rather than appearing a moment later.
+  planStore.load()
+})
 
 function initialsOf(member: Member) {
   const source = member.name || member.email
@@ -281,11 +307,24 @@ function initialsOf(member: Member) {
 }
 
 async function submitInvite() {
+  seatLimitReached.value = null
+
   try {
     await store.invite(inviteEmail.value, inviteRole.value)
     inviteEmail.value = ''
     copied.value = false
-  } catch {
+    // Sending an invitation spends a seat, which the Members meter shows.
+    planStore.refresh()
+  } catch (error) {
+    // Branching on the status, never on the message: `402` is the plan refusing
+    // and `403` is a permission failure, and the two are distinguished by code
+    // on purpose (features/0012). Nothing was lost - the address is still in the
+    // field, so the invitation can be sent again once a seat exists.
+    if (error instanceof ApiError && error.status === 402) {
+      seatLimitReached.value = error.message
+      planStore.refresh()
+      return
+    }
     // The store already holds the message; the template renders it.
   }
 }

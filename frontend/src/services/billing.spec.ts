@@ -23,7 +23,20 @@ describe('billingService', () => {
     expect(url).toBe('https://checkout.stripe.test/s')
     // The organization comes from the caller's membership, server-side. A
     // client-supplied one would be an authorization decision made in a browser.
-    expect(api.post).toHaveBeenCalledWith('/billing/checkout', {})
+    // The plan is not that: it is which product to buy, and the server still
+    // resolves who is buying it (features/0015).
+    expect(api.post).toHaveBeenCalledWith('/billing/checkout', { plan: 'pro' })
+  })
+
+  it('names the plan being bought, and sends no quantity with it', async () => {
+    vi.mocked(api.post).mockResolvedValue({ url: 'https://checkout.stripe.test/team' } as never)
+
+    await billingService.checkoutUrl('team')
+
+    // Seats are bought on Stripe's own page and changed in the portal. This
+    // client has no seat picker and never asks Stripe for a number
+    // (features/0015, trap 1).
+    expect(api.post).toHaveBeenCalledWith('/billing/checkout', { plan: 'team' })
   })
 
   it('asks the server for a Portal URL', async () => {

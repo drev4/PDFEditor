@@ -162,22 +162,39 @@ export function isPaidStatus(status: string): boolean {
 }
 
 /**
+ * The Stripe price id configured for a sellable plan, or `null`.
+ *
+ * Read from the environment on every call rather than captured at import, so a
+ * test can point it somewhere else — and so an unset variable means *this plan
+ * is not for sale here* rather than a boot failure. `free` has no price by
+ * definition: it is what an organization falls back to, not something bought.
+ */
+export function priceIdForPlan(planKey: PlanKey): string | null {
+  const variable = planKey === 'pro' ? 'STRIPE_PRICE_PRO' : planKey === 'team' ? 'STRIPE_PRICE_TEAM' : null
+  if (!variable) return null
+
+  return process.env[variable]?.trim() || null
+}
+
+/**
  * The plan a Stripe price maps to, or `null` if this deployment does not
  * recognise it.
  *
  * The price **id** is configuration; the price **amount** is Stripe's and is
- * never stored or rendered from a constant here (features/0013, trap 7). Read
- * from the environment on every call rather than captured at import, so a test
- * can point it somewhere else.
+ * never stored or rendered from a constant here (features/0013, trap 7).
  *
- * Free ↔ Pro only for now. Team is per-seat quantity billing and is out of
- * scope — adding it means keeping the quantity in step with `Membership`.
+ * Free ↔ Pro ↔ Team since features/0015. `STRIPE_PRICE_TEAM` being unset means
+ * Team simply cannot be bought on this deployment — Pro and Free are unaffected,
+ * and a subscription that somehow arrives on the Team price then resolves to
+ * free with the error `planKeyForStatus` prints, which is this code refusing to
+ * guess rather than a silent downgrade.
  */
 export function planKeyForPrice(priceId: string | null | undefined): PlanKey | null {
   if (!priceId) return null
 
-  const pro = process.env.STRIPE_PRICE_PRO?.trim()
-  if (pro && priceId === pro) return 'pro'
+  for (const planKey of ['pro', 'team'] as const) {
+    if (priceIdForPlan(planKey) === priceId) return planKey
+  }
 
   return null
 }
@@ -200,8 +217,8 @@ export function planKeyForStatus(status: string, priceId: string | null | undefi
   if (!planKey) {
     console.error(
       `Stripe subscription is "${status}" on price "${priceId}", which this ` +
-      `deployment does not recognise (check STRIPE_PRICE_PRO). Falling back to ` +
-      `"${DEFAULT_PLAN_KEY}".`
+      `deployment does not recognise (check STRIPE_PRICE_PRO and ` +
+      `STRIPE_PRICE_TEAM). Falling back to "${DEFAULT_PLAN_KEY}".`
     )
     return DEFAULT_PLAN_KEY
   }
@@ -218,6 +235,12 @@ export interface SubscriptionState {
   priceId: string | null
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean
+  /**
+   * Seats paid for, as Stripe reported them. `null` when the item carries no
+   * quantity — which `seatLimitFor` resolves to the catalogue floor, never to
+   * unlimited (features/0015).
+   */
+  quantity: number | null
 }
 
 /**
@@ -234,6 +257,14 @@ export interface SubscriptionState {
  * The price is likewise read off the item. A subscription with no items is not
  * something Stripe produces, but it is typed as possible, so it degrades to
  * `null` — which `planKeyForStatus` resolves to free.
+ *
+ * **The quantity is read here and written nowhere** (features/0015, trap 2). It
+ * sits on the same item as the price and the period end, and it is the only
+ * trustworthy answer to "how many seats were bought": a customer can change it
+ * in Stripe's portal without this application being in the request, so anything
+ * this code remembered having asked for would drift from what was actually paid
+ * for. A missing or zero quantity becomes `null` rather than `1`, so that
+ * "Stripe told us nothing" and "Stripe told us one" stay distinguishable.
  */
 export function subscriptionStateFrom(
   organizationId: string,
@@ -255,7 +286,8 @@ export function subscriptionStateFrom(
     status: subscription.status,
     priceId: items[0]?.price?.id ?? null,
     currentPeriodEnd: periodEnds.length ? new Date(Math.min(...periodEnds) * 1000) : null,
-    cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false
+    cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+    quantity: typeof items[0]?.quantity === 'number' && items[0].quantity > 0 ? items[0].quantity : null
   }
 }
 
@@ -296,7 +328,8 @@ export async function reconcileSubscription(state: SubscriptionState): Promise<P
         status: state.status,
         priceId: state.priceId,
         currentPeriodEnd: state.currentPeriodEnd,
-        cancelAtPeriodEnd: state.cancelAtPeriodEnd
+        cancelAtPeriodEnd: state.cancelAtPeriodEnd,
+        quantity: state.quantity
       },
       update: {
         stripeCustomerId: state.stripeCustomerId,
@@ -304,7 +337,8 @@ export async function reconcileSubscription(state: SubscriptionState): Promise<P
         status: state.status,
         priceId: state.priceId,
         currentPeriodEnd: state.currentPeriodEnd,
-        cancelAtPeriodEnd: state.cancelAtPeriodEnd
+        cancelAtPeriodEnd: state.cancelAtPeriodEnd,
+        quantity: state.quantity
       }
     })
 

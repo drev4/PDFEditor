@@ -9,7 +9,7 @@ import { requireMembership, requireRole, assertNotLastOwner } from '../middlewar
 import { invitationRateLimit } from '../middleware/rateLimit.js'
 import { issueRefreshToken } from '../services/refresh-token.js'
 import { setRefreshCookie } from '../services/session-cookie.js'
-import { getEntitlements } from '../services/entitlements.js'
+import { assertCanInvite, getEntitlements } from '../services/entitlements.js'
 import { subscriptionFor } from '../services/stripe.js'
 import {
   createInvitation,
@@ -47,7 +47,7 @@ const acceptSchema = z.object({
 organizationsRouter.get('/entitlements', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { organizationId } = await requireMembership(req)
-    const { plan, usage } = await getEntitlements(organizationId)
+    const { plan, usage, seatLimit } = await getEntitlements(organizationId)
     const subscription = await subscriptionFor(organizationId)
 
     res.json({
@@ -56,7 +56,13 @@ organizationsRouter.get('/entitlements', authenticate, async (req: AuthRequest, 
         name: plan.name,
         maxPublishedForms: plan.maxPublishedForms,
         maxResponsesPerMonth: plan.maxResponsesPerMonth,
-        seats: plan.seats
+        // The **effective** seat limit, not the catalogue's (features/0015).
+        // Team's seats are bought rather than declared, so `plan.seats` is only
+        // the floor there; sending it would show a Team customer who paid for
+        // eight seats a meter that says three. Every other plan's catalogue
+        // value passes through unchanged, and the client is deliberately not
+        // told which of the two it received — one number, one meaning.
+        seats: seatLimit
       },
       usage,
       // Only what a screen has to render, and **no Stripe identifier**
@@ -212,6 +218,19 @@ organizationsRouter.post('/invitations', authenticate, async (req: AuthRequest, 
     if (alreadyIn) {
       throw new AppError(400, 'That person is already a member of this organization')
     }
+
+    // The seat limit, last of the checks and deliberately so (features/0015).
+    //
+    // After the role check and after "already a member": re-inviting someone who
+    // is already here must not be refused for money, and an admin trying to hand
+    // out `owner` must hear that it is not their decision rather than that the
+    // plan is full. `402` — a plan limit — never `403`, which is what
+    // `requireRole` throws a few lines above for a permission failure.
+    //
+    // It **buys nothing**. On a per-seat plan the seats are bought by the owner
+    // in Stripe's portal and this only refuses the one that was not; see
+    // `assertCanInvite` for why pushing a quantity from here was rejected.
+    await assertCanInvite(caller.organizationId)
 
     const { id, token, expiresAt } = await createInvitation({
       organizationId: caller.organizationId,

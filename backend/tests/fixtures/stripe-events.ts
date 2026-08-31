@@ -41,6 +41,12 @@ const NOW = 1767225600 // 2026-01-01T00:00:00Z
 const PERIOD_END = 1769904000 // 2026-02-01T00:00:00Z
 
 export const TEST_PRICE_PRO = 'price_test_pro_0013'
+/**
+ * The per-seat Team price (features/0015). A distinct id from the Pro one on
+ * purpose: `planKeyForPrice` maps ids, and a shared fixture id would let a test
+ * pass while the two plans were indistinguishable.
+ */
+export const TEST_PRICE_TEAM = 'price_test_team_0015'
 export const TEST_CUSTOMER = 'cus_test_0013'
 export const TEST_SUBSCRIPTION = 'sub_test_0013'
 
@@ -105,7 +111,14 @@ function plan(priceId: string): Stripe.Plan {
   }
 }
 
-function item(priceId: string, periodEnd: number): Stripe.SubscriptionItem {
+/**
+ * `quantity` is a parameter because it is the one field of this fixture that
+ * carries a plan limit (features/0015). Seats on a per-seat plan are whatever
+ * Stripe says was bought, so a test has to be able to say something other than
+ * one — including `null`, which is the "Stripe reported nothing" case that must
+ * degrade to the catalogue floor rather than to unlimited.
+ */
+function item(priceId: string, periodEnd: number, quantity: number | undefined): Stripe.SubscriptionItem {
   return {
     id: 'si_test_0013',
     object: 'subscription_item',
@@ -118,7 +131,7 @@ function item(priceId: string, periodEnd: number): Stripe.SubscriptionItem {
     discounts: [],
     metadata: {},
     price: price(priceId),
-    quantity: 1,
+    quantity,
     subscription: TEST_SUBSCRIPTION
   }
 }
@@ -131,6 +144,8 @@ export interface SubscriptionOverrides {
   currentPeriodEnd?: number
   customer?: string
   id?: string
+  /** Seats bought. `undefined` is Stripe reporting no quantity at all. */
+  quantity?: number | undefined
 }
 
 /** A subscription object as it appears inside a `customer.subscription.*` event. */
@@ -145,7 +160,12 @@ export function subscription(overrides: SubscriptionOverrides = {}): Stripe.Subs
     id = TEST_SUBSCRIPTION
   } = overrides
 
-  const subscriptionItem = item(priceId, currentPeriodEnd)
+  // Not a destructuring default: `{ quantity: undefined }` has to mean "Stripe
+  // sent no quantity", and a default would quietly turn that case back into 1 —
+  // which is exactly the value `subscriptionStateFrom` must not invent.
+  const quantity = 'quantity' in overrides ? overrides.quantity : 1
+
+  const subscriptionItem = item(priceId, currentPeriodEnd, quantity)
 
   return {
     id,
