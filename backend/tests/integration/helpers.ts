@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { prisma } from '../../src/services/db.js'
+import { reconcileSubscription } from '../../src/services/stripe.js'
 
 /**
  * A user with their personal organization, exactly as registration creates it.
@@ -73,5 +74,31 @@ export async function createResponse(formId: string, answers: Record<string, str
       }
     },
     include: { answers: true }
+  })
+}
+
+/**
+ * Puts an organization on Team with `seats` seats bought (features/0015).
+ *
+ * Needed by every suite that invites anybody, because seats are enforced now and
+ * Free covers one person — the owner. It exists so those suites say what they
+ * mean ("this organization has room") instead of each writing its own billing
+ * rows.
+ *
+ * It goes through `reconcileSubscription`, which is the **only writer of
+ * `Organization.planKey`**, rather than updating the column directly. A fixture
+ * that wrote the plan itself would be a second writer, and it would keep passing
+ * if the real one ever stopped agreeing with it.
+ */
+export async function grantSeats(organizationId: string, seats: number) {
+  await reconcileSubscription({
+    organizationId,
+    stripeCustomerId: `cus_seats_${organizationId.slice(0, 8)}`,
+    stripeSubscriptionId: `sub_seats_${organizationId.slice(0, 8)}`,
+    status: 'active',
+    priceId: process.env.STRIPE_PRICE_TEAM!,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    quantity: seats
   })
 }

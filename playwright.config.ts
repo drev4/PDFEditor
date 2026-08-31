@@ -54,10 +54,21 @@ export default defineConfig({
                 // Plan limits are ON here regardless of the developer's
                 // `.env`. `app.ts` calls `dotenv.config()`, so a local
                 // `DEV_PLAN_KEY=dev` would otherwise reach the suite and
-                // quietly disable the thing under test. Empty rather than
+                // quietly disable the thing under test. Pinned rather than
                 // absent: dotenv does not overwrite a key that is already
                 // present, and an absent key it would happily fill in.
-                DEV_PLAN_KEY: '',
+                //
+                // **`team`, not empty, since features/0015.** Seats are enforced
+                // now and Free covers one person — the owner — so on the free
+                // plan every invitation answers 402 and `team.spec.ts` could
+                // never reach the flow it tests. Seats are *bought*, and billing
+                // is deliberately off in this suite (no Stripe keys below), so
+                // there is no way to buy any here: pinning the plan is what
+                // gives these organizations room. `team` and not `dev` because
+                // it is a real plan with real limits — this suite is not running
+                // with limits switched off, it is running as a paying customer
+                // with three seats.
+                DEV_PLAN_KEY: 'team',
                 // Same reasoning for Stripe: `dotenv.config()` would otherwise
                 // hand this suite a developer's real keys. Empty means billing
                 // is off, so `/api/billing/*` answers 503 and nothing in this
@@ -65,6 +76,7 @@ export default defineConfig({
                 STRIPE_SECRET_KEY: '',
                 STRIPE_WEBHOOK_SECRET: '',
                 STRIPE_PRICE_PRO: '',
+                STRIPE_PRICE_TEAM: '',
             },
         },
         {

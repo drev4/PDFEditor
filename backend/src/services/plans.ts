@@ -58,10 +58,21 @@ export interface Plan {
   maxPublishedForms: number | null
   maxResponsesPerMonth: number | null
   /**
-   * Members plus outstanding invitations.
+   * Members plus outstanding invitations, counted as **total people, not people
+   * beyond the owner** (features/0015, trap 4).
    *
-   * **Written but not enforced yet.** See `assertCanInvite` in
-   * `entitlements.ts` for why, and docs/BACKLOG.md for the row that closes it.
+   * That decision is the one thing to understand about this number. An
+   * organization's own owner is a `Membership`, so a brand-new account is
+   * already using one seat: Free's `1` means *you, alone*, and the `402` a Free
+   * user gets when inviting a colleague is the product working, not a bug. Team
+   * is the plan that adds people. The alternative reading — *additional* seats,
+   * with Free at `0` — was rejected because it makes every number here one less
+   * than the number the customer counts on the Members screen.
+   *
+   * For a per-seat plan (`PER_SEAT_PLANS`) this is a **floor**, not the answer:
+   * the effective limit is the greater of this and the quantity actually bought.
+   * `seatLimitFor` in `entitlements.ts` is the only thing that resolves it, and
+   * `assertCanInvite` is the only thing that enforces it.
    */
   seats: number | null
   /**
@@ -106,18 +117,45 @@ export const PLANS: Readonly<Record<PlanKey, Readonly<Plan>>> = Object.freeze({
     maxPublishedForms: null,
     maxResponsesPerMonth: 25000,
     // The canvas prices Team as "€39 / month + €6 per seat", so the seat count
-    // is bought rather than fixed — there is no number to put here until a
-    // `Subscription` says how many were paid for. features/0013 shipped Free ↔
-    // Pro only and deliberately left Team out, precisely because per-seat
-    // quantity billing has to stay in step with `Membership`; this stays `null`
-    // until that change.
-    seats: null,
+    // is **bought, not declared**: the effective limit is
+    // `max(this floor, Subscription.quantity)`, resolved by `seatLimitFor`.
+    //
+    // A floor rather than `null`, and that is the safety property (features/0015,
+    // trap 2). `null` would mean unlimited, so a Team subscription whose quantity
+    // Stripe did not report — an old row, a hand-made subscription, an API
+    // version that moved the field — would silently grant infinite seats. With a
+    // floor, an unreadable quantity degrades to the minimum anyone can have
+    // bought, which is the same direction `resolvePlan` degrades in.
+    //
+    // The number is *the seats included in the base price*. It is a business
+    // decision, still open in docs/BACKLOG.md alongside the amounts, and this
+    // code works with any value: change it here and nothing else moves.
+    seats: 3,
     hasBranding: true,
     hasApiAccess: true
   })
 })
 
 export const DEFAULT_PLAN_KEY: PlanKey = 'free'
+
+/**
+ * The plans whose seat count is bought rather than declared (features/0015).
+ *
+ * A set here rather than a `perSeat` flag on `Plan`, because `Plan` is mirrored
+ * field-for-field by `frontend/src/services/plan.ts` and the client has no use
+ * for this: it is told the effective limit, never how the limit was arrived at.
+ *
+ * Membership of this set is what lets `seatLimitFor` read `Subscription.quantity`
+ * at all. Every other limit, and the seat limit of every other plan, still comes
+ * wholly from the catalogue — which is the containment that keeps this one
+ * exception from becoming a general one (docs/sot/04-backend-patterns.md §10).
+ */
+export const PER_SEAT_PLANS: ReadonlySet<EffectivePlanKey> = new Set<EffectivePlanKey>(['team'])
+
+/** `true` when this plan's seats are bought in Stripe rather than fixed here. */
+export function isPerSeat(planKey: EffectivePlanKey): boolean {
+  return PER_SEAT_PLANS.has(planKey)
+}
 
 /**
  * The plan for a stored `Organization.planKey`.

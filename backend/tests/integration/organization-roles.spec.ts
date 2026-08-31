@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken'
 import { app } from '../../src/app.js'
 import { prisma } from '../../src/services/db.js'
 import type { MembershipRole } from '@prisma/client'
+import { grantSeats } from './helpers.js'
 
 /**
  * Roles, enforced ([`features/0010`]).
@@ -34,10 +35,21 @@ async function member(organizationId: string, role: MembershipRole, prefix = rol
   return { user, authHeader: `Bearer ${token}` }
 }
 
-async function organization(name = 'Acme') {
-  return prisma.organization.create({
+/**
+ * An organization with seats already bought, unless `seats` says otherwise.
+ *
+ * Seats are a **precondition here, not the subject** — features/0015 wired
+ * `assertCanInvite`, and Free covers one person, so an organization created bare
+ * answers `402` to every invitation and these tests would be asserting a plan
+ * limit while claiming to assert a role. `seats: 0` is for the one test that
+ * cares which of the two answers comes first.
+ */
+async function organization(name = 'Acme', seats = 10) {
+  const org = await prisma.organization.create({
     data: { name, slug: `org-${Math.random().toString(36).slice(2, 12)}` }
   })
+  if (seats > 0) await grantSeats(org.id, seats)
+  return org
 }
 
 describe('role enforcement', () => {
@@ -66,6 +78,23 @@ describe('role enforcement', () => {
       // 403, not 404: they are inside the organization and know it exists.
       expect(res.status).toBe(403)
       expect(res.body.error).toMatch(/role/i)
+    })
+
+    it('answers 403 before 402 — a permission failure is not a billing problem', async () => {
+      // The order of the two checks in the handler, asserted (features/0015).
+      // This organization has no seats *and* the caller lacks the role. Telling
+      // a member to go and buy seats they cannot buy — only an owner may — sends
+      // them to a screen that will not help, and it says something about the
+      // organization's billing state to somebody who was not allowed to ask.
+      const org = await organization('Acme', 0)
+      const plain = await member(org.id, 'member')
+
+      const res = await request(app)
+        .post('/api/organizations/invitations')
+        .set('Authorization', plain.authHeader)
+        .send({ email: 'newcomer@example.com', role: 'member' })
+
+      expect(res.status).toBe(403)
     })
 
     it('an admin may invite a member but not an owner', async () => {

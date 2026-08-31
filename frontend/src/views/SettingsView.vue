@@ -88,6 +88,13 @@
               :used="planStore.usage?.publishedForms ?? 0"
               :limit="planStore.plan.maxPublishedForms"
             />
+            <!--
+              `plan.seats` is the **effective** limit the server resolved, not
+              the catalogue's (features/0015): on Team it is what the customer
+              actually bought, so this meter is right for somebody who paid for
+              eight seats. The client is deliberately not told which of the two
+              it received - one number, one meaning.
+            -->
             <UsageMeter
               label="Members"
               :used="planStore.usage?.seats ?? 0"
@@ -103,13 +110,30 @@
             answers 403.
           -->
           <div v-if="isOwner" class="mt-4 pt-3.5 border-t border-line flex flex-wrap gap-2">
+            <!--
+              Two purchases rather than a plan picker (features/0015). Switching
+              an existing subscription is Stripe's portal - it needs proration
+              previews, confirmation and 3-D Secure, all of which already exist
+              there and none of which should be rebuilt here. These two buttons
+              only exist for the first purchase, which the portal cannot make.
+            -->
             <Button
               v-if="!planStore.hasSubscription"
-              label="Change plan"
+              label="Upgrade to Pro"
               size="small"
               data-testid="change-plan"
               :loading="planStore.billingRedirecting"
-              @click="planStore.startCheckout()"
+              @click="planStore.startCheckout('pro')"
+            />
+            <Button
+              v-if="!planStore.hasSubscription"
+              label="Upgrade to Team"
+              size="small"
+              severity="secondary"
+              outlined
+              data-testid="checkout-team"
+              :loading="planStore.billingRedirecting"
+              @click="planStore.startCheckout('team')"
             />
             <Button
               v-else
@@ -134,7 +158,18 @@
 
           <p class="mt-4 pt-3.5 border-t border-line text-meta text-faint">
             Responses reset at the start of each month (UTC). Unpublishing a form
-            frees its slot straight away. The member limit is not enforced yet.
+            frees its slot straight away. A member or a pending invitation each
+            take a seat.
+            <!--
+              Seats are bought, not billed after the fact (features/0015): adding
+              somebody to a Team plan that is full is two steps, buy then invite,
+              and saying so here is the difference between a deliberate trade and
+              a product that looks broken.
+            -->
+            <template v-if="isOwner && isPerSeatPlan">
+              Seats are bought in Stripe's billing portal - add one there, then
+              send the invitation. Lowering the number removes nobody.
+            </template>
             <template v-if="isOwner">
               Cancelling, changing your card and past invoices all live in
               Stripe's billing portal - this application never sees a card
@@ -146,13 +181,11 @@
 
       <!--
         What is left is still genuinely missing. Billing is no longer on this
-        list (features/0013), but the Team plan is: it is priced per seat, which
-        has to stay in step with `Membership`, and nothing here can buy it yet.
+        list (features/0013), and neither is the Team plan (features/0015).
       -->
       <NotBuiltYet title="Nothing else here yet" tracked="docs/BACKLOG.md">
-        The Team plan cannot be bought yet - it is priced per seat, which is its
-        own change; renaming the organization needs an endpoint that returns its
-        name; signing out other devices needs the session listing that
+        Renaming the organization needs an endpoint that returns its name;
+        signing out other devices needs the session listing that
         <code class="num">refresh_tokens</code> already has the data for. Until
         then, roles and members are managed in
         <RouterLink to="/dashboard/team">Members</RouterLink>.
@@ -186,6 +219,15 @@ const route = useRoute()
  */
 const organizationStore = useOrganizationStore()
 const isOwner = computed(() => organizationStore.currentRole === 'owner')
+
+/**
+ * Whether this plan's seats are bought rather than declared.
+ *
+ * Named by the key rather than by "is it Team", because the question the copy
+ * below asks is *where does the seat number come from* — and the answer is the
+ * portal for exactly the plans the backend puts in `PER_SEAT_PLANS`.
+ */
+const isPerSeatPlan = computed(() => planStore.plan?.key === 'team')
 
 /** `?checkout=complete` or `?checkout=cancelled`, set by the Stripe redirect. */
 const checkoutReturn = computed(() => {

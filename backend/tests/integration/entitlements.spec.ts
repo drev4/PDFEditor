@@ -342,7 +342,7 @@ describe('plan limits', () => {
    * Testing it directly is what keeps it honest until step 8 connects it; a
    * seat check that has never been executed is not a seat check.
    */
-  describe('assertCanInvite (written, not yet wired)', () => {
+  describe('assertCanInvite (wired since features/0015)', () => {
     it('counts a pending invitation as a seat in use', async () => {
       const author = await createUser()
       await prisma.invitation.create({
@@ -381,18 +381,22 @@ describe('plan limits', () => {
       await expect(assertCanInvite(author.organization.id)).resolves.toBeUndefined()
     })
 
-    it('is still not enforced by the invitation endpoint', async () => {
+    it('is enforced by the invitation endpoint, with 402', async () => {
       const author = await createUser()
 
-      // Deliberate: on the free plan's one seat this would be a 402 if it were
-      // wired. It is not, because no plan that allows a second member can be
-      // bought yet, and gating it would make features/0010 unreachable.
+      // Free covers one person and the owner is that person, so this is the
+      // limit doing its job. It sat unwired from features/0012 until Team
+      // existed to make it meaningful; the plan-by-plan behaviour and the
+      // purchased-seat cases are in `seats.spec.ts`.
       const res = await request(app)
         .post('/api/organizations/invitations')
         .set('Authorization', author.authHeader)
         .send({ email: 'colleague@example.com', role: 'member' })
 
-      expect(res.status).toBe(201)
+      // 402, not 403: this person is allowed to invite, the plan is not paying
+      // for it. `403` is what `requireRole` throws and the two are never merged.
+      expect(res.status).toBe(402)
+      expect(await prisma.invitation.count()).toBe(0)
     })
   })
 })

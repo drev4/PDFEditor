@@ -139,6 +139,15 @@ What bounds it:
 
 Both are asserted on the same endpoint in `backend/tests/integration/organization-roles.spec.ts`. This mirrors the `402` / `403` split the roadmap specifies for plan limits versus permissions.
 
+**Since [`features/0015`](../../features/0015-team-plan-and-purchased-seats.md) a plan limit gates access to a tenant, and that is why the split has to hold precisely.** `POST /organizations/invitations` is the one endpoint that can answer either: a plan limit (`402`, no free seat) or a permission failure (`403`, an admin trying to hand out `owner`), on the same request shape. The order in the handler is deliberate — role first, "already a member" second, seats last — and both directions of getting it wrong are real:
+
+- Answering `402` where `403` belongs tells a member who may not invite anybody that the organization is out of seats. That is the organization's billing state, disclosed to somebody who was not allowed to ask, and it sends them to a screen only an owner can act on.
+- Answering `403` where `402` belongs tells an owner they lack permission over their own organization, which is false and unactionable.
+
+The `402` is only ever seen by an authenticated member of the organization who was allowed to make the request. **It still never reaches a respondent** — no public path gained one — and inviting is not a public path.
+
+Note also what the limit does **not** do: refusing a seat removes nobody. A plan that shrinks below the number of people already in the organization keeps every membership and every pending invitation, so a billing event can never revoke somebody's access to data they had ([04-backend-patterns §10](./04-backend-patterns.md)).
+
 ## Where the headers actually are
 
 The single most important thing to know before changing anything here: **a CSP constrains a document, and `backend/src/app.ts` never serves one.** It serves JSON and one PDF; `frontend/index.html` is served by Vite in development and by whatever hosts the built assets in production. So the work splits in two, and mounting `helmet()` alone would have closed the finding on paper while leaving the XSS path untouched.

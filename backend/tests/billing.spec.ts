@@ -5,10 +5,12 @@ import { PrismaClient } from '@prisma/client'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
+import { PLANS } from '../src/services/plans'
 import {
   assertKnownApiVersion,
   isPaidStatus,
   planKeyForPrice,
+  priceIdForPlan,
   planKeyForStatus,
   resetAnnouncements,
   subscriptionStateFrom
@@ -18,6 +20,7 @@ import {
   checkoutCompletedEvent,
   subscriptionEvent,
   TEST_PRICE_PRO,
+  TEST_PRICE_TEAM,
   TEST_CUSTOMER,
   TEST_SUBSCRIPTION
 } from './fixtures/stripe-events'
@@ -153,10 +156,33 @@ describe('stripe billing', () => {
       expect(String(logged.mock.calls[0]?.[0])).toContain('STRIPE_PRICE_PRO')
     })
 
-    it('maps only the configured price', () => {
+    it('maps only the configured prices', () => {
       expect(planKeyForPrice(TEST_PRICE_PRO)).toBe('pro')
+      expect(planKeyForPrice(TEST_PRICE_TEAM)).toBe('team')
       expect(planKeyForPrice('price_other')).toBeNull()
       expect(planKeyForPrice(null)).toBeNull()
+    })
+
+    it('stops selling Team when STRIPE_PRICE_TEAM is unset, and leaves Pro alone', () => {
+      // The variable is optional (features/0015). Unset must mean "Team is not
+      // for sale here", never "Team is free" and never a broken Pro.
+      const saved = process.env.STRIPE_PRICE_TEAM
+      delete process.env.STRIPE_PRICE_TEAM
+
+      try {
+        expect(priceIdForPlan('team')).toBeNull()
+        expect(planKeyForPrice(TEST_PRICE_TEAM)).toBeNull()
+        expect(planKeyForPrice(TEST_PRICE_PRO)).toBe('pro')
+        // And a subscription that somehow arrives on it falls to free rather
+        // than being guessed at.
+        expect(planKeyForStatus('active', TEST_PRICE_TEAM)).toBe('free')
+      } finally {
+        process.env.STRIPE_PRICE_TEAM = saved
+      }
+    })
+
+    it('has no price for free — it is fallen back to, never bought', () => {
+      expect(priceIdForPlan('free')).toBeNull()
     })
   })
 
@@ -171,6 +197,22 @@ describe('stripe billing', () => {
       expect(state.priceId).toBe(TEST_PRICE_PRO)
       expect(state.stripeCustomerId).toBe(TEST_CUSTOMER)
       expect(state.status).toBe('active')
+    })
+
+    it('reads the seat quantity off the item', () => {
+      expect(subscriptionStateFrom('org-1', subscription({ quantity: 7 })).quantity).toBe(7)
+    })
+
+    it.each([
+      ['absent', undefined],
+      ['zero', 0]
+    ])('turns a %s quantity into null rather than 1', (_label, quantity) => {
+      // `null` and `1` must stay distinguishable: `null` means Stripe told us
+      // nothing, which `seatLimitFor` resolves to the catalogue floor. Defaulting
+      // to `1` would silently claim a one-seat purchase (features/0015).
+      const state = subscriptionStateFrom('org-1', subscription({ quantity: quantity as number | undefined }))
+
+      expect(state.quantity).toBeNull()
     })
   })
 
@@ -234,6 +276,74 @@ describe('stripe billing', () => {
       // The customer is remembered immediately. Minting a fresh one on the next
       // attempt is how somebody ends up with two subscriptions and two invoices.
       expect(prismaMock.subscription.upsert).toHaveBeenCalled()
+    })
+
+    it('opens a Team session with adjustable seats, starting at the base plan floor', async () => {
+      asRole('owner')
+      prismaMock.subscription.findUnique.mockResolvedValue(null)
+      prismaMock.user.findUnique.mockResolvedValue({ email: 'o@example.com', name: null } as any)
+      stripeCalls.createCustomer.mockResolvedValue({ id: 'cus_new' })
+      stripeCalls.createCheckoutSession.mockResolvedValue({ url: 'https://checkout.stripe.test/s' })
+
+      const response = await request(app).post('/api/billing/checkout').send({ plan: 'team' })
+
+      expect(response.status).toBe(200)
+
+      // The one place this application sends Stripe a quantity, and it is an
+      // opening position: `adjustable_quantity` means the buyer sets the real
+      // number on Stripe's own page, where the per-seat amount is shown. Nothing
+      // here pushes a quantity again — the portal is where seats change, and the
+      // webhook is how this application finds out (features/0015, trap 1).
+      const session = stripeCalls.createCheckoutSession.mock.calls[0]?.[0]
+      expect(session.line_items).toEqual([
+        {
+          price: TEST_PRICE_TEAM,
+          quantity: PLANS.team.seats,
+          adjustable_quantity: { enabled: true, minimum: PLANS.team.seats }
+        }
+      ])
+    })
+
+    it('still defaults to Pro when the body says nothing, as the shipped client does', async () => {
+      asRole('owner')
+      prismaMock.subscription.findUnique.mockResolvedValue(null)
+      prismaMock.user.findUnique.mockResolvedValue({ email: 'o@example.com', name: null } as any)
+      stripeCalls.createCustomer.mockResolvedValue({ id: 'cus_new' })
+      stripeCalls.createCheckoutSession.mockResolvedValue({ url: 'https://checkout.stripe.test/s' })
+
+      await request(app).post('/api/billing/checkout').send({})
+
+      expect(stripeCalls.createCheckoutSession.mock.calls[0]?.[0].line_items).toEqual([
+        { price: TEST_PRICE_PRO, quantity: 1 }
+      ])
+    })
+
+    it('refuses a plan this deployment has no price for, with 503', async () => {
+      asRole('owner')
+      const saved = process.env.STRIPE_PRICE_TEAM
+      delete process.env.STRIPE_PRICE_TEAM
+
+      try {
+        const response = await request(app).post('/api/billing/checkout').send({ plan: 'team' })
+
+        // 503, not 400: the request is fine and Team is a real plan. This
+        // server simply does not sell it, which is a deployment fact.
+        expect(response.status).toBe(503)
+        expect(stripeCalls.createCheckoutSession).not.toHaveBeenCalled()
+      } finally {
+        process.env.STRIPE_PRICE_TEAM = saved
+      }
+    })
+
+    it('refuses to sell free, or anything that is not a plan', async () => {
+      asRole('owner')
+
+      for (const plan of ['free', 'dev', 'enterprise']) {
+        const response = await request(app).post('/api/billing/checkout').send({ plan })
+        expect(response.status).toBe(400)
+      }
+
+      expect(stripeCalls.createCheckoutSession).not.toHaveBeenCalled()
     })
 
     it('creates the customer under an idempotency key scoped to the organization', async () => {

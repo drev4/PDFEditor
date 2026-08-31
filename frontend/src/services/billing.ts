@@ -19,10 +19,26 @@ import { api } from './api'
  * becomes real when Stripe's webhook says so, and the only way this application
  * learns about it is by re-reading `GET /api/organizations/entitlements`.
  */
+
+/**
+ * The plans Checkout can sell.
+ *
+ * `free` is absent on purpose: it is what an organization falls back to, never
+ * something bought, and the API's own enum refuses it.
+ */
+export type BuyablePlan = 'pro' | 'team'
+
 export const billingService = {
-  /** A Stripe Checkout URL for the Pro plan. Owner only, server-side. */
-  async checkoutUrl(): Promise<string> {
-    const { url } = await api.post<{ url: string }>('/billing/checkout', {})
+  /**
+   * A Stripe Checkout URL for a plan. Owner only, server-side.
+   *
+   * **No quantity is sent**, for Team either (features/0015). Seats are bought
+   * on Stripe's own page, where the per-seat amount is shown, and changed later
+   * in the portal; this client has no seat picker and never asks Stripe for a
+   * number.
+   */
+  async checkoutUrl(plan: BuyablePlan = 'pro'): Promise<string> {
+    const { url } = await api.post<{ url: string }>('/billing/checkout', { plan })
     return url
   },
 

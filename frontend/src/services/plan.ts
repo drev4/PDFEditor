@@ -28,6 +28,19 @@ export interface Plan {
   /** How many forms may be **published at once** — not how many may exist. */
   maxPublishedForms: number | null
   maxResponsesPerMonth: number | null
+  /**
+   * The seat limit **in force**, which is not always the catalogue's number
+   * (`features/0015`).
+   *
+   * Team's seats are bought rather than declared, so for a Team organization
+   * this is the quantity the customer actually paid for; for every other plan it
+   * is the catalogue value unchanged. The server resolves it and sends one
+   * number — the client is deliberately not told which of the two it got, and
+   * must not try to work it out, because that would be a second copy of a rule
+   * only the backend enforces.
+   *
+   * A member and a pending invitation each take a seat.
+   */
   seats: number | null
 }
 

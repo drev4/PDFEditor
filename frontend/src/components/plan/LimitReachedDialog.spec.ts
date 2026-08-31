@@ -36,8 +36,27 @@ describe('LimitReachedDialog', () => {
     subscription: null
   }
 
+  /** A Team organization with seats bought and every one of them in use. */
+  const teamPlanOutOfSeats: Entitlements = {
+    plan: {
+      key: 'team',
+      name: 'Team',
+      maxPublishedForms: null,
+      maxResponsesPerMonth: 25000,
+      // The **effective** limit the server resolved from what was bought — not
+      // the catalogue floor (features/0015).
+      seats: 4
+    },
+    usage: { publishedForms: 2, responsesThisPeriod: 10, seats: 4 },
+    subscription: { status: 'active', currentPeriodEnd: null, cancelAtPeriodEnd: false }
+  }
+
   /** Mounts the dialog with the signed-in person holding `role`. */
-  async function mountDialog(role: 'owner' | 'admin' | 'member', entitlements = freePlan) {
+  async function mountDialog(
+    role: 'owner' | 'admin' | 'member',
+    entitlements = freePlan,
+    props: Record<string, unknown> = {}
+  ) {
     vi.mocked(planService.entitlements).mockResolvedValue(entitlements)
 
     const planStore = usePlanStore()
@@ -49,7 +68,7 @@ describe('LimitReachedDialog', () => {
     vi.spyOn(organizationStore, 'currentRole', 'get').mockReturnValue(role)
 
     const wrapper = mount(LimitReachedDialog, {
-      props: { visible: true, formTitle: 'Invoice request' },
+      props: { visible: true, formTitle: 'Invoice request', ...props },
       global: {
         plugins: [PrimeVue],
         stubs: {
@@ -109,10 +128,76 @@ describe('LimitReachedDialog', () => {
       plan: { ...freePlan.plan, key: 'pro', name: 'Pro' }
     })
 
-    // Team is priced per seat and cannot be bought (features/0013 leaves it
-    // out), so opening Checkout here would sell the customer what they have.
+    // Team is buyable since features/0015, but it publishes no more forms than
+    // Pro does — both are unlimited — so an upgrade would sell the customer
+    // nothing they need, and switching an existing subscription is the portal's
+    // job in any case.
     expect(wrapper.find('[data-testid="upgrade-from-limit"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('already on the highest plan we sell')
+  })
+
+  describe('the seat limit (features/0015)', () => {
+    it('says a seat is missing, not that the invitation failed', async () => {
+      const wrapper = await mountDialog('owner', teamPlanOutOfSeats, {
+        limit: 'seats',
+        message: 'The Team plan covers 4 people, and this organization already has 4.'
+      })
+
+      // The server's own sentence, and a heading about seats rather than forms.
+      // A 402 is a limit the customer can act on, not a broken request.
+      expect(wrapper.text()).toContain("doesn't have a seat for this person yet")
+      expect(wrapper.text()).toContain('The Team plan covers 4 people')
+      expect(wrapper.text()).not.toContain('form limit')
+    })
+
+    it('shows the members meter against the bought limit', async () => {
+      const wrapper = await mountDialog('owner', teamPlanOutOfSeats, { limit: 'seats' })
+
+      expect(wrapper.text()).toContain('Members')
+      // The effective limit, so a customer who paid for four is not told three.
+      expect(wrapper.text()).toContain('4')
+      expect(wrapper.text()).not.toContain('Published forms')
+    })
+
+    it('sends an owner with a subscription to the portal, because seats are bought there', async () => {
+      const wrapper = await mountDialog('owner', teamPlanOutOfSeats, { limit: 'seats' })
+
+      const addSeats = wrapper.find('[data-testid="add-seats-from-limit"]')
+      expect(addSeats.exists()).toBe(true)
+      // Not Checkout: this organization already has a live subscription, and a
+      // second one would be a customer paying twice. The API refuses it too.
+      expect(wrapper.find('[data-testid="upgrade-from-limit"]').exists()).toBe(false)
+
+      await addSeats.trigger('click')
+      expect(billingService.portalUrl).toHaveBeenCalled()
+      expect(billingService.checkoutUrl).not.toHaveBeenCalled()
+    })
+
+    it('offers a free owner the upgrade instead, since there is nothing to manage yet', async () => {
+      const wrapper = await mountDialog('owner', freePlan, { limit: 'seats' })
+
+      expect(wrapper.find('[data-testid="upgrade-from-limit"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="add-seats-from-limit"]').exists()).toBe(false)
+    })
+
+    it('offers a non-owner no way to buy a seat, and says who can', async () => {
+      const wrapper = await mountDialog('admin', teamPlanOutOfSeats, { limit: 'seats' })
+
+      // An admin may invite but may not spend money — `POST /api/billing/*`
+      // answers 403 to anyone but an owner, and the UI agrees rather than
+      // offering a button that fails.
+      expect(wrapper.find('[data-testid="add-seats-from-limit"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="upgrade-from-limit"]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Only an owner of this organization can buy seats')
+    })
+
+    it('renders no price and no per-seat amount', async () => {
+      const wrapper = await mountDialog('owner', teamPlanOutOfSeats, { limit: 'seats' })
+
+      // The amount lives in Stripe and nowhere else. A per-seat figure rendered
+      // from a constant here would be wrong the first time there is a promotion.
+      expect(wrapper.text()).not.toMatch(/[€$£]/)
+    })
   })
 
   it('renders no price, anywhere', async () => {

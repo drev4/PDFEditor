@@ -1,14 +1,17 @@
 import { Router, type Request, type Response } from 'express'
 import express from 'express'
+import { z } from 'zod'
 import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, type AuthRequest } from '../middleware/auth.js'
 import { requireRole } from '../middleware/membership.js'
 import { withOrganizationLock } from '../services/organization-lock.js'
+import { isPerSeat, PLANS, type PlanKey } from '../services/plans.js'
 import {
   constructWebhookEvent,
   handleStripeEvent,
   isPaidStatus,
+  priceIdForPlan,
   rememberCustomer,
   stripeClient,
   subscriptionFor
@@ -38,12 +41,28 @@ function frontendUrl(path: string): string {
   return `${base}${path}`
 }
 
-/** The price this deployment sells, or a `503` saying it sells nothing. */
-function proPriceId(): string {
-  const priceId = process.env.STRIPE_PRICE_PRO?.trim()
+/**
+ * Which plan is being bought.
+ *
+ * `pro` by default, so the client that features/0013 shipped — which sends an
+ * empty body — keeps working unchanged. `free` is not in the enum: it is what an
+ * organization falls back to, never something Checkout sells, and offering it
+ * here would be a second way to change a plan outside the webhook.
+ */
+const checkoutSchema = z.object({
+  plan: z.enum(['pro', 'team']).default('pro')
+})
+
+/** The price this deployment sells for a plan, or a `503` saying it sells none. */
+function priceFor(planKey: PlanKey): string {
+  const priceId = priceIdForPlan(planKey)
 
   if (!priceId) {
-    throw new AppError(503, 'Billing is not configured on this server.')
+    // `503`, not `400`: the request is fine and this plan is real. This
+    // deployment simply has no price configured for it (`STRIPE_PRICE_TEAM` is
+    // optional, and unset means Team is not for sale here — Free and Pro are
+    // unaffected).
+    throw new AppError(503, `The ${PLANS[planKey].name} plan is not for sale on this server.`)
   }
 
   return priceId
@@ -61,7 +80,14 @@ function proPriceId(): string {
 billingRouter.post('/checkout', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const { organizationId } = await requireRole(req, ['owner'])
-    const price = proPriceId()
+
+    const validation = checkoutSchema.safeParse(req.body ?? {})
+    if (!validation.success) {
+      return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
+    }
+
+    const planKey = validation.data.plan
+    const price = priceFor(planKey)
     const stripe = stripeClient()
 
     // Everything from here is serialised per organization (features/0014).
@@ -131,21 +157,53 @@ billingRouter.post('/checkout', authenticate, async (req: AuthRequest, res, next
       // produce two sessions, and Stripe keeps one open for 24 hours. Handing
       // back the existing one means there is only ever a single session that can
       // be paid, which is the actual protection against being billed twice.
+      //
+      // **Only when it is for the plan being asked for** (features/0015). With
+      // two buyable plans, reusing blindly sends somebody who pressed "Team" to
+      // a page that charges them for Pro — the customer would be reading a
+      // correct-looking Stripe page for the wrong product. A session for another
+      // plan is expired rather than left open, which keeps the property that
+      // matters: there is never more than one session that can be paid.
       const open = await stripe.checkout.sessions.list({
         customer: customerId,
         status: 'open',
-        limit: 1
+        limit: 1,
+        expand: ['data.line_items']
       })
 
       const reusable = open.data[0]
-      if (reusable?.url) {
-        return reusable.url
+
+      if (reusable) {
+        const sessionPrice = reusable.line_items?.data[0]?.price?.id ?? null
+
+        if (sessionPrice === price && reusable.url) {
+          return reusable.url
+        }
+
+        await stripe.checkout.sessions.expire(reusable.id)
       }
 
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         customer: customerId,
-        line_items: [{ price, quantity: 1 }],
+        // **The only place this application sends Stripe a quantity, and it is
+        // an opening position rather than a decision** (features/0015, trap 1).
+        // Nothing here ever pushes a quantity again: seats are changed by the
+        // customer in the portal, and `Subscription.quantity` is only ever read
+        // back off the webhook. A per-seat plan starts at the seats included in
+        // the base price and `adjustable_quantity` lets the buyer set the real
+        // number on Stripe's own page — which is where the per-seat amount is
+        // shown, and the only place it is true. This application renders no
+        // figure and has no seat picker of its own.
+        line_items: [
+          isPerSeat(planKey)
+            ? {
+                price,
+                quantity: PLANS[planKey].seats ?? 1,
+                adjustable_quantity: { enabled: true, minimum: PLANS[planKey].seats ?? 1 }
+              }
+            : { price, quantity: 1 }
+        ],
         // Both, deliberately. `client_reference_id` is what Stripe echoes on the
         // session; `metadata` is what survives onto objects the session creates.
         client_reference_id: organizationId,

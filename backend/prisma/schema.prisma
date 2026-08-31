@@ -323,6 +323,21 @@ model Subscription {
   /// ends. The normal cancellation path; a mid-period drop to free only ever
   /// comes from a payment that finally failed.
   cancelAtPeriodEnd    Boolean @default(false) @map("cancel_at_period_end")
+  /// The number of seats **paid for**, read from the Stripe subscription item
+  /// and never computed here (features/0015).
+  ///
+  /// The first plan limit that is bought rather than declared, and the only one
+  /// that does not come wholly from `services/plans.ts`. `reconcileSubscription`
+  /// is its only writer, and it writes what the event said — this application
+  /// never sends Stripe a quantity beyond the initial one on a Checkout line
+  /// item, because a customer can change it in the portal without this code
+  /// being in the request at all. A remembered "what we last asked for" would
+  /// drift from what was actually bought, silently.
+  ///
+  /// `null` means Stripe reported none. It resolves to the catalogue floor, not
+  /// to unlimited: `seatLimitFor` in `services/entitlements.ts` degrades
+  /// downward, the same discipline as `resolvePlan`.
+  quantity             Int?
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 

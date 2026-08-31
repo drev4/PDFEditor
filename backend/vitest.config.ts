@@ -40,6 +40,10 @@ export default defineConfig({
             STRIPE_SECRET_KEY: 'sk_test_0013_suite',
             STRIPE_WEBHOOK_SECRET: 'whsec_test_0013_suite',
             STRIPE_PRICE_PRO: 'price_test_pro_0013',
+            // Team is per-seat (features/0015). Set here for the same reason as
+            // the Pro price: without it a Team subscription resolves to free and
+            // every seat assertion below would be measuring the free plan.
+            STRIPE_PRICE_TEAM: 'price_test_team_0015',
         },
         setupFiles: ['./tests/setup.ts'],
         coverage: {

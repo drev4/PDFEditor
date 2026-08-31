@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from './db.js'
 import { AppError } from '../middleware/errorHandler.js'
-import { PLANS, effectivePlan, isWithin, type Plan } from './plans.js'
+import { PLANS, effectivePlan, isPerSeat, isWithin, type Plan } from './plans.js'
 
 /**
  * Where plan limits get checked.
@@ -29,9 +29,17 @@ import { PLANS, effectivePlan, isWithin, type Plan } from './plans.js'
  * `services/stripe.ts` is the only thing that knows about Stripe, and a grep
  * for `from 'stripe'` finds it and nothing else (features/0013).
  *
- * **This file was not changed by features/0013**, which is the point of it: the
+ * **features/0013 changed nothing in this file**, which was the point of it: the
  * plan still comes from `Organization.planKey` through `effectivePlan`, and all
- * billing did was become the one thing allowed to write that column.
+ * billing did was become the one thing allowed to write that column. That is
+ * still true of *which* plan an organization is on.
+ *
+ * features/0015 made one contained exception, and it is worth knowing exactly
+ * how far it goes. `seatLimitFor` reads `Subscription.quantity`, because Team's
+ * seats are **bought rather than declared** and no constant can know how many
+ * somebody paid for. It reads one column of one table for one plan family, it
+ * still does not import Stripe or know what a webhook is, and every other limit
+ * — published forms, responses, branding — answers from `PLANS` alone.
  */
 
 /**
@@ -61,6 +69,17 @@ export interface Usage {
 export interface Entitlements {
   plan: Readonly<Plan>
   usage: Usage
+  /**
+   * The seat limit actually in force — `plan.seats` for every plan whose seats
+   * are declared, and what was bought for the one whose seats are not.
+   *
+   * Separate from `plan` because `PLANS` is frozen and must stay the catalogue:
+   * copying a per-organization number into a shared plan object would make the
+   * catalogue mean something different depending on who asked. The API sends
+   * this as the plan's `seats`, so a screen renders one number and never has to
+   * know which of the two it got (features/0015).
+   */
+  seatLimit: number | null
 }
 
 /** The organization's plan, or the free plan if the row has vanished. */
@@ -118,6 +137,50 @@ async function countSeatsInUse(organizationId: string): Promise<number> {
   return members + pendingInvitations
 }
 
+/**
+ * The seat limit in force for an organization.
+ *
+ * **The only limit in this application that is not wholly owned by the
+ * catalogue** (features/0015, trap 2), and the only reason `entitlements.ts`
+ * reads a billing table at all. It is contained on purpose: one function, one
+ * plan family (`PER_SEAT_PLANS`), one column. `assertCanPublishForm`,
+ * `assertResponseWithinLimit` and `isOverResponseLimit` were not touched and
+ * still answer from `PLANS` alone.
+ *
+ * Note what it reads and what it does not. `Subscription.quantity` is what
+ * Stripe *reported*, reconciled by the webhook like `status` and `priceId`; it
+ * is never a number this application chose, because the customer can change the
+ * quantity in the portal without this code being in the request. The plan itself
+ * still comes from `Organization.planKey` through `effectivePlan` — no billing
+ * table decides *which* plan anyone is on, only how many seats one particular
+ * plan bought.
+ *
+ * Every unreadable case degrades **downward**, to the catalogue floor:
+ *
+ *   - not a per-seat plan → the catalogue value, unchanged (and `null` for the
+ *     `dev` override still means unlimited)
+ *   - no subscription row, `quantity` null, `0`, or negative → the floor
+ *   - a quantity below the floor → the floor, because the floor is the seats
+ *     included in the base price and Stripe lets a customer set a quantity under
+ *     what they already have
+ *   - a quantity above the floor → the quantity
+ */
+export async function seatLimitFor(organizationId: string): Promise<number | null> {
+  const plan = await planFor(organizationId)
+
+  if (!isPerSeat(plan.key)) return plan.seats
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { organizationId },
+    select: { quantity: true }
+  })
+
+  const purchased = subscription?.quantity ?? 0
+  const floor = plan.seats ?? 0
+
+  return Math.max(floor, purchased)
+}
+
 /** Reads the meter for the current period. An absent row means nothing yet. */
 async function readResponseUsage(organizationId: string): Promise<number> {
   const counter = await prisma.usageCounter.findUnique({
@@ -145,14 +208,15 @@ async function readResponseUsage(organizationId: string): Promise<number> {
  * not something a limit is computed from.
  */
 export async function getEntitlements(organizationId: string): Promise<Entitlements> {
-  const [plan, publishedForms, responsesThisPeriod, seats] = await Promise.all([
+  const [plan, publishedForms, responsesThisPeriod, seats, seatLimit] = await Promise.all([
     planFor(organizationId),
     countPublishedForms(organizationId),
     readResponseUsage(organizationId),
-    countSeatsInUse(organizationId)
+    countSeatsInUse(organizationId),
+    seatLimitFor(organizationId)
   ])
 
-  return { plan, usage: { publishedForms, responsesThisPeriod, seats } }
+  return { plan, usage: { publishedForms, responsesThisPeriod, seats }, seatLimit }
 }
 
 /**
@@ -185,35 +249,54 @@ export async function assertCanPublishForm(
 }
 
 /**
- * Refuses to hand out a seat the plan does not have.
+ * Refuses to hand out a seat that was not bought.
  *
- * **Written, tested, and deliberately not wired into
- * `POST /api/organizations/invitations` yet.**
+ * **Wired into `POST /api/organizations/invitations` since features/0015.** It
+ * sat unenforced from features/0012 until there was a plan that could actually
+ * have more than one seat, because turning it on before that would have answered
+ * `402` to every invitation from every account and made the whole of
+ * features/0010 unreachable.
  *
- * The canvas gives Free and Pro one seat each; only Team has several, and Team
- * still cannot be bought — features/0013 shipped Free ↔ Pro only, because Team
- * is priced per seat and that quantity has to be kept in step with
- * `Membership`. So enforcing this today would still answer `402` to *every*
- * invitation from *every* account, making the whole of features/0010
- * unreachable — that is not validating the limit UX, it is deleting a shipped
- * feature. The alternative, inventing a seat count for Free that the design
- * does not state, would put a product decision nobody has taken into the code.
+ * Two things it deliberately does not do:
  *
- * So it waits for the plan that makes it meaningful, which is now the Team
- * plan rather than "billing" in general. The row in docs/BACKLOG.md is what
- * remembers to.
+ *   - **It does not buy anything.** Seats are bought by the customer in Stripe's
+ *     portal and this only refuses the seat that was not (trap 1). Adding the
+ *     fourth person to a three-seat plan is therefore two steps, not one, and
+ *     that is the trade: the alternative pushes a quantity to Stripe from an
+ *     Invite button, charging money from a screen that mentions none, and drifts
+ *     silently the first time an invitation expires with no code running.
+ *   - **It never removes anyone.** A plan that shrinks below the number of people
+ *     already in the organization refuses the *next* invitation and touches no
+ *     existing membership (trap 3), exactly as a downgrade leaves published
+ *     forms published.
+ *
+ * `402`, never `403`. `403` is what `requireRole` throws for a permission
+ * failure, and the invitations route can answer both: an admin inviting an owner
+ * gets `403`, an owner out of seats gets `402`. Collapsing them would leave the
+ * client unable to tell "you may not" from "you have not paid for this".
  */
 export async function assertCanInvite(organizationId: string): Promise<void> {
-  const plan = await planFor(organizationId)
-  const inUse = await countSeatsInUse(organizationId)
+  const [plan, inUse, seatLimit] = await Promise.all([
+    planFor(organizationId),
+    countSeatsInUse(organizationId),
+    seatLimitFor(organizationId)
+  ])
 
-  if (!isWithin(inUse, plan.seats)) {
-    throw new AppError(
-      402,
-      `The ${plan.name} plan includes ${plan.seats} ` +
-      `${plan.seats === 1 ? 'seat' : 'seats'}. Upgrade to invite more people.`
-    )
-  }
+  if (isWithin(inUse, seatLimit)) return
+
+  // Seats count total people, so the limit is the size of the organization, not
+  // the number of colleagues that can be added to it.
+  const isTeam = isPerSeat(plan.key)
+
+  throw new AppError(
+    402,
+    `The ${plan.name} plan covers ${seatLimit} ${seatLimit === 1 ? 'person' : 'people'}, ` +
+    `and this organization already has ${inUse} ` +
+    `${inUse === 1 ? 'member or pending invitation' : 'members and pending invitations'}. ` +
+    (isTeam
+      ? 'Add seats in the billing portal, then send the invitation again.'
+      : 'Upgrade to invite more people.')
+  )
 }
 
 /**

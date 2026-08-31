@@ -7,7 +7,7 @@ import {
   type PlanUsage,
   type Subscription
 } from '../services/plan'
-import { billingService } from '../services/billing'
+import { billingService, type BuyablePlan } from '../services/billing'
 import { useAsyncAction } from '../composables/useAsyncAction'
 
 /**
@@ -146,9 +146,16 @@ export const usePlanStore = defineStore('plan', () => {
     }
   }
 
-  /** Opens Stripe Checkout for the Pro plan. Owner only; the API enforces it. */
-  function startCheckout() {
-    return goToStripe(billingService.checkoutUrl)
+  /**
+   * Opens Stripe Checkout for a plan. Owner only; the API enforces it.
+   *
+   * `pro` by default, which is what every call site meant before Team could be
+   * bought (features/0015). The plan is a *purchase* choice, not a plan switch:
+   * changing an existing subscription is the portal's job, and the API refuses a
+   * second checkout while one is live.
+   */
+  function startCheckout(plan: BuyablePlan = 'pro') {
+    return goToStripe(() => billingService.checkoutUrl(plan))
   }
 
   /** Opens the Stripe Customer Portal — cancel, resume, change card, invoices. */

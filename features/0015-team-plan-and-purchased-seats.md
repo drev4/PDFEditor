@@ -1,8 +1,8 @@
 # 0015 — The Team plan, and seats the customer buys rather than seats we bill them for
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *The Team plan, and per-seat billing*, and *The seat limit is written and not enforced*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0015-team-plan-and-purchased-seats`
 **Related:** [03-domain-model](../docs/sot/03-domain-model.md) · [04-backend-patterns §10a](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [08-operations](../docs/sot/08-operations.md) · [10-saas-roadmap](../docs/sot/10-saas-roadmap.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md) · [`features/0013`](0013-stripe-subscriptions.md) · [`features/0014`](0014-close-the-subscription-surface.md)
 
 ## Context
@@ -171,4 +171,56 @@ The webhook already handles the result. A plan switch arrives as `customer.subsc
 
 ## Outcome
 
-*(filled in when the work is finished)*
+Shipped as specified. The design decision in trap 1 held all the way through: **nothing in this application writes a Stripe quantity**, and a grep for `quantity` in `backend/src` finds the Checkout line item, the reconciler's read, and comments.
+
+### The trap-4 decision, and why
+
+**Seat numbers in the catalogue mean total people, not people beyond the owner.** The organization's own owner is a `Membership`, so a brand-new account already uses one seat: Free's `1` means *you, alone*, and the `402` a Free user gets when inviting a colleague is the intended product behaviour. Team is the plan that adds people.
+
+Chosen over the *additional seats* reading (Free at `0`) because that makes every number in `PLANS` one less than the number the customer counts on the Members screen, and because it was already what `countSeatsInUse` computed — the alternative would have meant changing the counter, the catalogue and every existing test to arrive at the same enforcement. `PLANS` and `assertCanInvite` needed no reconciliation: they already agreed, which is a decent sign the reading is the natural one. It is written in the doc comment on `Plan.seats` and asserted in `backend/tests/integration/seats.spec.ts`.
+
+### What shipped
+
+- `Subscription.quantity Int?` (migration `20260831154031_subscription_quantity` — one additive nullable column, no destructive step), read by `subscriptionStateFrom` off `items.data[0].quantity` and written only by `reconcileSubscription`. A missing **or zero** quantity becomes `null`, not `1`, so "Stripe told us nothing" stays distinguishable from "Stripe told us one".
+- Team's catalogue seats went from `null` to a floor of **3**. The number is not a decided one — it is the seats included in the base price and that is a business decision, now recorded in `docs/BACKLOG.md` alongside the amounts. The *shape* is what matters: a floor rather than `null`, so a subscription whose quantity cannot be read degrades to the minimum anyone can have bought instead of to unlimited.
+- `seatLimitFor` in `entitlements.ts` resolves `max(floor, quantity)` for `PER_SEAT_PLANS` and returns the catalogue value untouched for everything else. It is the only place in that module that reads a billing table, and `assertCanPublishForm`, `assertResponseWithinLimit` and `isOverResponseLimit` were not modified at all.
+- `assertCanInvite` wired into `POST /api/organizations/invitations`, **last** — after `requireRole` and after "already a member", so a permission failure and a re-invitation never come back as `402`.
+- `getEntitlements` reports `seatLimit` and the route sends it as `plan.seats`, so the Members meter shows a Team customer the seats they bought rather than the floor.
+- `STRIPE_PRICE_TEAM`, `priceIdForPlan`, `planKeyForPrice` mapping both prices, and `POST /api/billing/checkout` taking `{plan?}` (`pro` by default, so the shipped client is unchanged).
+- Frontend: two first-purchase buttons on Settings, seats copy that says where seats are bought and that lowering the number removes nobody, and `LimitReachedDialog` gained a `limit="seats"` mode that `MembersView.vue` opens on a `402` — the same "a limit is not a failure" treatment a publish limit gets, with *Add seats* opening the portal instead of an *Upgrade* that would sell a second subscription.
+
+### Decisions the spec left open
+
+**The first-purchase quantity (goal 11) comes from the catalogue floor, with `adjustable_quantity` enabled** — not from the request. A quantity in the request body would be this application choosing a number, and the buyer would be picking seats on a screen that shows no per-seat price. `adjustable_quantity` puts the choice on Stripe's own page, where the amount is, and keeps the request body free of anything that costs money.
+
+**One thing the spec did not anticipate.** `POST /api/billing/checkout` hands back an already-open Checkout Session (features/0014). With two buyable plans that is a defect: somebody who pressed *Upgrade to Team* would be handed the Pro session and charged for Pro on a page that looks entirely correct. The session's price is now compared against the plan asked for, and a session for another plan is **expired** rather than left open — which preserves the property features/0014 actually wanted, that there is never more than one session that can be paid. Covered by a new test in `billing-checkout.spec.ts`.
+
+### The test that had to fail first
+
+`seats.spec.ts` asserts that a downgrade removes nobody, and no version of this implementation ever removed a membership — so the test could not fail on its own history. It was verified by temporary sabotage instead: adding a `membership.deleteMany` to `reconcileSubscription` (the exact "obvious cleanup" trap 3 forbids) failed **3 of the 14** tests, including the one that compares the membership rows themselves — same ids, same `createdAt` — rather than a count. The sabotage was reverted and the suite is green.
+
+A second discriminating check found a real gap: the `quantity` parameter in `tests/fixtures/stripe-events.ts` had a default of `1`, so the "Stripe reported no quantity" case was silently exercising `1` and passing for the wrong reason. Removing that default made the mocked test fail as it should, which is what surfaced it.
+
+### Test output
+
+```
+npm run test:backend        14 passed (14 files) / 187 passed (187)
+npm run test:integration    13 passed (13 files) / 139 passed (139)
+npm run test:frontend       38 passed (38 files) / 321 passed (321)
+npm run test:e2e            50 passed (23.3s)
+npm run build --workspace=frontend      built in 11.85s
+cd backend && npx tsc --noEmit          clean
+cd backend && npm run typecheck:tests   clean
+```
+
+Integration went from 123 to 139 tests and backend from 178 to 187. Three existing suites needed changing, and each change is the limit being real rather than a test being bent:
+
+- `invitations.spec.ts` and `organization-roles.spec.ts` invited from bare organizations, which now answer `402`. Their fixtures buy seats through a new `grantSeats` helper that goes through `reconcileSubscription` — **not** by writing `planKey` directly, which would make the fixture a second writer of that column. Seats are a precondition there, not the subject; `organization-roles.spec.ts` also gained a test that a seatless organization still answers `403` to a member, so the check order is asserted rather than assumed.
+- `entitlements.spec.ts` had a test named *is still not enforced by the invitation endpoint*. It now asserts the opposite.
+- `playwright.config.ts` pins `DEV_PLAN_KEY=team` instead of empty. Billing is deliberately off in that suite, so seats cannot be bought there and `e2e/team.spec.ts` would otherwise be unreachable. `team` and not `dev`: the suite runs with limits **on**, as a paying customer with three seats.
+
+### Not done, and why
+
+**The manual Stripe verification has not been run** — the four numbered steps at the end of the execution prompt, in test mode with `stripe listen`. It needs the portal reconfigured first (*Update quantities*, *Switch plan* with both products, downgrades at the period end), a Team price created in the Stripe account, and `STRIPE_PRICE_TEAM` set locally. Everything above is automated-test evidence, and features/0013's own Outcome records that Stripe's real behaviour contradicted its spec in four places — so this is the step that would find the fifth. The portal configuration requirement is documented in [08-operations](../docs/sot/08-operations.md); the live-mode row in `docs/BACKLOG.md` stays open, as does tax.
+
+**`saas-readiness-reviewer` has not been run** either; it is called for before the PR.

@@ -3,6 +3,7 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { app } from '../../src/app.js'
 import { prisma } from '../../src/services/db.js'
+import { grantSeats } from './helpers.js'
 
 /**
  * The invitation lifecycle ([`features/0010`]).
@@ -17,6 +18,15 @@ let seq = 0
 const email = (p: string) => `${p}-${Date.now()}-${seq++}-${Math.random().toString(36).slice(2, 8)}@example.com`
 const PASSWORD = 'TestPassword123!'
 
+/**
+ * An owner whose organization has room for the people these tests invite.
+ *
+ * The seats are a **precondition, not the subject**: features/0015 wired
+ * `assertCanInvite`, and Free covers one person — the owner — so an organization
+ * created bare now answers `402` to the first invitation and none of the
+ * lifecycle below would ever be reached. The seat limit itself is asserted in
+ * `seats.spec.ts`; here it is simply paid for.
+ */
 async function ownerWithOrganization() {
   const organization = await prisma.organization.create({
     data: { name: 'Acme', slug: `org-${Math.random().toString(36).slice(2, 12)}` }
@@ -27,6 +37,7 @@ async function ownerWithOrganization() {
   await prisma.membership.create({
     data: { organizationId: organization.id, userId: user.id, role: 'owner' }
   })
+  await grantSeats(organization.id, 10)
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '1h' })
   return { organization, user, authHeader: `Bearer ${token}` }
 }
