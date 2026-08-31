@@ -81,10 +81,14 @@ Pick by that rule, not by habit. A future `BillingService` or `EntitlementsServi
 
 ## 5. Side effects on the physical PDF are explicit and best-effort
 
-Two operations mutate the PDF file on disk rather than only the database, and both are wrapped so they cannot fail the request:
+Two operations mutate the stored PDF rather than only the database, and both are wrapped so they cannot fail the request:
 
 - `GET /api/forms/:id` re-syncs fields from the PDF when the form has a `pdfUrl` and has never had a field, archived ones included (`syncFieldsFromPDF`).
 - `POST /api/forms/:formId/fields/bulk` rewrites the PDF from the resulting live field set, embedding them as an AcroForm (`embedFieldsInPDF`). It runs **after** the transaction commits, so a failed embed cannot roll back a saved field set.
+
+The embed is a read-modify-write of the whole document, which made it a lost update as soon as two saves overlapped: both read, both embedded their own view, and the later write silently discarded the earlier one's fields — a save the author was told had succeeded, on a PDF that did not contain their work. [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md) fixed it with two halves that do not work alone: it is **serialised per form** (`services/organization-lock.ts`, keyed by form), and it **re-reads the fields inside that serialisation**. Taking the caller's already-read field list would only move the race, since whichever request was queued second would still embed what it read before it started waiting. The local driver's `put` is also atomic — temporary file plus rename — so no reader can see a half-written document.
+
+That lock is in-process, and deliberately not more. Two replicas embedding one form at the same instant can still lose an update; that residual is in [`docs/BACKLOG.md`](../BACKLOG.md), and the honest fix is not a bigger lock but the job queue in step 9's other half, where one in-flight job per form is a serialiser that actually spans processes.
 
 Both are `try/catch` around a `console.error` that then continues. The UX reasoning is sound: a user should not get a 500 because a post-processing step failed.
 
@@ -130,7 +134,14 @@ Three things that module encodes, each of which was a live defect:
 
 RE2 is a native module, so its binary is tied to a Node ABI — see [08-operations](./08-operations.md#configuration). It is loaded defensively: if it will not load, the service still starts and patterns are simply not enforced. Never fall back to `RegExp`, which would reinstate the hang.
 
-`services/pdf-url.ts` follows the same shape for a different kind of untrusted-adjacent value. A `Form.pdfUrl` is a client-supplied string that ends up as a filesystem path and as a URL handed to a browser, so exactly one module produces, parses and verifies it — `pdfFilenameFrom`, `canonicalPdfUrl`, `signPdfUrl`, `verifyPdfToken`. **Nothing else may split a `pdfUrl` on `/` or build an `/uploads` path by hand.** Three call sites used to do that independently; they now all go through the helper, which is also the single seam that a move to presigned object-storage URLs replaces.
+`services/pdf-url.ts` follows the same shape for a different kind of untrusted-adjacent value. A `Form.pdfUrl` is a client-supplied string that ends up as a filesystem path and as a URL handed to a browser, so exactly one module produces, parses and verifies it — `pdfFilenameFrom`, `canonicalPdfUrl`, `signPdfUrl`, `verifyPdfToken`. **Nothing else may split a `pdfUrl` on `/` or build an `/uploads` path by hand.**
+
+`services/pdf-storage.ts` is the third, and it owns the **bytes** ([`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)). The division with `pdf-url.ts` is worth keeping straight: that module owns what a URL may contain and how a filename is safely got out of one; this module owns where the bytes live and how they move. **Nothing outside it may join an `uploads` path or open a PDF by name** — six call sites used to do exactly that (four routes, `app.ts`, and a maintenance script no test covers), and leaving any one of them behind in a move to object storage gives a deployment where uploads work and one read silently 404s depending on which replica answered.
+
+Two rules it encodes that are not obvious:
+
+- **The key is re-validated at the boundary**, even though every caller is supposed to have run the name through `pdfFilenameFrom` first. It is the last thing between a request-supplied string and a path, and it throws rather than returning a falsy value — an `exists` that answered `false` for an unsafe key would send the caller down the silent "no PDF, skip the work" path with a name that should have stopped the request. That was a real bug in the first draft, caught by its own test.
+- **An unknown driver refuses to boot**, which is the opposite of how `resolvePlan` and `envInt` treat bad configuration. The difference is what the mistake costs. A bad plan key degrades to free and somebody is briefly on the wrong tier; a storage driver that quietly fell back to local disk would accept uploads and lose them at the next deploy. Degrading safely requires a safe direction to degrade in, and here there is none.
 
 ## 9. Tenancy is a `where` fragment, not a comparison
 

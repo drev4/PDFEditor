@@ -47,6 +47,13 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
 | `UPLOAD_URL_TTL_SECONDS` | no | `900` (15 min), min `60` | How long a signed PDF URL stays valid. The link is a bearer capability, so longer is not free — see [07](./07-security-and-privacy.md) |
+| `PDF_STORAGE_DRIVER` | no | `local` | Where PDF bytes live: `local` (this process's disk) or `s3` (any S3-compatible store). **An unrecognised value refuses to boot** — see below |
+| `PDF_STORAGE_BUCKET` | only when `s3` | — | Bucket name. The server will not start on the `s3` driver without it |
+| `PDF_STORAGE_REGION` | no | `auto` | `auto` suits Cloudflare R2; AWS wants a real region |
+| `PDF_STORAGE_ENDPOINT` | no | AWS default | R2's `https://<account>.r2.cloudflarestorage.com`, or `http://localhost:9000` for the MinIO in `docker-compose.yml` |
+| `PDF_STORAGE_ACCESS_KEY_ID` / `PDF_STORAGE_SECRET_ACCESS_KEY` | no | unset | Leave both empty to use the SDK's own credential chain (instance roles, IRSA, `~/.aws/credentials`) |
+| `PDF_STORAGE_FORCE_PATH_STYLE` | no | `false` | `true` for MinIO, which has no wildcard DNS so the bucket goes in the path |
+| `PDF_STORAGE_PREFIX` | no | `pdfs/` | Key prefix, so a shared bucket stays legible and a lifecycle rule can target these objects |
 | `TRUST_PROXY_HOPS` | no | `0` | **Number of reverse proxies in front of this process.** See below — it decides whether rate limiting works |
 | `RATE_LIMIT_LOGIN_MAX` | no | `10` | Failed logins per window per IP. Successful logins are refunded |
 | `RATE_LIMIT_LOGIN_WINDOW_MS` | no | `900000` (15 min) | |
@@ -63,6 +70,24 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `STRIPE_PRICE_PRO` | no | unset | The Stripe **price id** for Pro (`price_…`), never an amount. Unset ⇒ checkout answers `503`. Wrong ⇒ see below |
 | `STRIPE_PRICE_TEAM` | no | unset | The Stripe **price id** for Team — a **per-seat** recurring price, so that a quantity means something. Independent of the one above: unset means Team is not for sale on this deployment and Free and Pro are unaffected. Wrong ⇒ the same deliberate fall to free described below |
 | `ENABLE_HSTS` | no | `false` | Send `Strict-Transport-Security`. **Must stay off wherever the app is reachable over plain HTTP, including local development** — a browser that sees HSTS from `localhost` forces HTTPS on `localhost` for every port afterwards, and the breakage that follows never mentions this setting. Turn on where TLS terminates |
+
+### PDF storage, and the two ways to get the switch wrong
+
+`services/pdf-storage.ts` is the only module that reads or writes PDF bytes, and `PDF_STORAGE_DRIVER` chooses where they go. Unset means `local`, which is what this repository has always done and what every test suite runs on — `npm test` needs no bucket and no network.
+
+**Switching the driver does not move the files.** This is the mistake that loses customer documents, and it is silent: flip `PDF_STORAGE_DRIVER` to `s3` and the application starts looking in a bucket that does not contain anything uploaded before the switch. The forms keep their rows and their fields; the PDF behind them simply stops resolving. The order is:
+
+1. Create the bucket, **private**. There is no step where a PDF should be publicly readable — the only route to one is this API's signed, expiring URL ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)), and a public bucket hands every customer document to anyone who guesses a key.
+2. Set the `PDF_STORAGE_*` variables for the target, but **do not** switch `PDF_STORAGE_DRIVER` yet.
+3. `npm run storage:migrate -- --dry-run`, then `npm run storage:migrate`. It copies every PDF the database references, verifies each by reading it back, skips what is already there, and never deletes the local original. It exits non-zero if anything failed or any referenced file was already missing from disk — do not proceed on a non-clean run.
+4. Switch `PDF_STORAGE_DRIVER=s3` and restart.
+5. Keep the local files until the bucket has been read from in anger. They are the only other copy.
+
+**An unrecognised driver name refuses to start**, and that is deliberate and different from how `DEV_PLAN_KEY`, `envInt` and `resolvePlan` treat bad input. Those degrade to a safe default because there is one. Here there is not: falling back to local disk would accept uploads and lose them at the next deploy, so a typo in this variable stops the process instead of quietly costing documents.
+
+**Rolling back** is setting `PDF_STORAGE_DRIVER` back to `local` — but be clear about what that does *not* recover: anything uploaded while the `s3` driver was live is in the bucket and not on the disk, so those forms lose their PDFs on the way back. A rollback is only clean if nothing was uploaded in between.
+
+For local work on the `s3` driver, `docker compose up -d minio createbuckets` brings up MinIO and creates a private `vuepdf-pdfs` bucket (console on `http://localhost:9001`, `minioadmin` / `minioadmin`). Nothing requires it — with the container stopped, the default driver is unaffected.
 
 ### `DEV_PLAN_KEY`, and the allowlist that makes it safe
 

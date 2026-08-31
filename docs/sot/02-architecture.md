@@ -31,7 +31,8 @@ Orchestration is plain **npm workspaces**. The root `package.json` delegates eve
 | ORM | Prisma + PostgreSQL 16 | `@prisma/client ^6.2.1` |
 | Auth | `jsonwebtoken` + `bcrypt` | `^9.0.2`, `^5.1.1` |
 | Validation | Zod | `^3.24.1` |
-| Uploads | Multer, local disk | `^2.0.2` |
+| Uploads | Multer (in memory) → `services/pdf-storage.ts` | `^2.0.2` |
+| Object storage | `@aws-sdk/client-s3`, only on the `s3` driver | `^3.1122.0` |
 | Public identifiers | nanoid | `^5.0.9` |
 | Frontend tests | Vitest + Testing Library + `@pinia/testing` | `vitest ^4.0.16` |
 | Backend tests | Vitest + supertest + `vitest-mock-extended` | `vitest ^4.0.18` |
@@ -50,13 +51,13 @@ Browser ── Vite dev server / static build (Vue SPA)
                   ├── /uploads/pdfs/:token/:filename  ← signed, expiring (0006)
                   └── Prisma ──> PostgreSQL (docker-compose in dev)
 
-Filesystem: backend/uploads/pdfs/  ← PDFs live on the local disk of this process
+Storage:    services/pdf-storage.ts  ← `local` (backend/uploads/pdfs) or `s3`
 ```
 
 Three properties of this topology are load-bearing and each is a constraint on scaling:
 
-1. **PDFs live on the local filesystem of the API process.** `middleware/upload.ts` writes to `process.cwd()/uploads/pdfs`, and `app.ts` serves that directory statically. The API therefore cannot be run as more than one replica, and cannot be redeployed on ephemeral disk without losing every uploaded PDF. This is the single biggest blocker to a real deployment. See [08-operations.md](./08-operations.md).
-2. **PDF processing is synchronous and inline in the request.** `extractFieldsFromPDF` on upload and `embedFieldsInPDF` on bulk save both run inside the HTTP handler. A large or pathological PDF blocks the Node event loop for every other request, not just its own.
+1. **PDF bytes go through one module, and where they land is configuration** ([`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)). `services/pdf-storage.ts` is the only thing in the backend that reads or writes them; `PDF_STORAGE_DRIVER` chooses `local` (this process's own disk, the default) or `s3` (any S3-compatible store — AWS, R2, MinIO). On `local` the old constraint still applies in full: one replica, and a redeploy on ephemeral disk loses every PDF. On `s3` it does not, which is what makes more than one replica possible. Two things to know before switching: **the files already on disk are not moved by the switch** — `npm run storage:migrate` copies them, and it is run *before* — and an unrecognised driver name **refuses to boot** rather than falling back, because falling back to local disk would accept uploads and lose them. See [08-operations.md](./08-operations.md).
+2. **PDF processing is synchronous and inline in the request.** `extractFieldsFromPDF` on upload and `embedFieldsInPDF` on bulk save both run inside the HTTP handler. A large or pathological PDF blocks the Node event loop for every other request, not just its own. **Still true, and the other half of build-order step 9** — [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md) moved the bytes and deliberately did not move the work. The embed is now serialised per form and re-reads the fields inside that serialisation, which makes it converge instead of losing an update, but it is still in the request and still in this process.
 3. **Reading a PDF is a capability carried in the URL, not a session.** The `express.static` mount is gone ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)): the only way to the bytes is `GET /uploads/pdfs/:token/:filename`, whose token `services/pdf-url.ts` mints per read and which expires after `UPLOAD_URL_TTL_SECONDS`. It is deliberately unauthenticated, because an anonymous respondent has to load the PDF of a published form. What is still open is *per-file* revocation — withdrawing one document today means rotating `JWT_SECRET`, which invalidates every outstanding link ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
 ## Data flows
@@ -135,7 +136,7 @@ Whatever is chosen, two things follow from the rest of this document: the landin
 
 In the order the load will actually hit it:
 
-1. **Local disk storage** — breaks on the first horizontal scale-out or the first redeploy on ephemeral storage. Move to S3/R2 behind signed URLs.
+1. **Local disk storage** — solved as of [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md): S3/R2 behind the existing signed URLs, chosen by `PDF_STORAGE_DRIVER`. It remains the default and therefore remains the constraint for any deployment that has not switched.
 2. **Synchronous PDF work** — breaks on the first genuinely large PDF, as a request timeout. Move to a job queue (BullMQ + Redis) with the editor polling for completion.
 3. **No rate limiting** — breaks on the first bot that finds `POST /api/responses` or `POST /api/auth/login`.
 4. **Single-tenant data model** — breaks the moment a B2B customer wants two people to share a form. This is the schema change with the longest lead time, which is why [10-saas-roadmap.md](./10-saas-roadmap.md) puts it ahead of billing.

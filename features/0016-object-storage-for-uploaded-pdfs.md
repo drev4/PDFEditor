@@ -1,6 +1,6 @@
 # 0016 — Object storage for uploaded PDFs, behind the signed URL that already exists
 
-**Status:** in progress
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Object storage (S3/R2) for PDFs*)
 **Branch:** `feature/0016-object-storage-for-uploaded-pdfs`
 **Related:** [02-architecture](../docs/sot/02-architecture.md) · [04-backend-patterns §5, §8](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [08-operations](../docs/sot/08-operations.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [10-saas-roadmap](../docs/sot/10-saas-roadmap.md) · [`features/0006`](0006-signed-expiring-urls-for-uploaded-pdfs.md)
@@ -171,4 +171,83 @@ So the service takes the shape the rest of this repository already uses for opti
 
 ## Outcome
 
-*(filled in when the work is finished)*
+Shipped. PDF bytes go through one module, `PDF_STORAGE_DRIVER` chooses `local` (default) or `s3`, and the signed URL, its path shape and every one of its response headers are unchanged — verified against a live S3 endpoint rather than assumed.
+
+### The count in trap 1 was wrong, and the sixth was the interesting one
+
+The spec said five call sites. It is **six**: `grep -rn "uploads/pdfs\|'uploads'" backend/src` matched 9 lines across 7 files, and the one the first draft missed is `src/scripts/migrate-existing-forms.ts` — the `migrate:run` maintenance script. No test and no request path covers it, so leaving it behind would not have failed anything; it would simply have started throwing `PDF file not found` the next time somebody ran it, long after this shipped. The spec was corrected before implementation started.
+
+That script also writes a backup copy, and its name was `<key>.backup.pdf` — which the storage key guard rejects, because `SAFE_KEY` is `[A-Za-z0-9_-]+\.pdf` and `x.backup` is not. Changed to `-backup.pdf` so there is one key alphabet across `pdf-url.ts`, `pdf-storage.ts` and the script.
+
+### Trap 2: the recommended fix does not work, and the reason is worth keeping
+
+The spec recommended **writing a new object per embed** over serialising, and reading the code changed that. Two problems:
+
+1. **It does not make the PDF converge on the database.** A new object per embed stops a write destroying bytes another request is reading, but the *pointer* still races: two saves each write their own object and each update `Form.pdfUrl`, and the last one to update wins with whatever field set it embedded. The lost update moves from the bytes to the column; it does not go away.
+2. It rotates the stored filename on every save, which perturbs `Form.pdfUrl` for something that is not a new document.
+
+What shipped instead is option 2 **plus the part that actually fixes it**, which neither option in the spec named: the embed is serialised per form *and* **re-reads the fields inside that serialisation**. Taking the caller's already-read `savedFields` — which is what a plain lock would do — only moves the race, because whichever request is queued second still embeds what it read before it began waiting. Reading inside the lock is what makes the last writer the best-informed one.
+
+The local driver's `put` also became atomic (temporary file plus rename), so no reader can observe a half-written document. `writeFile` truncates then fills; the object store is already atomic per object, and the local driver should not have been the weaker one.
+
+The **cross-replica** case is not closed and is filed in `docs/BACKLOG.md`. The honest fix is not a bigger lock: the embed is moving to the job queue in step 9's other half, where one in-flight job per form serialises across processes.
+
+### The failing test, and the two times it lied
+
+`tests/integration/pdf-embed-concurrency.spec.ts` was written first and **passed against the unfixed code** on its first run. The delay was on the wrong side of the read: sleeping *before* `get` makes the stalled request read last, so it gets the fresher document and no update is lost. Moving the delay to after the read produced the intended failure — `expected 1 to be 2`, the database holding two fields and the stored PDF one. Then it passed against the fix. The reason is recorded in the file, because the wrong version looks equally plausible.
+
+`tests/pdf-storage.spec.ts` caught a real bug in this feature's own code: `exists` resolved the key inside its `try`, so an unsafe key was swallowed into `false` rather than throwing — which would send a caller down the silent "no PDF, skip the work" path with a name that should have stopped the request. The S3 driver already rethrew non-404s for the same reason; the local one now matches.
+
+### Trap 4 decided: `memoryStorage`, with the number written down
+
+`multer.memoryStorage`, so worst case is 10 MB (the existing `fileSize` cap) × concurrent uploads. `POST /api/upload` is behind `authenticate`, so that concurrency is not an anonymous surface, and a deployment wanting a hard ceiling should bound it at the proxy. The failure mode genuinely changed and is recorded in the file: a full disk used to fail one request, and memory exhaustion takes the process down for everybody.
+
+It also improved the upload path by accident. The old code wrote the file, read it back, validated, and deleted it again when it was not a PDF; now nothing is stored until the bytes are known to be a PDF, so a corrupt or hostile upload leaves nothing to clean up.
+
+### What Windows forced
+
+`rename` is atomic on POSIX and replaces an open file happily. **Windows returns `EPERM` while the destination is open**, so the atomicity test failed on the first run — a real portability defect, not a test artefact: on a developer machine an embed landing while somebody downloads the same PDF would fail outright. `put` now retries the rename on `EPERM`/`EBUSY`/`EACCES` with a short bounded backoff. If the retries are exhausted the error propagates and `embedFieldsInPDF`, which is best-effort by design, logs it and leaves the PDF as it was — the fields are in the database either way.
+
+### One behaviour lost, deliberately
+
+`res.sendFile` advertised `Accept-Ranges` and answered range requests, so pdf.js could fetch a large document in parts. A driver has no local path to hand Express, so the route streams and always sends the whole file. Acceptable at a 10 MB cap; implementing ranges over a driver is a feature, not a detail of this move. Recorded at the call site.
+
+### Verified against a real endpoint
+
+MinIO in `docker-compose.yml` (private `vuepdf-pdfs` bucket, created by a `createbuckets` service so the first run needs no clicking). Nothing requires it — with the container stopped the default driver is unaffected.
+
+Driver level: put, get, getStream, exists, remove, remove-again-is-idempotent, and 404 handling on both `exists` and `getStream`. Then the whole HTTP flow with the app on the `s3` driver — 14 checks, all passing:
+
+- upload returns 201, extracts the AcroForm, and returns the canonical unsigned URL shape
+- form create, then the first `GET /api/forms/:id` triggers `syncFieldsFromPDF`, which reads the object
+- bulk save embeds, and the stored AcroForm matches the database (`pdf=2 db=2`)
+- the signed download returns 200 and the whole document, byte length matching
+- **every security header survived**: `sandbox` CSP, `nosniff`, `DENY`, `cross-origin`
+- a forged signature still gets 403
+- the public form read returns a signed URL to an anonymous caller
+
+Two of those checks failed on the first run and **both were the verification script being wrong, not the product** — confirmed by running the identical flow on the `local` driver and getting identical failures. `syncFieldsFromPDF` runs on the first `GET` of a form, not on create; the script asserted it after create.
+
+`storage:migrate` was exercised for real: a dry run correctly refused to green-light a switch because one referenced file was missing from disk, a real run copied and verified by read-back, and a second run copied nothing.
+
+### Test output
+
+```
+npm run test:backend        15 passed (15 files) / 203 passed (203)
+npm run test:integration    14 passed (14 files) / 140 passed (140)
+npm run test:frontend       38 passed (38 files) / 321 passed (321)
+npm run test:e2e            50 passed
+npm run build --workspace=frontend      clean
+cd backend && npx tsc --noEmit          clean
+cd backend && npm run typecheck:tests   clean
+```
+
+Step 1's requirement held: **the whole suite passed with no test modified** after the six call sites moved, which is the proof the refactor changed nothing observable. The new tests came afterwards. Backend went 187 → 203 and integration 139 → 140.
+
+`npm audit` reports 15 high findings on the backend workspace both with and without `@aws-sdk/client-s3` — they are pre-existing and this dependency added none.
+
+### Not done, and why
+
+- **The job queue.** Out of scope by design; it is the other half of step 9 and the backlog row now says so.
+- **Deleting PDFs on form deletion.** Trap 5, filed rather than built — hard rule 5, and a storage migration is not the change in which to start destroying customer documents. The row now carries the cost and the GDPR angle, and notes the `-backup.pdf` copies that need an answer too.
+- **A manual browser pass on the `s3` driver.** The 14-check HTTP flow covers all four read paths through the real routes, but nobody has clicked through the editor with `PDF_STORAGE_DRIVER=s3` set.

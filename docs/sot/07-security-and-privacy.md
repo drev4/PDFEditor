@@ -148,6 +148,18 @@ The `402` is only ever seen by an authenticated member of the organization who w
 
 Note also what the limit does **not** do: refusing a seat removes nobody. A plan that shrinks below the number of people already in the organization keeps every membership and every pending invitation, so a billing event can never revoke somebody's access to data they had ([04-backend-patterns §10](./04-backend-patterns.md)).
 
+## Uploaded PDFs leave this origin's disk, and the headers do not go with them
+
+[`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md) moved PDF bytes behind `services/pdf-storage.ts`, so on the `s3` driver a customer's documents sit in a bucket. Three properties are load-bearing and none of them changed:
+
+- **The route did not change.** The only way to a PDF is still `GET /uploads/pdfs/:token/:filename`, signed by `services/pdf-url.ts` and expiring after `UPLOAD_URL_TTL_SECONDS`. The object store is read *behind* that check, and the bytes are streamed through this API.
+- **Provider presigned URLs were deliberately not used.** Redirecting the browser to a presigned S3 URL is the obvious optimisation and it would have undone this: the response headers below are set by *this* route, and a bucket only sends them if every object was uploaded with the right metadata. It would also move expiry from `verifyPdfToken` to the provider, and put the bucket's structure in a URL handed to every anonymous respondent. The cost of not doing it is that read bytes flow through the API process, which is the accepted trade.
+- **The headers still come from this API**, because it still serves the bytes: `Content-Security-Policy: default-src 'none'; sandbox`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cache-Control: private, no-store`, and the deliberate `Cross-Origin-Resource-Policy: cross-origin`. They exist because **the bytes are attacker-supplied** — anyone with an account can upload a PDF — and they are what stop a hostile document acting as one. Verified against a live S3 endpoint, not assumed.
+
+**The bucket must be private.** Nothing in this design ever wants a publicly readable object: a public bucket serves customer documents to anyone who guesses a key, with no token, no expiry and none of the headers above — which is precisely the `express.static` exposure [`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md) removed, reintroduced from the storage side. See [08-operations](./08-operations.md).
+
+Unchanged and still open: **revocation is all-or-nothing**, and **deleting a form deletes no PDF**. The second one matters more now than it did — on object storage a document the customer deleted is data retained, and billed for, indefinitely. Both are in [`docs/BACKLOG.md`](../BACKLOG.md).
+
 ## Where the headers actually are
 
 The single most important thing to know before changing anything here: **a CSP constrains a document, and `backend/src/app.ts` never serves one.** It serves JSON and one PDF; `frontend/index.html` is served by Vite in development and by whatever hosts the built assets in production. So the work splits in two, and mounting `helmet()` alone would have closed the finding on paper while leaving the XSS path untouched.
