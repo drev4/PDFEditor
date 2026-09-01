@@ -226,7 +226,7 @@ That last check found and fixed one real defect: the shutdown path ended in `pro
 
 ### What the readiness review found, and the fix
 
-`saas-readiness-reviewer` was run on the finished branch and returned one **Critical** finding, since fixed in this branch (`3f0…`, the fourth commit):
+`saas-readiness-reviewer` was run on the finished branch and returned one **Critical** finding, since fixed in this branch (`27c712c`):
 
 **`requestEmbed` could hang the bulk save for ever instead of falling back to inline.** The module claimed a configured-but-unreachable Redis falls back to running the embed inline, and the `try`/`catch` implementing that only fires on a rejection. `connect()` built every client with `maxRetriesPerRequest: null` — required by BullMQ's *worker*, whose blocking commands sit for minutes — and ioredis' default `retryStrategy` never gives up, so on the request path `queue.add()` waited for a connection that might never arrive. `POST /api/forms/:formId/fields/bulk` then never answered. Nothing was lost, since the fields were already committed, but the editor waits on a response that does not come, which to the author is a broken save.
 
