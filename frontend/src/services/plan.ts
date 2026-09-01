@@ -42,6 +42,19 @@ export interface Plan {
    * A member and a pending invitation each take a seat.
    */
   seats: number | null
+  /**
+   * Whether this organization may mint an API key (`features/0021`).
+   *
+   * **It decides what is drawn and never what is allowed.** `assertHasApiAccess`
+   * inside `POST /api/organizations/api-keys` is the enforcer, and every screen
+   * that acts on this flag must still handle the `402` — the plan can change
+   * between a page loading and a button being pressed.
+   *
+   * It is sent because the alternative is a create button whose only possible
+   * answer is `402`, which reads as a broken product rather than an enforced
+   * rule ([05-frontend-patterns §8](../../../docs/sot/05-frontend-patterns.md)).
+   */
+  hasApiAccess: boolean
 }
 
 export interface PlanUsage {

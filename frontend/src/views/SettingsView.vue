@@ -8,8 +8,31 @@
         </p>
       </header>
 
+      <!--
+        Two tabs, as the Settings artboard draws them. Built for the two that
+        exist and not as a mechanism for the ones that might: the webhooks tab is
+        its own piece of work, and a general tab framework built ahead of it
+        would be a guess at what it needs.
+      -->
+      <nav class="px-gutter border-b border-line flex gap-1" data-testid="settings-tabs">
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          type="button"
+          class="h-control-sm px-3 -mb-px border-b-2 text-row font-medium transition-colors"
+          :class="activeTab === tab.id
+            ? 'border-accent text-ink'
+            : 'border-transparent text-muted hover:text-ink'"
+          :data-testid="`settings-tab-${tab.id}`"
+          @click="selectTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
+
+      <template v-if="activeTab === 'general'">
       <!-- The one thing on this screen that is real. -->
-      <section class="px-gutter">
+      <section class="px-gutter mt-5">
         <div class="p-4 rounded-card border border-line max-w-[560px]">
           <h2 class="col-label mb-3">Account</h2>
           <dl class="flex flex-col gap-2.5">
@@ -183,24 +206,28 @@
         What is left is still genuinely missing. Billing is no longer on this
         list (features/0013), and neither is the Team plan (features/0015).
       -->
-      <NotBuiltYet title="Nothing else here yet" tracked="docs/BACKLOG.md">
+      <NotBuiltYet title="Nothing else on this tab yet" tracked="docs/BACKLOG.md">
         Renaming the organization needs an endpoint that returns its name;
         signing out other devices needs the session listing that
         <code class="num">refresh_tokens</code> already has the data for. Until
         then, roles and members are managed in
         <RouterLink to="/dashboard/team">Members</RouterLink>.
       </NotBuiltYet>
+      </template>
+
+      <ApiKeysPanel v-else class="mt-5" />
     </div>
   </AppShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import AppShell from '@/layouts/AppShell.vue'
 import NotBuiltYet from '@/components/ui/NotBuiltYet.vue'
 import UsageMeter from '@/components/plan/UsageMeter.vue'
+import ApiKeysPanel from '@/components/settings/ApiKeysPanel.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlanStore } from '@/stores/plan.store'
 import { useOrganizationStore } from '@/stores/organization.store'
@@ -210,6 +237,33 @@ const authStore = useAuthStore()
 // already there rather than fetching it a second time.
 const planStore = usePlanStore()
 const route = useRoute()
+const router = useRouter()
+
+/**
+ * The tabs on this screen, and which one is showing.
+ *
+ * The tab lives in the query string rather than in a `ref` so that a link can
+ * point at it and a reload keeps it — support saying "open Settings, API keys
+ * tab" is a URL, not a set of instructions. It is a separate parameter from
+ * `?checkout=`, which the Stripe redirect owns.
+ */
+const tabs = [
+  { id: 'general', label: 'General' },
+  { id: 'api-keys', label: 'API keys' }
+] as const
+
+type TabId = (typeof tabs)[number]['id']
+
+const activeTab = computed<TabId>(() =>
+  route.query.tab === 'api-keys' ? 'api-keys' : 'general'
+)
+
+function selectTab(tab: TabId) {
+  if (tab === activeTab.value) return
+  // `replace`, not `push`: flipping a tab is not a place in the history that
+  // Back should have to walk through.
+  router.replace({ query: { ...route.query, tab: tab === 'general' ? undefined : tab } })
+}
 
 /**
  * The caller's own role, read the way `MembersView.vue` already reads it -

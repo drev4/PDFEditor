@@ -13,7 +13,8 @@ const freePlan: Entitlements = {
     name: 'Free',
     maxPublishedForms: 1,
     maxResponsesPerMonth: 50,
-    seats: 1
+    seats: 1,
+    hasApiAccess: false
   },
   usage: { publishedForms: 0, responsesThisPeriod: 10, seats: 1 },
   // features/0013 added this. `null` is what the API reports for an

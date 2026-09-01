@@ -145,7 +145,7 @@ Verified against the code on **2026-09-01**; every claim below names the file it
 
 | # | Next | Kind | Depends on |
 |---|---|---|---|
-| A1 | **API keys and webhooks screens in the SPA** | Product | Nothing |
+| A1 | ~~**API keys screen in the SPA**~~ — done ([`features/0021`](../../features/0021-api-keys-screen.md)) · **the webhooks screen** is what is left of it | Product | Nothing |
 | A2 | **An endpoint that returns the organization**, then the switcher and renaming | Product | Nothing |
 | A3 | **Organization-wide responses listing**, then `/dashboard/responses` | Product | A paging decision |
 | B1 | **Structured logging (`pino`)** with request ids and redaction | Operability | Nothing — and it unblocks three other rows |
@@ -159,7 +159,9 @@ Verified against the code on **2026-09-01**; every claim below names the file it
 
 ### A — close the distance to the customer
 
-**A1. The API keys and webhooks screens.** The endpoints exist and are complete: `GET`/`POST`/`DELETE /api/organizations/api-keys` (`backend/src/routes/organizations.ts:421`, `:448`, `:478`) and the same three for `/webhooks` (`:567`, `:586`, `:628`), plus `GET /api/v1/webhooks/deliveries` (`backend/src/routes/v1/webhooks.ts:27`) for the delivery log. The SPA reaches none of them — `frontend/src/services/` has no client for either, `frontend/src/views/` has no screen, and `useAppNav.ts` lists four destinations. So a Team customer who is *paying for API access* cannot mint a key from the product. This is first because it is the cheapest conversion of finished backend work into something sellable.
+**A1. The API keys and webhooks screens.** ~~Both pending.~~ **The keys half is done** ([`features/0021`](../../features/0021-api-keys-screen.md)): Settings has an `API keys` tab, `GET /api/organizations/entitlements` now carries `hasApiAccess` so the tab knows whether to draw a create form, and the webhooks tab is what remains — it needs a session-authenticated delivery log first, because the only one that exists is on `/api/v1` and needs a key. The reasoning below stood and is kept.
+
+**What it was.** The endpoints existed and were complete: `GET`/`POST`/`DELETE /api/organizations/api-keys` (`backend/src/routes/organizations.ts:435`, `:462`, `:492`) and the same three for `/webhooks` (`:581`, `:600`, `:642`), plus `GET /api/v1/webhooks/deliveries` (`backend/src/routes/v1/webhooks.ts:27`) for the delivery log. The SPA reached neither, so a Team customer who was *paying for API access* could not mint a key from the product — which is why this came first: it is the cheapest conversion of finished backend work into something sellable. **Keys are now reachable** (`components/settings/ApiKeysPanel.vue`, `services/apiKeys.ts`); webhooks are not, and `useAppNav.ts` still lists four destinations, because both tabs live inside Settings rather than in the sidebar.
 
 Two things the screens must get right, and both are properties of the endpoints rather than of the design. **The secret is returned exactly once**, at creation, by both `POST` handlers — a screen that does not make the customer copy it there has lost it. And `GET /webhooks` returns a `deliverable` boolean, false when `REDIS_URL` or `WEBHOOK_SIGNING_KEY` is missing, which the screen has to surface: otherwise the customer configures an endpoint that will never fire and nothing says so.
 

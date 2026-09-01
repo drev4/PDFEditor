@@ -52,10 +52,10 @@ In `.claude/agents/`. All read-only except `test-author`.
 
 ```bash
 npm run dev                      # both workspaces (docker-compose up -d first, for PostgreSQL)
-npm run test:frontend            # Vitest, 38 specs / 321 tests beside the source
-npm run test:backend             # Vitest + supertest over a mocked Prisma, 15 specs / 204 tests in backend/tests/
-npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, 14 specs / 140 tests in backend/tests/integration/
-npm run test:e2e                 # Playwright, 50 tests; starts both apps itself
+npm run test:frontend            # Vitest, 41 specs / 343 tests beside the source
+npm run test:backend             # Vitest + supertest over a mocked Prisma, 18 specs / 231 tests in backend/tests/
+npm run test:integration         # Vitest + supertest over a REAL PostgreSQL, 23 specs / 193 tests in backend/tests/integration/
+npm run test:e2e                 # Playwright, 51 tests; starts both apps itself
 npm run build --workspace=frontend   # includes vue-tsc type checking
 cd backend && npx tsc --noEmit       # backend type check
 cd backend && npm run typecheck:tests # checks tests/fixtures/ against the Stripe SDK's own types

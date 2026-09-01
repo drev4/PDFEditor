@@ -320,6 +320,40 @@ describe('plan limits', () => {
       expect(res.status).toBe(401)
     })
 
+    /**
+     * `hasApiAccess` on the payload (features/0021).
+     *
+     * It is there so the API keys screen knows whether to draw a create form at
+     * all; `assertHasApiAccess` inside `POST /api/organizations/api-keys` is
+     * still the only thing that decides. Asserted here rather than in the mocked
+     * suite because the value comes from resolving a real organization's plan.
+     */
+    it('says the plan does not include the API when it does not', async () => {
+      const author = await createUser()
+
+      const res = await request(app)
+        .get('/api/organizations/entitlements')
+        .set('Authorization', author.authHeader)
+
+      expect(res.body.plan.key).toBe('free')
+      expect(res.body.plan.hasApiAccess).toBe(false)
+    })
+
+    it('says it does on a plan that has it', async () => {
+      const author = await createUser()
+      await prisma.organization.update({
+        where: { id: author.organization.id },
+        data: { planKey: 'team' }
+      })
+
+      const res = await request(app)
+        .get('/api/organizations/entitlements')
+        .set('Authorization', author.authHeader)
+
+      expect(res.body.plan.key).toBe('team')
+      expect(res.body.plan.hasApiAccess).toBe(true)
+    })
+
     it('falls back to the free plan for an unknown planKey rather than upward', async () => {
       const author = await createUser()
       await prisma.organization.update({

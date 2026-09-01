@@ -268,7 +268,11 @@ describe('plan limits', () => {
           name: 'Free',
           maxPublishedForms: 1,
           maxResponsesPerMonth: 50,
-          seats: 1
+          seats: 1,
+          // Added by features/0021, so the API keys screen knows whether to
+          // draw a create form. It decides what is rendered and nothing else:
+          // `assertHasApiAccess` in the route is still the enforcer.
+          hasApiAccess: false
         },
         usage: { publishedForms: 1, responsesThisPeriod: 12, seats: 1 },
         // Added by features/0013. `null` for an organization that has never

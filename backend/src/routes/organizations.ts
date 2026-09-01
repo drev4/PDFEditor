@@ -66,7 +66,21 @@ organizationsRouter.get('/entitlements', authenticate, async (req: AuthRequest, 
         // eight seats a meter that says three. Every other plan's catalogue
         // value passes through unchanged, and the client is deliberately not
         // told which of the two it received — one number, one meaning.
-        seats: seatLimit
+        seats: seatLimit,
+        // Whether this organization may mint an API key (features/0021).
+        //
+        // It is here so the screen knows what to *draw*, and for nothing else:
+        // `assertHasApiAccess` inside `POST /api-keys` is still the only thing
+        // that decides what is allowed, and the client's `402` handler stays.
+        // A capability the UI cannot see produces a create button that is
+        // guaranteed to answer `402`, which tells a customer the product is
+        // broken when it is enforcing a rule (05-frontend-patterns §8).
+        //
+        // Safe to send here and **not** on `GET /api/forms/public/:shareId`:
+        // this endpoint is member-authenticated, so the plan state reaches the
+        // customer who is paying for it rather than every respondent
+        // (features/0014).
+        hasApiAccess: plan.hasApiAccess
       },
       usage,
       // Only what a screen has to render, and **no Stripe identifier**
