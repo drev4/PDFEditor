@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { installProcessGuards } from './process-guards.js'
 import { createEmbedWorker, isEmbedQueueEnabled } from './services/embed-queue.js'
+import { createWebhookWorker, isWebhookQueueEnabled } from './services/webhook-queue.js'
 import { prisma } from './services/db.js'
 
 dotenv.config()
@@ -31,13 +32,33 @@ async function main() {
     process.exit(1)
   }
 
-  const { close } = await createEmbedWorker()
+  const embed = await createEmbedWorker()
+
+  // The second job type (features/0020), in the same process. It is skipped
+  // when `WEBHOOK_SIGNING_KEY` is missing rather than started uselessly - a
+  // worker that cannot decrypt an endpoint's secret cannot deliver anything,
+  // and saying so at startup is better than one failed job per event.
+  const webhooks = isWebhookQueueEnabled() ? await createWebhookWorker() : null
+  if (!webhooks) {
+    console.warn(
+      '[worker] webhook delivery is OFF: WEBHOOK_SIGNING_KEY is not set. ' +
+      'PDF embedding still runs.'
+    )
+  }
+
+  const close = async () => {
+    await Promise.all([embed.close(), webhooks?.close()].filter(Boolean) as Promise<void>[])
+  }
 
   // Startup and shutdown are logged distinctly on purpose (goal 10). A worker
   // dying is otherwise invisible - no request fails, nothing 500s - so the two
   // lines an operator greps for are these, and `docs/sot/08-operations.md` says
   // what to do when the second one is missing.
-  console.log('[worker] pdf-embed worker started, waiting for jobs')
+  console.log(
+    webhooks
+      ? '[worker] started, waiting for jobs (pdf-embed + webhook-delivery)'
+      : '[worker] started, waiting for jobs (pdf-embed only)'
+  )
 
   let closing = false
   const shutdown = async (signal: string) => {
@@ -49,7 +70,7 @@ async function main() {
     console.log(`[worker] ${signal} received, finishing jobs in flight`)
     await close()
     await prisma.$disconnect()
-    console.log('[worker] pdf-embed worker stopped')
+    console.log('[worker] stopped')
 
     // **No `process.exit(0)` here**, and that is not tidiness. When stdout is a
     // file or a pipe - which is what it is under any process manager - Node

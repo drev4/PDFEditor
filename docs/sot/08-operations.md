@@ -54,7 +54,11 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `PDF_STORAGE_ACCESS_KEY_ID` / `PDF_STORAGE_SECRET_ACCESS_KEY` | no | unset | Leave both empty to use the SDK's own credential chain (instance roles, IRSA, `~/.aws/credentials`) |
 | `PDF_STORAGE_FORCE_PATH_STYLE` | no | `false` | `true` for MinIO, which has no wildcard DNS so the bucket goes in the path |
 | `PDF_STORAGE_PREFIX` | no | `pdfs/` | Key prefix, so a shared bucket stays legible and a lifecycle rule can target these objects |
-| `REDIS_URL` | no | unset | **Drives two subsystems.** Unset means there is no job queue (the PDF embed runs inline, as it always has) *and* rate limiting counts per process. Set, bulk save enqueues — so a worker must be running — *and* the five limiters count in one shared store. See both sections below |
+| `WEBHOOK_SIGNING_KEY` | only for webhooks | unset | 32 bytes, base64. Encrypts endpoint secrets at rest (`webhook_endpoints.secret`). Unset means webhooks cannot be configured (`503`) and the worker says so at startup; everything else is unaffected |
+| `WEBHOOK_JOB_ATTEMPTS` | no | `5` | Delivery attempts before a webhook is given up on |
+| `WEBHOOK_BACKOFF_MS` | no | `10000` | First retry delay, doubling. Tens of seconds on purpose: an endpoint is usually down because somebody is deploying it |
+| `WEBHOOK_WORKER_CONCURRENCY` | no | `3` | Deliveries in flight per worker. Lower than the embed's: each one holds a socket to somebody else's server for up to ten seconds |
+| `REDIS_URL` | no | unset | **Drives three subsystems.** Unset means there is no job queue (the PDF embed runs inline, as it always has), rate limiting counts per process, **and webhooks cannot be configured at all**. Set, bulk save enqueues — so a worker must be running — the limiters count in one shared store, and webhooks become available. See the sections below |
 | `REDIS_KEY_PREFIX` | no | `vuepdf` | Namespace for every key this application writes in Redis, so one Redis can be shared. Rate-limit keys are `<prefix>:rl:<limiter>:<client>` |
 | `EMBED_WORKER_CONCURRENCY` | no | `5`, min `1` | Embed jobs one worker runs at once. Jobs for the same form never overlap regardless — that is a lock, not a consequence of this number |
 | `EMBED_JOB_ATTEMPTS` | no | `5`, min `1` | Tries before an embed job is given up on, with exponential backoff. Exhausting them logs `EMBED GAVE UP` — see below |
@@ -151,6 +155,28 @@ redis-cli --scan --pattern 'vuepdf:rl:login:*' | xargs -r redis-cli DEL
 ```
 
 Substitute `REDIS_KEY_PREFIX` if it is not the default. A locked-out user is otherwise limited until the window expires: 15 minutes for login, refresh and invitations, an hour for registration, 10 minutes for submissions.
+
+### Webhooks, and the one place the queue is not optional
+
+`REDIS_URL` makes the PDF embed asynchronous; for webhooks it is a **requirement**, and `WEBHOOK_SIGNING_KEY` with it ([`features/0020`](../../features/0020-outbound-webhooks.md)). Without either, `POST /api/organizations/webhooks` answers `503` and says which one is missing — deliberately, rather than accepting a configuration that could never be delivered. That is the inverse of the queue's own known hole above, and the reason is that a feature whose entire purpose is to tell somebody something happened must never fail silently.
+
+```bash
+# 32 bytes, base64. Generating one:
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+**Losing that key loses every endpoint's secret.** The secrets are encrypted with it and cannot be recovered without it; rotating it means every customer's receiver starts rejecting signatures until they are issued new secrets. Back it up with the same care as `JWT_SECRET`.
+
+**The worker runs both job types.** `npm run worker` starts PDF embedding always and webhook delivery when the signing key is present; its startup line says which:
+
+```
+[worker] started, waiting for jobs (pdf-embed + webhook-delivery)
+[worker] started, waiting for jobs (pdf-embed only)
+```
+
+**What failure looks like.** A delivery that failed and will be retried logs `webhook delivery … will retry`; one that has exhausted `WEBHOOK_JOB_ATTEMPTS` logs `WEBHOOK GAVE UP`, names the endpoint and the event, and says plainly that the customer was not told about it. After ten consecutive failures the endpoint is **disabled** — `disabled_at` and `last_error` on `webhook_endpoints`, both returned by the management API. **Nothing notifies the customer**, because this product has no email service; they find out by looking, and that gap is filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+An endpoint disabled with *"The endpoint URL is no longer deliverable"* is not a customer's server being down: it means the URL now resolves to an address inside the deployment, checked at delivery time as well as at configuration time. That is the DNS-rebinding defence firing, and the endpoint stays off until somebody looks at it.
 
 ### `DEV_PLAN_KEY`, and the allowlist that makes it safe
 

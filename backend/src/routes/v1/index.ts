@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { identifyApiKey, requireApiKey, requireApiAccess } from '../../middleware/apiKeyAuth.js'
 import { apiRateLimit } from '../../middleware/rateLimit.js'
 import { v1FormsRouter } from './forms.js'
+import { v1WebhooksRouter } from './webhooks.js'
 
 /**
  * `/api/v1` — the published API (features/0019).
@@ -43,3 +44,4 @@ v1Router.use(requireApiKey)
 v1Router.use(requireApiAccess)
 
 v1Router.use('/forms', v1FormsRouter)
+v1Router.use('/webhooks', v1WebhooksRouter)

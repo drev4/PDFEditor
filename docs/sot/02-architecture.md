@@ -58,6 +58,9 @@ Browser ── Vite dev server / static build (Vue SPA)
 
 Storage:    services/pdf-storage.ts  ← `local` (backend/uploads/pdfs) or `s3`
 Queue:      services/embed-queue.ts  ← absent unless `REDIS_URL` is set
+            services/webhook-queue.ts ← second job type; REQUIRES `REDIS_URL`
+Egress:     services/webhook-egress.ts ← the only outbound request to a
+                                        customer-chosen address
 Redis:      services/redis.ts        ← the only module that opens a connection;
                                        serves the queue *and* the rate limiters
 ```

@@ -19,6 +19,7 @@ model User {
   sentInvitations Invitation[]
   refreshTokens RefreshToken[]
   createdApiKeys ApiKey[]
+  createdWebhookEndpoints WebhookEndpoint[]
 
   @@map("users")
 }
@@ -55,6 +56,7 @@ model Organization {
   usageCounters UsageCounter[]
   subscription  Subscription?
   apiKeys       ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
 
   @@map("organizations")
 }
@@ -111,6 +113,103 @@ model ApiKey {
 
   @@index([organizationId])
   @@map("api_keys")
+}
+
+/// Where an organization wants to be told that something happened
+/// (features/0020).
+///
+/// The first thing in this schema that makes this server call **out**, to an
+/// address the customer picked, which is why `services/webhook-egress.ts` is
+/// the only module allowed to use `url` and why it is re-validated on every
+/// delivery rather than only when it was saved: a hostname that was public
+/// yesterday can point at `10.0.0.5` today.
+///
+/// **`secret` is stored encrypted, not hashed, and that is a real difference
+/// from `ApiKey.hash`.** A key is only ever *verified*, so a one-way hash is
+/// enough; this secret has to be *used* to sign every payload, so it must be
+/// recoverable. Encrypted with `WEBHOOK_SIGNING_KEY` (AES-256-GCM,
+/// `services/webhooks.ts`), which does nothing against a compromised
+/// application process and everything against the far more common incident: a
+/// leaked backup, a snapshot, a read-only SQL injection.
+///
+/// `consecutiveFailures` and `disabledAt` are how a dead endpoint stops costing
+/// deliveries for ever. Note what this product cannot do when it disables one:
+/// **tell anybody.** There is no email service here, so the customer finds out
+/// by reading `disabledAt` and `lastError` through the API - which is why both
+/// are returned rather than kept internal.
+model WebhookEndpoint {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  /// Always https, never with credentials, never resolving to a private
+  /// address. Enforced by `assertDeliverableUrl`, at configuration time and
+  /// again at delivery time.
+  url            String
+  /// AES-256-GCM ciphertext. Shown to the customer once, at creation, in
+  /// plaintext, and never retrievable again.
+  secret         String
+  /// Which events this endpoint wants. Only `response.created` exists today;
+  /// a list rather than a boolean so adding one is not a migration.
+  events         String[]
+  consecutiveFailures Int   @default(0) @map("consecutive_failures")
+  /// Non-null means this endpoint is off: too many failures in a row, or the
+  /// customer turned it off. Nothing is delivered while it is set.
+  disabledAt     DateTime? @map("disabled_at")
+  /// The last thing that went wrong, in the customer's words rather than ours.
+  /// Truncated, and never contains a payload or a credential.
+  lastError      String?   @map("last_error")
+  /// Provenance only, nullable for the same reason as `ApiKey.createdByUserId`:
+  /// an integration must not stop working because an employee left.
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?             @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+/// One attempt to deliver one event (features/0020).
+///
+/// **It deliberately holds no payload body.** The payload of `response.created`
+/// contains the answers a member of the public typed into a form, so a log that
+/// stored it would be a second copy of respondent personal data — in a table
+/// nobody thinks of as holding any, with a longer life than the original:
+/// `Response` cascades from `Form`, so deleting a form destroys the answers,
+/// and a delivery row holding the payload would keep them afterwards. What is
+/// here is metadata: which event, which endpoint, which attempt, what the
+/// customer's server said, and how long it took.
+///
+/// The consequence is deliberate and is written down in
+/// docs/sot/07-security-and-privacy.md: a delivery cannot be replayed from this
+/// table alone, only re-rendered from a `Response` that still exists.
+///
+/// `eventId` is **stable across retries** and is what a customer deduplicates
+/// on — this product built the receiving half of that answer in `StripeEvent`
+/// for the same reason: delivery is at-least-once.
+model WebhookDelivery {
+  id         String   @id @default(uuid())
+  endpointId String   @map("endpoint_id")
+  /// The same value in every attempt, and in the `X-VuePDF-Event-Id` header.
+  eventId    String   @map("event_id")
+  eventType  String   @map("event_type")
+  /// 1 for the first try. BullMQ's attempt number, not a count of rows.
+  attempt    Int
+  /// What the customer's endpoint answered, or null when nothing did.
+  status     Int?
+  durationMs Int?     @map("duration_ms")
+  succeeded  Boolean
+  /// Short and safe to store: never a payload, never a credential.
+  error      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, createdAt])
+  @@index([eventId])
+  @@map("webhook_deliveries")
 }
 
 /// One row per organization per calendar month: how many responses that

@@ -5,6 +5,7 @@ import { AppError } from '../middleware/errorHandler.js'
 import { compilePattern } from '../services/pattern-validator.js'
 import { responseRateLimit } from '../middleware/rateLimit.js'
 import { assertResponseWithinLimit } from '../services/entitlements.js'
+import { queueResponseCreated } from '../services/webhook-queue.js'
 
 export const responsesRouter = Router()
 
@@ -182,6 +183,25 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
             answers: true
           }
         })
+      })
+
+      // Webhooks, **after** the transaction commits and never inside it
+      // (features/0020). Three properties, all deliberate:
+      //
+      //   - it cannot fail the submission. The response is saved, which is the
+      //     record that matters, and a respondent must not see an error because
+      //     a customer's integration is misconfigured. `queueResponseCreated`
+      //     swallows and logs everything, like the PDF embed
+      //     (docs/sot/04-backend-patterns.md §5);
+      //   - it only *queues*. Delivering here would put a third party's server
+      //     on the critical path of somebody pressing "submit";
+      //   - it is a no-op when nothing is configured, which is every
+      //     deployment without `REDIS_URL` and every organization with no
+      //     endpoints.
+      await queueResponseCreated({
+        organizationId: form.organizationId,
+        formId,
+        responseId: response.id
       })
 
       res.status(201).json({
