@@ -103,13 +103,21 @@ test.describe('The shell', () => {
     await expect(page).toHaveURL(/\/dashboard$/);
   });
 
-  // Responses and Settings are in the navigation before they are built. They
-  // must say so rather than render an empty table, which reads as "you have no
-  // data" instead of "this does not exist yet".
-  test('says plainly which screens are not built', async ({ page }) => {
+  // Responses is built now (features/0024). A fresh account has collected
+  // nothing, and what it must say is "there is none" rather than drawing an
+  // empty table, which reads as "your data is missing".
+  test('the responses screen says nothing has been collected yet', async ({ page }) => {
     await page.goto('/dashboard/responses');
-    await expect(page.locator('text=Not built yet')).toBeVisible();
 
+    await expect(page.locator('[data-testid="responses-empty"]')).toBeVisible();
+    await expect(page.locator('[data-testid="organization-responses-table"]')).toHaveCount(0);
+    // No combined export: two forms share no fields, so the CSV lives per form.
+    await expect(page.locator('text=/csv|export/i')).toHaveCount(0);
+  });
+
+  // Settings is in the navigation with a tab that is still not built. It must
+  // say so rather than render an empty section.
+  test('says plainly which screens are not built', async ({ page }) => {
     await page.goto('/dashboard/settings');
     // Scoped to the General tab now (features/0021): the API keys tab beside it
     // is built, so "nothing else" is a claim about this tab and not the screen.

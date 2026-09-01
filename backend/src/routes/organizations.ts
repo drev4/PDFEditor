@@ -123,6 +123,88 @@ organizationsRouter.post('/active', authenticate, async (req: AuthRequest, res, 
   }
 })
 
+/**
+ * GET /api/organizations/responses — everything collected, newest first
+ * (features/0024).
+ *
+ * The `Responses` destination in the navigation. Until this existed the only
+ * listings were per form, so a combined view meant one request per form merged
+ * in a browser, with no paging and no ordering the server agreed to.
+ *
+ * **It carries no answer values, no `ipAddress` and no `userAgent`, and the body
+ * is built field by field for that reason.** The per-form listing returns whole
+ * `Response` rows — answers and both of those columns — and its screen renders
+ * an IP column deliberately; that is S7 in docs/sot/07-security-and-privacy.md,
+ * filed, and it is the state of one screen a customer opens for one form. This
+ * is a browsing surface over everything the organization has ever collected,
+ * left open on a desk, and widening *that* to every respondent's answers and
+ * address adds nothing it needs. A row says which form, when, and how many
+ * answers it holds; the detail is one click away in the per-form screen.
+ *
+ * Never `include: { answers: true }` here, and never a serialised Prisma row:
+ * the next column added to `Response` would otherwise reach this screen without
+ * anybody deciding it should.
+ */
+const RESPONSES_DEFAULT_LIMIT = 20
+const RESPONSES_MAX_LIMIT = 100
+
+organizationsRouter.get('/responses', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    // Any member: this is the organization's own work, and the same people who
+    // can open a form's responses can see that they arrived.
+    const { organizationId } = await requireMembership(req)
+
+    const requestedLimit = Number.parseInt(String(req.query.limit ?? ''), 10)
+    const requestedOffset = Number.parseInt(String(req.query.offset ?? ''), 10)
+    const limit =
+      Number.isInteger(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, RESPONSES_MAX_LIMIT)
+        : RESPONSES_DEFAULT_LIMIT
+    const offset = Number.isInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0
+
+    const formId = typeof req.query.formId === 'string' ? req.query.formId : undefined
+
+    // Scoped through the form's organization, in the `where` and never after the
+    // fact (docs/sot/04-backend-patterns.md §9). A `formId` belonging to another
+    // tenant therefore matches nothing and returns an empty list — not a `404`,
+    // which would confirm that the form exists.
+    const where = {
+      form: { organizationId },
+      ...(formId ? { formId } : {})
+    }
+
+    const [total, responses] = await Promise.all([
+      prisma.response.count({ where }),
+      prisma.response.findMany({
+        where,
+        orderBy: { submittedAt: 'desc' },
+        take: limit,
+        skip: offset,
+        select: {
+          id: true,
+          formId: true,
+          submittedAt: true,
+          form: { select: { title: true } },
+          _count: { select: { answers: true } }
+        }
+      })
+    ])
+
+    res.json({
+      responses: responses.map(response => ({
+        id: response.id,
+        formId: response.formId,
+        formTitle: response.form.title,
+        submittedAt: response.submittedAt,
+        answerCount: response._count.answers
+      })),
+      pagination: { total, limit, offset }
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // GET /api/organizations/entitlements — any member may see the plan and usage.
 //
 // Not owner-only: the sidebar card and the plan screen are visible to everyone
