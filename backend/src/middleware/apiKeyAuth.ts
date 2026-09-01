@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import { AppError } from './errorHandler.js'
 import { verifyApiKey, touchApiKey } from '../services/api-key.js'
+import { assertHasApiAccess } from '../services/entitlements.js'
 
 /**
  * Authentication for `/api/v1`, and the only credential in this product that
@@ -79,6 +80,43 @@ export async function identifyApiKey(
 export function requireApiKey(req: ApiKeyRequest, _res: Response, next: NextFunction) {
   if (!req.apiKey) return next(new AppError(401, 'Invalid or missing API key'))
   next()
+}
+
+/**
+ * Refuses a key whose organization is no longer entitled to the API.
+ *
+ * **The entitlement is checked on every request, not only when the key was
+ * minted**, and the difference is a billing hole rather than a nicety: without
+ * it, an organization could pay for one month of Team, mint a key, downgrade to
+ * Free, and keep full read access — including the CSV export of respondent
+ * answers — for as long as it liked. Found by `saas-readiness-reviewer`, which
+ * measured this feature against its own goal 8.
+ *
+ * `402` and never `401`: the credential is valid and the caller is who they say
+ * they are. Nothing about authentication failed, and telling an integration its
+ * key is invalid when the real answer is "your plan lapsed" sends its owner
+ * looking in the wrong place. Same rule as everywhere else — `402` is a plan
+ * limit, `403` is a permission failure (features/0012).
+ *
+ * It costs one query per request, deliberately, for the same reason
+ * `verifyApiKey` reads the key row every time: an entitlement cached here is an
+ * entitlement that outlives the subscription that paid for it.
+ *
+ * Note what this deliberately does **not** gate: revoking a key
+ * (`DELETE /api/organizations/api-keys/:id`) still works after a downgrade.
+ * Turning a credential off is never something to charge for.
+ */
+export async function requireApiAccess(
+  req: ApiKeyRequest,
+  _res: Response,
+  next: NextFunction
+) {
+  try {
+    await assertHasApiAccess(callerOrganizationId(req))
+    next()
+  } catch (error) {
+    next(error)
+  }
 }
 
 /**

@@ -196,8 +196,8 @@ The cross-tenant tests were written before the router existed and all thirteen f
 
 ```
 npm run test:backend                                      16 specs, 206 tests passed
-npm run test:integration                                  19 specs, 168 passed, 2 specs skipped
-TEST_REDIS_URL=… npm run test:integration                 21 specs, 174 tests passed
+npm run test:integration                                  19 specs, 169 passed, 2 specs skipped
+TEST_REDIS_URL=… npm run test:integration                 21 specs, 175 tests passed
 npm run test:frontend                                     38 specs, 321 tests passed
 npm run test:e2e                                          50 passed (19.2s)
 npm run build --workspace=frontend                        built in 5.53s
@@ -215,6 +215,16 @@ team plan     POST /api/organizations/api-keys  -> 201, secret vpk_40867288d411.
               api_keys row: last_used_at set, revoked_at set
               grep -c "vpk_" server.log         -> 0   (the secret is never logged)
 ```
+
+### What the readiness review found, and the fix
+
+`saas-readiness-reviewer` returned one **Medium**, and it was this feature failing its own goal 8: the entitlement was checked **only when a key was minted**. So an organization could buy one month of Team, mint a key, downgrade to Free, and keep reading — including the CSV export of respondent answers — for as long as it liked. Nothing on the read path looked at the plan again, and the api-keys spec had quietly normalised it: "still revokes after the plan has lost API access" is a correct test that happens to demonstrate the key still working.
+
+Fixed rather than filed: `requireApiAccess` in `middleware/apiKeyAuth.ts` runs on every `/api/v1` request and answers `402` — not `401`, because nothing about authentication failed and telling an integration its key is invalid sends its owner looking in the wrong place. It costs one query per request, deliberately, for the same reason `verifyApiKey` re-reads the key row: an entitlement cached here is an entitlement that outlives the subscription that paid for it. Revoking a key still works after a downgrade; turning a credential off is never something to charge for.
+
+**The fix made three existing tests fail, which is the evidence the gap was real**: `api-v1.spec.ts` had been running against organizations on the default `free` plan and passing. They now put both organizations on Team, and a new test asserts the `402` after a downgrade.
+
+Everything else came back clear: tenancy on every `/api/v1` query (scoped in the `where`, `404` not `403`), the secret handling, the limiter and its middleware order, the cascades, the explicitly built response bodies, and the documentation.
 
 ### Two things a reader should know before building on this
 

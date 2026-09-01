@@ -286,7 +286,7 @@ Deliberately absent from every response: `organizationId`, `createdByUserId`, `p
 
 **Rate limit: 120 requests per minute per key** (`RATE_LIMIT_API_MAX` / `RATE_LIMIT_API_WINDOW_MS`). It counts **per API key**, not per IP address — an integration calling from one server is one caller, and two customers behind the same address do not share a budget. A request with no valid key is limited by address instead, so not authenticating is not a way around it. Over the limit is a `429` in the shape described under *The 429 response* above.
 
-**Errors** use the same `{ error }` shape as the rest of the API. `401` covers every authentication failure — missing, malformed, unknown, revoked — without distinguishing them. `404` covers both "no such form" and "not yours", deliberately: a `403` would confirm that an id exists.
+**Errors** use the same `{ error }` shape as the rest of the API. `401` covers every authentication failure — missing, malformed, unknown, revoked — without distinguishing them. `402` is different and is not an authentication failure: the key is valid and the caller is who they say they are, but the organization's plan no longer includes API access. **It is checked on every request, not only when the key was minted**, so a downgrade stops the integration at the next call rather than whenever somebody remembers to revoke the key. `404` covers both "no such form" and "not yours", deliberately: a `403` would confirm that an id exists.
 
 **Read-only, for now.** There are no write endpoints and no webhooks; both are tracked in [`docs/BACKLOG.md`](../BACKLOG.md).
 

@@ -38,13 +38,24 @@ describe('GET /api/v1', () => {
     ]
   }
 
+  /** `hasApiAccess` is true only on Team, and it is checked on every request. */
+  async function setPlan(organizationId: string, planKey: string) {
+    await prisma.organization.update({ where: { id: organizationId }, data: { planKey } })
+  }
+
   beforeEach(async () => {
     owner = await createUser()
     stranger = await createUser()
 
-    // Team is the plan with `hasApiAccess`; minting goes through the service
-    // here rather than the endpoint, so these tests are about the API surface
-    // and not about billing.
+    // Both callers are on the plan that includes the API. Before the
+    // entitlement was checked per request rather than only at mint time, these
+    // tests passed on the default free plan — which is precisely the gap
+    // `saas-readiness-reviewer` found.
+    await setPlan(owner.organization.id, 'team')
+    await setPlan(stranger.organization.id, 'team')
+
+    // Minting goes through the service rather than the endpoint, so these tests
+    // are about the API surface and not about billing.
     ownerKey = (await mintApiKey({
       organizationId: owner.organization.id,
       name: 'owner key',
@@ -122,6 +133,24 @@ describe('GET /api/v1', () => {
       // one, and the `/api/forms` check below.
       const response = await get('/api/v1/forms', owner.token)
       expect(response.status).toBe(401)
+    })
+
+    it('answers 402 — not 401 — once the organization has lost API access', async () => {
+      expect((await get('/api/v1/forms', ownerKey)).status).toBe(200)
+
+      // A downgrade. The key is still perfectly valid and still belongs to a
+      // real organization; what changed is what that organization pays for.
+      await setPlan(owner.organization.id, 'free')
+
+      const response = await get('/api/v1/forms', ownerKey)
+
+      // Checked on **every** request, not only when the key was minted:
+      // otherwise one month of Team buys a credential that reads respondent
+      // data for ever. And `402`, because nothing about authentication failed —
+      // telling an integration its key is invalid would send its owner looking
+      // in the wrong place.
+      expect(response.status).toBe(402)
+      expect(response.body.error).toMatch(/API access/i)
     })
 
     it('does not accept an API key on the internal API', async () => {

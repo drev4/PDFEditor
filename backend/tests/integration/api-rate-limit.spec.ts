@@ -36,6 +36,10 @@ describe('the /api/v1 rate limiter', () => {
 
     alice = await createUser()
     bob = await createUser()
+    // The API is a Team entitlement, and it is checked on every request.
+    for (const org of [alice.organization.id, bob.organization.id]) {
+      await prisma.organization.update({ where: { id: org }, data: { planKey: 'team' } })
+    }
     aliceKey = (await mintApiKey({ organizationId: alice.organization.id, name: 'a' })).secret
     bobKey = (await mintApiKey({ organizationId: bob.organization.id, name: 'b' })).secret
 

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { identifyApiKey, requireApiKey } from '../../middleware/apiKeyAuth.js'
+import { identifyApiKey, requireApiKey, requireApiAccess } from '../../middleware/apiKeyAuth.js'
 import { apiRateLimit } from '../../middleware/rateLimit.js'
 import { v1FormsRouter } from './forms.js'
 
@@ -30,11 +30,16 @@ import { v1FormsRouter } from './forms.js'
  *     spends nothing by simply not sending a key. A test asserts it
  *     (`tests/integration/api-rate-limit.spec.ts`), and it caught exactly that
  *     mistake in the first draft of this router.
+ *
+ * `requireApiAccess` is last, and it is checked on **every** request rather
+ * than only when a key was minted — otherwise a month of Team buys a key that
+ * keeps reading respondent data for ever.
  */
 export const v1Router = Router()
 
 v1Router.use(identifyApiKey)
 v1Router.use(apiRateLimit)
 v1Router.use(requireApiKey)
+v1Router.use(requireApiAccess)
 
 v1Router.use('/forms', v1FormsRouter)
