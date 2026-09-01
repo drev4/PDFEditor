@@ -164,7 +164,7 @@ It also creates a state that does not exist today: **a job that has exhausted it
 
 ## Outcome
 
-**Shipped**, in two commits: the seam (`c55da35`) and the worker with the queued path (`f56984a`).
+**Shipped**, in four commits: the seam (`c55da35`), the worker with the queued path (`f56984a`), the documentation (`0ba9e3c`), and the readiness-review fix below.
 
 ### What shipped
 
@@ -202,12 +202,13 @@ which is the lost update exactly. With the lock restored, 3 passed.
 | `tests/integration/pdf-embed-concurrency.spec.ts` (unchanged) | **inline** — two overlapping saves, in-process lock |
 | Every other backend, integration and E2E spec | **inline** — `REDIS_URL` pinned empty |
 | `tests/integration/pdf-embed-queue.spec.ts` (new, 3 tests) | **queued** — real Redis, in-process worker: response unchanged, a save during an in-flight embed still reaches the PDF, and the embed is idempotent |
+| `tests/integration/pdf-embed-fallback.spec.ts` (new, 2 tests) | **`REDIS_URL` set with no Redis behind it** — refused and black-holed; needs no Redis, so CI runs it |
 | `tests/process-guards.spec.ts` (new, 2 tests) | neither — a real child process, for a rejection that must be survived and an exception that must not be |
 
 ```
 npm run test:backend        16 specs, 206 tests passed
-npm run test:integration    14 specs, 140 passed, 1 spec (3 tests) skipped   # offline
-  with TEST_REDIS_URL set   15 specs, 143 tests passed
+npm run test:integration    15 specs, 142 passed, 1 spec (3 tests) skipped   # offline
+  with TEST_REDIS_URL set   16 specs, 145 tests passed
 npm run test:frontend       38 specs, 321 tests passed
 npm run test:e2e            50 passed (21.4s)
 npm run build --workspace=frontend    built in 10.33s
@@ -222,6 +223,26 @@ cd backend && npx tsc --noEmit && npm run typecheck:tests    clean
 4. **Graceful shutdown** was verified through `close()` directly — 15 active jobs before, `{ waiting: 0, active: 0 }` after, nothing abandoned. **A real `SIGTERM` could not be tested on this machine**: Windows has no signals, and `kill -TERM` from the shell terminates the process outright (exit 143, none of the shutdown logging), so the signal handler's own path is unverified here. What it calls is the code that was verified.
 
 That last check found and fixed one real defect: the shutdown path ended in `process.exit(0)`, which discards buffered stdout when it is a file or a pipe — losing exactly the shutdown logs this feature relies on to make a dead worker visible. The worker now lets the process end on its own, with an `unref`d 10-second forced exit as the safety net.
+
+### What the readiness review found, and the fix
+
+`saas-readiness-reviewer` was run on the finished branch and returned one **Critical** finding, since fixed in this branch (`3f0…`, the fourth commit):
+
+**`requestEmbed` could hang the bulk save for ever instead of falling back to inline.** The module claimed a configured-but-unreachable Redis falls back to running the embed inline, and the `try`/`catch` implementing that only fires on a rejection. `connect()` built every client with `maxRetriesPerRequest: null` — required by BullMQ's *worker*, whose blocking commands sit for minutes — and ioredis' default `retryStrategy` never gives up, so on the request path `queue.add()` waited for a connection that might never arrive. `POST /api/forms/:formId/fields/bulk` then never answered. Nothing was lost, since the fields were already committed, but the editor waits on a response that does not come, which to the author is a broken save.
+
+Writing the test first showed the finding was *worse* than reported: with the pre-fix code **both** cases hang — not only an unroutable address, but a refused port too, because reconnection keeps retrying and `waitUntilReady` never settles either way.
+
+```
+× embeds inline when the configured Redis refuses the connection            30305ms
+× embeds inline, and answers, when the configured Redis black-holes it      30246ms
+  Error: Test timed out in 30000ms.
+```
+
+The fix has three parts. `connect()` now takes a **role**: only the worker's connection keeps `maxRetriesPerRequest: null`, while the producer and the lock connections get bounded retries and command timeouts — the lock one because a wedged `SET`/`EVAL` inside a job would hold a worker slot for ever with no error and no `EMBED GAVE UP`, which is worse than the dead worker this feature designed logging around. `withDeadline` caps the request path's wait on Redis at five seconds regardless of what the libraries do, because the property should not depend on when a command happens to settle. And a failed enqueue throws the client away, so the next save reconnects instead of inheriting a wedged one.
+
+After the fix, both cases pass in ~5.3s each and the PDF is genuinely embedded — the assertion is on the document, not on the status code.
+
+The reviewer's second finding (the fallback branch had no test) is closed by that same spec, which **needs no Redis and therefore runs in CI**. Its third (the queued-path spec does not run in CI) stands as filed. Tenancy, data loss, the lock design and the documentation were reported clear.
 
 ### What was deliberately not done
 
