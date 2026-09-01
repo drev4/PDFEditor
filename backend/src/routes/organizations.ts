@@ -13,7 +13,7 @@ import { assertCanInvite, assertHasApiAccess, getEntitlements } from '../service
 import { mintApiKey } from '../services/api-key.js'
 import { mintWebhookSecret, isWebhookSigningConfigured } from '../services/webhooks.js'
 import { assertDeliverableUrl } from '../services/webhook-egress.js'
-import { isEmbedQueueEnabled } from '../services/embed-queue.js'
+import { isRedisConfigured } from '../services/redis.js'
 import { subscriptionFor } from '../services/stripe.js'
 import {
   createInvitation,
@@ -531,7 +531,11 @@ const webhookSchema = z.object({
  * that something happened must never accept a configuration it cannot deliver.
  */
 function assertWebhooksConfigured() {
-  if (!isEmbedQueueEnabled()) {
+  // `isRedisConfigured` from `services/redis.js`, deliberately, and not the
+  // embed queue's own helper: that one is a bare alias for this today, and a
+  // webhook route inheriting a future embed-specific condition is a coupling
+  // nobody would think to look for here.
+  if (!isRedisConfigured()) {
     throw new AppError(
       503,
       'Webhooks require the job queue. Set REDIS_URL and run a worker; delivering ' +
@@ -572,7 +576,7 @@ organizationsRouter.get('/webhooks', authenticate, async (req: AuthRequest, res,
 
     // Listing works even when the deployment cannot deliver, on purpose: seeing
     // what is configured is how somebody diagnoses why nothing is arriving.
-    res.json({ webhooks, deliverable: isEmbedQueueEnabled() && isWebhookSigningConfigured() })
+    res.json({ webhooks, deliverable: isRedisConfigured() && isWebhookSigningConfigured() })
   } catch (error) {
     next(error)
   }

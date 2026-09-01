@@ -186,7 +186,7 @@ So the auto-disable must be *discoverable*: `disabledAt` and `lastError` on the 
 - `backend/src/services/webhook-queue.ts` — the second job type, the worker, retries with backoff, auto-disable after ten consecutive failures, and the delivery log.
 - Management endpoints on the session API; `GET /api/v1/webhooks/deliveries` on the published one.
 - `queueResponseCreated` after the submission transaction in `routes/responses.ts`, swallowing every error — a respondent must never see a failure because a customer's integration is misconfigured.
-- 39 new tests: 23 unit (the egress guard), 12 integration (configuration, refusals, signature), 4 end-to-end delivery against a real TLS receiver.
+- 41 new tests: 23 unit for the egress guard, **2 for the pinned lookup** (added after review — see below), 12 integration for configuration, refusals and the signature, and 4 end-to-end deliveries against a real TLS receiver.
 
 ### The failing test, first
 
@@ -221,7 +221,7 @@ That is the DNS-rebinding defence firing on a real delivery, which is the half a
 ### Verification
 
 ```
-npm run test:backend                                      17 specs, 229 tests passed
+npm run test:backend                                      18 specs, 231 tests passed
 npm run test:integration                                  20 specs, 181 passed, 3 specs skipped
 TEST_REDIS_URL=… npm run test:integration                 23 specs, 191 tests passed
 npm run test:frontend                                     38 specs, 321 tests passed
@@ -237,6 +237,23 @@ cd backend && npx tsc --noEmit && npm run typecheck:tests  clean
 **The delivery log holds no payload** (trap 3), so a delivery cannot be replayed from the log alone — only re-rendered from a `Response` that still exists. Filed as its own row rather than smuggled in.
 
 **Delivery is at-least-once**, the event id is stable across retries and shared by every endpoint receiving that event, and the documentation says so in the words a receiver's author needs.
+
+### What the readiness review found, and the fixes
+
+`saas-readiness-reviewer` came back with no findings on data loss, tenancy, the secret, the signature or the SSRF guard itself — it checked the blocklist against WHATWG URL normalisation (decimal, octal and hex IPv4, IPv4-mapped IPv6, zone ids) with its own scripts rather than by reading, and confirmed the rebinding gap is closed by the pinned lookup. Three findings, all fixed on the branch:
+
+**Medium — nothing could catch the removal of the pin.** `webhook-egress.spec.ts` only exercised `isBlockedAddress` and `assertDeliverableUrl`; the one place `deliver()` ran was the integration spec, whose receiver is at `https://127.0.0.1:<port>` — a hostname that resolves to itself, so a `deliver()` that had gone back to ordinary DNS would pass it unchanged. The module's own comment calls that rule "the subtle one", and it was the one rule with no test.
+
+`tests/webhook-pinning.spec.ts` makes the two answers differ: the URL's hostname is under `.invalid`, which RFC 2606 guarantees never resolves, while the validated address is the local server. With the pin it lands; without it, `https.request` does its own lookup and fails. Confirmed by deleting the `lookup` option and watching it go red —
+
+```
+× uses the validated address, not a fresh resolution of the hostname
+  AssertionError: expected false to be true
+```
+
+**Low — `.env.example` had none of the four new variables**, including `WEBHOOK_SIGNING_KEY`, which is not optional. Added, with the note that losing that key loses every endpoint's secret.
+
+**Low — the route checked `isEmbedQueueEnabled()`** as a proxy for "is Redis configured", correct only because that helper happens to be a bare alias today. It now calls `isRedisConfigured` from `services/redis.ts` directly, so a future embed-specific condition cannot leak into a webhook route.
 
 ### Two things a customer actually experiences today
 

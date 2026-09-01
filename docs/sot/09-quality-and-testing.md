@@ -12,7 +12,7 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 38 specs, 321 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 17 specs, 229 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| Backend route (mocked Prisma) | 18 specs, 231 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 23 specs, 191 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 50 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
@@ -30,6 +30,8 @@ Note the variable is deliberately **not** `REDIS_URL`: that name is the one pinn
 **`REDIS_URL` now switches two subsystems, so both have a spec.** Beside the queue's, `tests/integration/rate-limit-store.spec.ts` proves the property that makes features/0018 worth having — two independently built limiters, standing in for two replicas, counting a client once — and it skips itself without `TEST_REDIS_URL` for the same reason. Note the trap it walked into first: the `login` limiter refunds successful requests (`skipSuccessfulRequests`), so a probe returning 200 never accumulates a hit and the limiter never bites; the spec uses `responses` and `register`, which have no refund.
 
 **Webhook delivery is tested against a real receiver, not a mock.** `tests/integration/webhook-delivery.spec.ts` starts a genuine TLS server, submits a real form, lets the real worker deliver, and verifies the signature the way a customer would — from the raw body. One thing is stubbed and it is narrow: the receiver is on `127.0.0.1`, which the egress guard exists to refuse, so `assertDeliverableUrl` is replaced *in that file only*. The guard keeps its own unit spec (`tests/webhook-egress.spec.ts`, 23 cases covering every blocked address family) and `webhooks.spec.ts` asserts the API refuses that same URL, so the protection is not what goes untested — everything after it is what this file exercises.
+
+**One rule needed a test of its own, and a review found that out.** The address pinned into the socket — the actual DNS-rebinding defence — could be deleted without any suite noticing, because the integration receiver lives at `127.0.0.1`, a hostname that resolves to itself. `tests/webhook-pinning.spec.ts` makes the two answers differ (a `.invalid` hostname that never resolves, pinned to the local server), so removing the pin fails it immediately and offline. It is the standing example of the rule this document keeps repeating: a test that would pass against the broken version is not covering the thing it names.
 
 **The third state — `REDIS_URL` set and no Redis there — has its own spec, and it needs no Redis, so CI runs it.** `tests/integration/pdf-embed-fallback.spec.ts` points `REDIS_URL` at a refused port and then at an unroutable address (TEST-NET-1) and asserts the save still answers *and* the PDF is still embedded. The second case is the one worth having: before it existed, a Redis that neither answered nor refused made the enqueue wait for ever and the bulk save never responded, while the "falls back to inline" claim sat in a comment above the code that could not deliver it.
 
