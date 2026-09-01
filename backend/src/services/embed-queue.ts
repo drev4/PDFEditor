@@ -1,6 +1,6 @@
 import type { Job, Queue, Worker } from 'bullmq'
-import type { Redis } from 'ioredis'
 import { envInt } from '../config/env.js'
+import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from './redis.js'
 import { embedFormFields, embedInline } from './pdf-embed.js'
 
 /**
@@ -8,9 +8,12 @@ import { embedFormFields, embedInline } from './pdf-embed.js'
  *
  * Same rule as `services/stripe.ts` for the Stripe SDK and
  * `services/pdf-storage.ts` for PDF bytes: **nothing else in this repository
- * imports `bullmq` or `ioredis`.** Routes ask for an embed and do not learn
- * where it runs; `src/worker.ts` asks for a worker and does not learn what a
- * job looks like.
+ * imports `bullmq`.** Routes ask for an embed and do not learn where it runs;
+ * `src/worker.ts` asks for a worker and does not learn what a job looks like.
+ *
+ * The connections themselves are not this module's business either: they come
+ * from `services/redis.ts`, which owns the per-role options and the reason each
+ * role differs (features/0018).
  *
  * ## Redis is optional, and that is the whole shape of this feature
  *
@@ -35,20 +38,6 @@ import { embedFormFields, embedInline } from './pdf-embed.js'
 
 const QUEUE_NAME = 'pdf-embed'
 
-/**
- * Every key this feature writes lives under one prefix, so a Redis shared with
- * something else stays legible - and so a developer pointing `REDIS_URL` at a
- * Redis another project is already using cannot collide with it.
- *
- * Read per call rather than memoised into a constant, for the same reason the
- * rate limits and `DEV_PLAN_KEY` are: a constant is fixed at import, which is
- * before any test can set it, and `tests/integration/pdf-embed-queue.spec.ts`
- * uses this to keep its keys out of whatever else the developer's Redis holds.
- */
-function keyPrefix(): string {
-  return process.env.REDIS_KEY_PREFIX?.trim() || 'vuepdf'
-}
-
 export interface EmbedJobData {
   /**
    * The only thing in the payload, and deliberately so.
@@ -61,61 +50,9 @@ export interface EmbedJobData {
   formId: string
 }
 
-function redisUrl(): string | undefined {
-  return process.env.REDIS_URL?.trim() || undefined
-}
-
 /** Whether this process has a queue behind it at all. */
 export function isEmbedQueueEnabled(): boolean {
-  return redisUrl() !== undefined
-}
-
-/**
- * `bullmq` and `ioredis` are imported **only** once a queue is actually wanted.
- *
- * Same reasoning as the lazy S3 client and the lazy Stripe client: a deployment
- * without Redis - which includes every test run - should not pay for, or fail
- * on, a dependency it never uses.
- */
-async function connect(role: 'producer' | 'worker' | 'locks'): Promise<Redis> {
-  const url = redisUrl()
-  if (!url) throw new Error('REDIS_URL is not set')
-
-  const { default: IORedis } = await import('ioredis')
-
-  // **The three roles need different failure behaviour, and giving them all the
-  // worker's is how the enqueue came to hang.** Found by `saas-readiness-reviewer`
-  // on this branch.
-  //
-  // `maxRetriesPerRequest: null` is required by BullMQ's *worker*: its blocking
-  // commands sit on a connection for minutes at a time and ioredis' default
-  // would kill them as failed requests. But ioredis' default `retryStrategy`
-  // also never gives up, so on the connection the **request path** uses, the two
-  // together mean a command waits for a connection that may never arrive. A
-  // Redis that refuses the TCP connection rejects quickly and the fallback below
-  // works; a Redis that is simply unreachable - a wrong host, a dropped route, a
-  // security group - does not refuse anything, so `queue.add()` never settles
-  // and `POST /api/forms/:formId/fields/bulk` never answers. The fields are
-  // already committed at that point, so nothing is lost, but the editor waits
-  // for a response that never comes, which to the author is a broken save.
-  if (role === 'worker') {
-    return new IORedis(url, { maxRetriesPerRequest: null })
-  }
-
-  // Both non-blocking roles: a command fails after a bounded number of attempts
-  // instead of queueing for ever, and reconnection keeps trying, so a blip
-  // recovers on its own.
-  //
-  //   - producer: a rejected `add` is what makes the inline fallback reachable.
-  //   - locks: a wedged `SET`/`EVAL` inside a job would hold a worker slot for
-  //     ever with no error and no `EMBED GAVE UP`, which is worse than the dead
-  //     worker this feature designed its logging around. Failing the job hands
-  //     it to BullMQ's retries instead.
-  return new IORedis(url, {
-    maxRetriesPerRequest: 2,
-    connectTimeout: 5_000,
-    commandTimeout: 10_000
-  })
+  return isRedisConfigured()
 }
 
 let queuePromise: Promise<{ queue: Queue<EmbedJobData>; connection: Redis }> | null = null
@@ -123,7 +60,7 @@ let queuePromise: Promise<{ queue: Queue<EmbedJobData>; connection: Redis }> | n
 async function embedQueue() {
   if (!queuePromise) {
     queuePromise = (async () => {
-      const connection = await connect('producer')
+      const connection = await connectRedis('producer')
       const { Queue } = await import('bullmq')
       return {
         queue: new Queue<EmbedJobData>(QUEUE_NAME, { connection, prefix: keyPrefix() }),
@@ -155,8 +92,9 @@ async function embedQueue() {
  *
  * Two things make that guarantee real rather than stated, and both exist because
  * the first version of this function had only the `try`/`catch` and would hang
- * for ever on a Redis that neither answered nor refused: the connection options
- * in `connect` above, and the wall-clock deadline in `withDeadline` below. The
+ * for ever on a Redis that neither answered nor refused: the per-role connection
+ * options in `services/redis.ts`, and the wall-clock deadline in `withDeadline`
+ * below. The
  * test that holds them honest is
  * `tests/integration/pdf-embed-fallback.spec.ts`, which points `REDIS_URL` at
  * an address that black-holes and asserts the save still answers and the PDF is
@@ -385,10 +323,10 @@ export interface EmbedWorkerHandle {
  * Builds the worker. Called by `src/worker.ts` and by nothing else.
  */
 export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
-  const connection = await connect('worker')
+  const connection = await connectRedis('worker')
   // A second connection for the lock: the worker's own is occupied by blocking
   // commands, and a `SET`/`EVAL` would queue behind them.
-  const locks = await connect('locks')
+  const locks = await connectRedis('locks')
   const { Worker } = await import('bullmq')
 
   const worker = new Worker<EmbedJobData>(

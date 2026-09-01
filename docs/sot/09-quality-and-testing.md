@@ -13,7 +13,7 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 |---|---|---|---|
 | Frontend unit / component | 38 specs, 321 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
 | Backend route (mocked Prisma) | 16 specs, 206 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 16 specs, 145 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| **Backend database-backed** | 18 specs, 151 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 50 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **The suites run offline, and the storage driver is what keeps that true.** `PDF_STORAGE_DRIVER` defaults to `local`, so every suite reads and writes real files under `backend/uploads/pdfs` exactly as before — `tests/security-headers.spec.ts` writes a fixture and fetches it through the signed route, and the E2E suite uploads real PDFs. The `s3` driver is never exercised by `npm test` and that is deliberate: mocking the AWS SDK would assert that the code calls the mock the way the code calls the mock. It is verified against a real S3-compatible endpoint instead — MinIO from `docker-compose.yml` — and what that run covered is recorded in [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)'s Outcome.
@@ -26,6 +26,8 @@ TEST_REDIS_URL=redis://localhost:6379 npm run test:integration --workspace=backe
 ```
 
 Note the variable is deliberately **not** `REDIS_URL`: that name is the one pinned empty, so a developer's `.env` cannot move the other fifteen specs onto a worker that is not running.
+
+**`REDIS_URL` now switches two subsystems, so both have a spec.** Beside the queue's, `tests/integration/rate-limit-store.spec.ts` proves the property that makes features/0018 worth having — two independently built limiters, standing in for two replicas, counting a client once — and it skips itself without `TEST_REDIS_URL` for the same reason. Note the trap it walked into first: the `login` limiter refunds successful requests (`skipSuccessfulRequests`), so a probe returning 200 never accumulates a hit and the limiter never bites; the spec uses `responses` and `register`, which have no refund.
 
 **The third state — `REDIS_URL` set and no Redis there — has its own spec, and it needs no Redis, so CI runs it.** `tests/integration/pdf-embed-fallback.spec.ts` points `REDIS_URL` at a refused port and then at an unroutable address (TEST-NET-1) and asserts the save still answers *and* the PDF is still embedded. The second case is the one worth having: before it existed, a Redis that neither answered nor refused made the enqueue wait for ever and the bulk save never responded, while the "falls back to inline" claim sat in a comment above the code that could not deliver it.
 
@@ -130,7 +132,7 @@ Test stores and composables through their public surface — call an action, ass
 
 This is not hypothetical: adding `DEV_PLAN_KEY=dev` to a local `.env` turned plan enforcement off inside the suites and four tests in `tests/entitlements.spec.ts` failed — the tests were right and the environment was wrong, which is the confusing direction for that to happen in.
 
-Anything that can switch a behaviour off is therefore **pinned in the test configuration**, not left to the environment: `backend/vitest.config.ts`, `backend/vitest.integration.config.ts` and `playwright.config.ts` all set `RATE_LIMIT_*` high and `DEV_PLAN_KEY: ''`, and the two vitest configs also pin `REDIS_URL: ''` — a local `REDIS_URL` would otherwise queue every embed onto a worker no suite is running, and every embed assertion would be measuring a document nothing ever wrote. Set it to the empty string rather than leaving it out — dotenv fills in a key that is absent from `process.env` and leaves alone one that is already there.
+Anything that can switch a behaviour off is therefore **pinned in the test configuration**, not left to the environment: `backend/vitest.config.ts`, `backend/vitest.integration.config.ts` and `playwright.config.ts` all set `RATE_LIMIT_*` high and `DEV_PLAN_KEY: ''`, and **all three** now pin `REDIS_URL: ''` — `playwright.config.ts` joined the list in features/0018, because `REDIS_URL` had stopped meaning only “the embed moves to a worker nobody started” and started also meaning “rate limiting fails closed if that Redis is not there” — a local `REDIS_URL` would otherwise queue every embed onto a worker no suite is running, and every embed assertion would be measuring a document nothing ever wrote. Set it to the empty string rather than leaving it out — dotenv fills in a key that is absent from `process.env` and leaves alone one that is already there.
 
 **Add a line to all three whenever you add a setting that can disable something.** A suite that passes because a feature was switched off is worse than a failing one.
 
@@ -156,7 +158,7 @@ The last row is the remaining coverage gap of this kind: nothing verifies the ca
 | **No PDF round-trip test** | Nothing verifies that embedded AcroForm positions match what the editor showed |
 | **Coverage collected but not enforced** | Coverage can fall silently; Codecov failures are ignored |
 | **Database-backed coverage is narrow** | Only the bulk save and archived-field visibility are covered. Form deletion, response submission and the `syncFieldsFromPDF` side effect still have no real-database test |
-| **The queued embed path is not in CI** | `tests/integration/pdf-embed-queue.spec.ts` skips unless `TEST_REDIS_URL` is set, and no workflow sets it. The path is verified by hand and locally; a Redis service in the integration job would close this |
+| **The Redis-backed paths are not in CI** | `tests/integration/pdf-embed-queue.spec.ts` and `rate-limit-store.spec.ts` both skip unless `TEST_REDIS_URL` is set, and no workflow sets it. Both are verified by hand and locally; one Redis service in the integration job would close this for both |
 
 When lint is added, use flat config (`eslint.config.js`) — the rest of the toolchain is on versions that assume it.
 
