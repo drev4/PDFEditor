@@ -58,7 +58,11 @@ Browser ── Vite dev server / static build (Vue SPA)
 
 Storage:    services/pdf-storage.ts  ← `local` (backend/uploads/pdfs) or `s3`
 Queue:      services/embed-queue.ts  ← absent unless `REDIS_URL` is set
+Redis:      services/redis.ts        ← the only module that opens a connection;
+                                       serves the queue *and* the rate limiters
 ```
+
+`REDIS_URL` switches two things at once, and this is the place to see it: the PDF embed moves to the worker, and the rate limiters move from a per-process counter to a shared one ([`features/0018`](../../features/0018-shared-rate-limit-store.md)). Both are optional and both default to the in-process behaviour, so a single-replica deployment needs no Redis at all — and **more than one API replica needs it for both reasons**, which is the one-line rule in [08-operations.md](./08-operations.md).
 
 The worker is the **same image with a different entrypoint**, not a second service: it imports the same `pdf-embed`, `pdf-storage` and Prisma modules the API does. It is needed only when `REDIS_URL` is set, and then it is **required** — with a queue configured and no worker alive, jobs accumulate and no form's PDF is ever rewritten, silently ([08-operations.md](./08-operations.md)).
 

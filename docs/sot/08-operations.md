@@ -54,8 +54,8 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `PDF_STORAGE_ACCESS_KEY_ID` / `PDF_STORAGE_SECRET_ACCESS_KEY` | no | unset | Leave both empty to use the SDK's own credential chain (instance roles, IRSA, `~/.aws/credentials`) |
 | `PDF_STORAGE_FORCE_PATH_STYLE` | no | `false` | `true` for MinIO, which has no wildcard DNS so the bucket goes in the path |
 | `PDF_STORAGE_PREFIX` | no | `pdfs/` | Key prefix, so a shared bucket stays legible and a lifecycle rule can target these objects |
-| `REDIS_URL` | no | unset | **Unset means there is no job queue** and the PDF embed runs inline in the request, exactly as it always has. Set it and bulk save enqueues instead — which means a worker process must be running. See below |
-| `REDIS_KEY_PREFIX` | no | `vuepdf` | Namespace for every key this application writes in Redis, so one Redis can be shared |
+| `REDIS_URL` | no | unset | **Drives two subsystems.** Unset means there is no job queue (the PDF embed runs inline, as it always has) *and* rate limiting counts per process. Set, bulk save enqueues — so a worker must be running — *and* the five limiters count in one shared store. See both sections below |
+| `REDIS_KEY_PREFIX` | no | `vuepdf` | Namespace for every key this application writes in Redis, so one Redis can be shared. Rate-limit keys are `<prefix>:rl:<limiter>:<client>` |
 | `EMBED_WORKER_CONCURRENCY` | no | `5`, min `1` | Embed jobs one worker runs at once. Jobs for the same form never overlap regardless — that is a lock, not a consequence of this number |
 | `EMBED_JOB_ATTEMPTS` | no | `5`, min `1` | Tries before an embed job is given up on, with exponential backoff. Exhausting them logs `EMBED GAVE UP` — see below |
 | `TRUST_PROXY_HOPS` | no | `0` | **Number of reverse proxies in front of this process.** See below — it decides whether rate limiting works |
@@ -122,6 +122,35 @@ docker compose up -d redis                # a local Redis; nothing else requires
 **Rolling back to inline is an environment variable**: empty `REDIS_URL`, restart the API, stop the worker. Nothing needs migrating — a queued job is reconstructible, and any later save embeds from the current fields. Jobs still sitting in Redis at that moment are abandoned, so drain the queue first if it is deep.
 
 **Deploying the worker.** It is the same build (`npm run build --workspace=backend`) with `node dist/worker.js` as the command, and it needs the same `DATABASE_URL`, the same PDF storage variables and the same `REDIS_URL` as the API. On `SIGTERM` it finishes the job it is running before exiting, so a rolling deploy does not abandon a half-written document — give it a termination grace period longer than one embed takes. Note that a **hard** kill (`SIGKILL`, an OOM) does not lose the job: BullMQ recovers it as stalled and another worker re-runs it, which is safe because the embed is idempotent.
+
+### Rate limiting, and what a shared store changes
+
+`REDIS_URL` also decides where the rate limiters count ([`features/0018`](../../features/0018-shared-rate-limit-store.md)). Unset: an in-memory counter per process, which is correct at one replica and is what every test suite runs on. Set: one counter for the whole service, which is the only version that means anything above one replica — an in-memory limit multiplies by replica count and resets on every deploy.
+
+**Which store a process ended up with is in its log**, once, on the first limited request:
+
+```
+Rate limiting is counting in Redis (shared across every replica)
+Rate limiting is counting in-memory (per process; correct at one replica, and the limit multiplies by replica count above that)
+```
+
+**More than one API replica means `REDIS_URL`.** It is also what closes the cross-replica embed race — see the queue section above — so the rule is one line: scaling out is not supported without Redis and a worker.
+
+**A Redis outage rejects limited requests; it does not let them through.** `passOnStoreError` is `false`, deliberately and with the argument written down in [07-security](./07-security-and-privacy.md). In practice: while Redis is unreachable, login, registration, session refresh, invitation acceptance and public form submission answer `5xx` in about two seconds each, and everything else in the product keeps working. **The rollback is one step** — empty `REDIS_URL` and restart, which returns that process to per-instance limits rather than to none. Do not "fix" an outage by flipping `passOnStoreError`.
+
+**Clearing one locked-out identity.** Counters now survive a restart, so bouncing the API no longer unlocks anybody — that used to be the accidental remedy and it is gone. There is no self-service unlock and no admin endpoint; the keys are plain and can be inspected and deleted directly:
+
+```bash
+# What is currently limited (the client part is an IP or an IPv6 subnet):
+redis-cli --scan --pattern 'vuepdf:rl:*'
+# Example key: vuepdf:rl:login:::1/56
+# Clear one identity on one limiter:
+redis-cli DEL 'vuepdf:rl:login:<client>'
+# Clear everything for one limiter (use with care - it lifts the limit for all):
+redis-cli --scan --pattern 'vuepdf:rl:login:*' | xargs -r redis-cli DEL
+```
+
+Substitute `REDIS_KEY_PREFIX` if it is not the default. A locked-out user is otherwise limited until the window expires: 15 minutes for login, refresh and invitations, an hour for registration, 10 minutes for submissions.
 
 ### `DEV_PLAN_KEY`, and the allowlist that makes it safe
 

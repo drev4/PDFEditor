@@ -1,6 +1,6 @@
 # 0018 — One rate limit for the whole service, not one per replica
 
-**Status:** in progress
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Shared rate-limit store (Redis)*)
 **Branch:** `feature/0018-shared-rate-limit-store`
 **Related:** [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [04-backend-patterns §7](../docs/sot/04-backend-patterns.md) · [08-operations](../docs/sot/08-operations.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [`features/0002`](0002-rate-limiting-on-public-write-paths.md) · [`features/0017`](0017-job-queue-for-pdf-embedding.md)
@@ -162,4 +162,69 @@ Each limiter has its own `MemoryStore` today, and `resetRateLimitStores()` — c
 
 ## Outcome
 
-*(filled in when the work is finished)*
+**Shipped**, in two commits: the extraction (`3fdbd7b`) and the store (`83f4238`).
+
+### What shipped
+
+- `backend/src/services/redis.ts` — the only module that opens a Redis connection, and now the only one that imports `ioredis` at all (the `Redis` type is re-exported so not even a type import escapes it). `connectRedis(role)` carries the per-role options and the reasoning behind each.
+- `backend/src/middleware/rateLimit.ts` — the five limiters became a named catalogue plus `buildRateLimiter(name)`. With `REDIS_URL` set they count in Redis (`rate-limit-redis`), one key namespace per limiter under `REDIS_KEY_PREFIX`; without it, `MemoryStore` exactly as before.
+- `backend/tests/integration/rate-limit-store.spec.ts` (3 tests, needs `TEST_REDIS_URL`) and `rate-limit-failure.spec.ts` (3 tests, **needs no Redis, so CI runs it**).
+- `playwright.config.ts` pins `REDIS_URL: ''`, joining the two vitest configs.
+
+### The failing test, first
+
+Written before the store and run against `MemoryStore`:
+
+```
+× counts a client once across two independently built limiters
+× gives each limiter its own counter, so one cannot exhaust another
+× keeps counting across a restart, unlike the in-memory store
+  AssertionError: expected 200 to be 429
+```
+
+The middle one was **my test being wrong, not the code**: `login` carries `skipSuccessfulRequests`, so a probe that answers 200 is refunded every hit and the limiter never bites. Using `responses` and `register` fixed it, and that test then passed on both stores — which is correct, since separate counters are true of the memory store too. The other two are the property this feature exists for, and they failed for exactly the right reason.
+
+### Two decisions, both argued rather than defaulted into
+
+**`passOnStoreError: false`.** A Redis outage rejects limited requests instead of letting them through. The alternative is not a degraded limiter — it is *no* limiter on the entire unauthenticated write surface for the duration, with a 200 on every request and nothing in the logs. The argument is now in [07-security](../docs/sot/07-security-and-privacy.md) to the same standard as the webhook's missing limiter, and `rate-limit-failure.spec.ts` asserts that ten requests against a dead store never answer 200. The memory-fallback store the spec told me to reject was rejected.
+
+**`enableOfflineQueue` stays on, and this one was measured, not reasoned.** Turning it off is the obvious way to make an outage fail fast, and it does — 15.5 s per request down to 0.5 s. It also breaks the healthy case: with the offline queue disabled, the first command issued while the socket is still connecting fails against a perfectly good Redis with *"Stream isn't writeable"*. That did not show up running the new spec alone; it turned it red the moment two spec files shared a process, which is the closest thing to production the suite has. **Bounding the timeouts was the right lever; refusing to wait at all was not.** With `connectTimeout`/`commandTimeout` at 2 s the black-hole case answers in ~4 s and the healthy case is unaffected.
+
+That is also why the `rate-limit` role exists in `services/redis.ts` rather than sharing the queue's options: the limiter sits in front of login, and the queue's 10 s command timeout is a fine number for a background embed and a terrible one for a sign-in.
+
+### Verification
+
+```
+npm run test:backend                                     16 specs, 206 tests passed
+npm run test:integration                                 16 specs, 145 passed, 2 specs (6 tests) skipped
+TEST_REDIS_URL=… npm run test:integration                18 specs, 151 tests passed
+npm run test:frontend                                    38 specs, 321 tests passed
+npm run test:e2e                                         50 passed (18.8s)
+npm run build --workspace=frontend                       built in 5.77s
+cd backend && npx tsc --noEmit && npm run typecheck:tests clean
+```
+
+**Two replicas against one Redis** — the check no single-process test can make. `RATE_LIMIT_LOGIN_MAX=3`, one API on 3101 and another on 3102:
+
+```
+Rate limiting is counting in Redis (shared across every replica)   (both processes)
+A:401 A:401 A:401          three failed logins against the first replica
+B:429                      the fourth, against the second one
+{"error":"Too many failed login attempts. Please wait a few minutes and try again."}
+after restart: 429         a third process, started fresh - the counter survived
+key: vuepdf-manual:rl:login:::1/56
+```
+
+Before this feature the fourth attempt on replica B would have been a `401` — a fresh counter — and the restart would have cleared everything.
+
+### What was deliberately not done
+
+No global fallback limiter, no account-level lockout, no other state moved into Redis, and Redis is still optional. `services/organization-lock.ts` stays in-process.
+
+One row was **added** rather than closed: clearing a locked-out identity is a documented `redis-cli DEL`, which is fine for an operator and is not a support process. It belongs with the unlock flow that account-level lockout needs anyway.
+
+`rate-limit-store.spec.ts` joins the queued-embed spec in needing `TEST_REDIS_URL`, which no workflow sets. One Redis service in the integration job would close both, and that gap is filed in [09-quality-and-testing](../docs/sot/09-quality-and-testing.md).
+
+### One thing found on the way, and left alone
+
+Limiters are now built on their **first request** rather than at import, because `src/app.ts` calls `dotenv.config()` in its body and ES imports evaluate first — so at import time `backend/.env` has not been read. That is not new: `windowMs` has always been read at import, which means a `RATE_LIMIT_*_WINDOW_MS` in a developer's `.env` has never taken effect locally, while the *limit* (read per request) has. Not fixed here — it changes no production behaviour, since a deployment passes real environment variables rather than a `.env` file — and not worth a backlog row on its own; the laziness introduced here makes the store immune to it, which was the part that mattered.

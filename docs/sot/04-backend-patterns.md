@@ -123,6 +123,10 @@ authRouter.post('/login', loginRateLimit, async (req, res, next) => { … })
 
 Applied at the route, not globally, for the same reason auth is: the guard has to be visible when you read the handler. There is deliberately no global limiter — the authenticated editor legitimately bursts (a bulk field save, a PDF upload), and a global number that does not break it would be a guess.
 
+**Where the count lives is configuration** ([`features/0018`](../../features/0018-shared-rate-limit-store.md)). `REDIS_URL` unset means an in-memory store per process — correct at one replica, and what every suite runs on; set, it means one shared store, so the limit belongs to the service rather than to whichever replica answered. The pattern above does not change: a new public endpoint still adds a named limiter and applies it at the route, and it inherits the store automatically.
+
+Three things about it are worth knowing before touching that file. Limiters are built **on their first request, not at import**, because `dotenv.config()` runs in `app.ts`'s body and ES imports evaluate first — choosing a store at import would ignore a developer's `.env` and silently pick memory. Each limiter gets **its own key namespace**, so a burst of public submissions cannot consume the login budget. And a store failure **rejects** the request (`passOnStoreError: false`), which is a security decision argued in [07-security](./07-security-and-privacy.md) rather than a default nobody chose.
+
 Three things about them are decisions rather than defaults:
 
 - **Limits come from the environment**, so the test suites and CI can set their own without weakening the production default. The window is fixed at startup; the limit is read per request, which is what lets a test drive the real configuration path instead of reaching into the limiter.
