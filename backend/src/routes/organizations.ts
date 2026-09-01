@@ -11,6 +11,9 @@ import { issueRefreshToken } from '../services/refresh-token.js'
 import { setRefreshCookie } from '../services/session-cookie.js'
 import { assertCanInvite, assertHasApiAccess, getEntitlements } from '../services/entitlements.js'
 import { mintApiKey } from '../services/api-key.js'
+import { mintWebhookSecret, isWebhookSigningConfigured } from '../services/webhooks.js'
+import { assertDeliverableUrl } from '../services/webhook-egress.js'
+import { isEmbedQueueEnabled } from '../services/embed-queue.js'
 import { subscriptionFor } from '../services/stripe.js'
 import {
   createInvitation,
@@ -500,6 +503,147 @@ organizationsRouter.delete('/api-keys/:id', authenticate, async (req: AuthReques
     // revoke the keys it minted while it had it. Turning off a credential is
     // never something to charge for.
     res.json({ message: 'API key revoked' })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// --- Webhook endpoints (features/0020) --------------------------------------
+//
+// Managed from the session-authenticated API, like API keys and for the same
+// reason: a credential that could add a new place for customer data to be sent
+// would turn one leaked key into an exfiltration channel.
+
+const webhookSchema = z.object({
+  url: z.string().min(1).max(2000),
+  // Only one event exists. A list rather than a boolean so that adding the
+  // second one is not a migration and not a breaking change.
+  events: z.array(z.enum(['response.created'])).min(1).default(['response.created'])
+})
+
+/**
+ * Webhooks need two things this deployment may not have, and **both refusals
+ * are loud**.
+ *
+ * This is the deliberate inverse of the hole features/0017 left and documented:
+ * there, a queue configured with no worker running fails silently and every
+ * PDF quietly falls behind. A feature whose entire purpose is to tell somebody
+ * that something happened must never accept a configuration it cannot deliver.
+ */
+function assertWebhooksConfigured() {
+  if (!isEmbedQueueEnabled()) {
+    throw new AppError(
+      503,
+      'Webhooks require the job queue. Set REDIS_URL and run a worker; delivering ' +
+      'inline is not an option, because retries cannot happen inside a request.'
+    )
+  }
+
+  if (!isWebhookSigningConfigured()) {
+    throw new AppError(
+      503,
+      'Webhooks require WEBHOOK_SIGNING_KEY (32 bytes, base64), which encrypts ' +
+      'endpoint secrets at rest.'
+    )
+  }
+}
+
+/** What a customer sees. Never the secret, encrypted or otherwise. */
+const webhookSelect = {
+  id: true,
+  url: true,
+  events: true,
+  disabledAt: true,
+  lastError: true,
+  consecutiveFailures: true,
+  createdAt: true
+} as const
+
+// GET /api/organizations/webhooks - owner or admin.
+organizationsRouter.get('/webhooks', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+
+    const webhooks = await prisma.webhookEndpoint.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      select: webhookSelect
+    })
+
+    // Listing works even when the deployment cannot deliver, on purpose: seeing
+    // what is configured is how somebody diagnoses why nothing is arriving.
+    res.json({ webhooks, deliverable: isEmbedQueueEnabled() && isWebhookSigningConfigured() })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/organizations/webhooks - owner or admin. Returns the secret ONCE.
+organizationsRouter.post('/webhooks', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+
+    const validation = webhookSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
+    }
+
+    assertWebhooksConfigured()
+
+    // Same entitlement as the read API, and checked again on every delivery
+    // (`services/webhook-queue.ts`) so a downgrade stops deliveries rather than
+    // waiting for somebody to notice - the fix features/0019 needed after review.
+    await assertHasApiAccess(organizationId)
+
+    // `https`, no credentials, and no hostname that resolves inside. Refused
+    // here so the customer finds out while they are looking at the screen, and
+    // checked again at delivery time because DNS can change under a name that
+    // was public when it was saved.
+    const { url } = await assertDeliverableUrl(validation.data.url)
+
+    const { secret, stored } = mintWebhookSecret()
+
+    const endpoint = await prisma.webhookEndpoint.create({
+      data: {
+        organizationId,
+        url: url.toString(),
+        secret: stored,
+        events: validation.data.events,
+        createdByUserId: req.userId!
+      },
+      select: webhookSelect
+    })
+
+    res.status(201).json({ webhook: { ...endpoint, secret } })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// DELETE /api/organizations/webhooks/:id - owner or admin.
+organizationsRouter.delete('/webhooks/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+    const id = req.params.id as string
+
+    // Scoped in the `where`, so another organization's endpoint is a 404 and is
+    // never touched - the rule from docs/sot/04-backend-patterns.md §9.
+    const endpoint = await prisma.webhookEndpoint.findFirst({
+      where: { id, organizationId },
+      select: { id: true }
+    })
+
+    if (!endpoint) throw new AppError(404, 'Webhook endpoint not found')
+
+    // A real delete, unlike an API key's revocation. There is nothing here worth
+    // keeping a tombstone for: the deliveries cascade with it, and they hold no
+    // payload (see schema.prisma) - only a record that this endpoint was told,
+    // which is meaningless once the endpoint is gone.
+    await prisma.webhookEndpoint.delete({ where: { id } })
+
+    // No plan check and no queue check: turning delivery off must work on a
+    // deployment that can no longer deliver, and after a downgrade.
+    res.json({ message: 'Webhook endpoint deleted' })
   } catch (error) {
     next(error)
   }
