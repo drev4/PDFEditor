@@ -9,7 +9,8 @@ import { requireMembership, requireRole, assertNotLastOwner } from '../middlewar
 import { invitationRateLimit } from '../middleware/rateLimit.js'
 import { issueRefreshToken } from '../services/refresh-token.js'
 import { setRefreshCookie } from '../services/session-cookie.js'
-import { assertCanInvite, getEntitlements } from '../services/entitlements.js'
+import { assertCanInvite, assertHasApiAccess, getEntitlements } from '../services/entitlements.js'
+import { mintApiKey } from '../services/api-key.js'
 import { subscriptionFor } from '../services/stripe.js'
 import {
   createInvitation,
@@ -401,3 +402,105 @@ async function joinOrganization(
     await tx.invitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date() } })
   })
 }
+
+// ─── API keys (features/0019) ────────────────────────────────────────────────
+//
+// The management surface lives here, on the session-authenticated router, and
+// deliberately not on `/api/v1`: a credential that could mint more credentials
+// would turn one leaked key into permanent access. Creating and revoking keys
+// is something a person does while signed in.
+
+const apiKeySchema = z.object({
+  name: z.string().min(1).max(100)
+})
+
+// GET /api/organizations/api-keys — owner or admin.
+organizationsRouter.get('/api-keys', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+
+    const apiKeys = await prisma.apiKey.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      // No `hash`, and no way to get one. The secret was shown once, when the
+      // key was created, and this endpoint is the reason there is no "reveal":
+      // anything that can return a key twice is storing a password.
+      select: {
+        id: true,
+        name: true,
+        prefix: true,
+        lastUsedAt: true,
+        revokedAt: true,
+        createdAt: true
+      }
+    })
+
+    res.json({ apiKeys })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/organizations/api-keys — owner or admin. Returns the secret ONCE.
+organizationsRouter.post('/api-keys', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+
+    const validation = apiKeySchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
+    }
+
+    // After the role check and before anything is written. `402` is a plan
+    // limit and `403` is a permission failure, and they are never collapsed
+    // (features/0012) — so a member who is not an admin hears `403` from
+    // `requireRole` above, and an admin on a plan without the API hears `402`
+    // here.
+    await assertHasApiAccess(organizationId)
+
+    const key = await mintApiKey({
+      organizationId,
+      name: validation.data.name,
+      createdByUserId: req.userId!
+    })
+
+    // `secret` appears in this response and nowhere else, ever.
+    res.status(201).json({ apiKey: key })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// DELETE /api/organizations/api-keys/:id — owner or admin. Revokes; never deletes.
+organizationsRouter.delete('/api-keys/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+    const id = req.params.id as string
+
+    // Scoped to the caller's organization in the `where`, not checked
+    // afterwards: a key id belonging to another tenant must be a `404` and must
+    // never be revoked. Same rule as every other tenant-scoped read
+    // (docs/sot/04-backend-patterns.md §9).
+    const key = await prisma.apiKey.findFirst({
+      where: { id, organizationId },
+      select: { id: true, revokedAt: true }
+    })
+
+    if (!key) throw new AppError(404, 'API key not found')
+
+    // Revoking twice is not an error: the customer wanted it dead and it is.
+    // Re-stamping the timestamp would rewrite the record of when access
+    // actually stopped.
+    if (!key.revokedAt) {
+      await prisma.apiKey.update({ where: { id }, data: { revokedAt: new Date() } })
+    }
+
+    // No plan check here, on purpose: an organization that has *lost* API
+    // access — a downgrade, a lapsed subscription — must still be able to
+    // revoke the keys it minted while it had it. Turning off a credential is
+    // never something to charge for.
+    res.json({ message: 'API key revoked' })
+  } catch (error) {
+    next(error)
+  }
+})

@@ -300,6 +300,33 @@ export async function assertCanInvite(organizationId: string): Promise<void> {
 }
 
 /**
+ * Whether this organization may use the public API at all (features/0019).
+ *
+ * `Plan.hasApiAccess` had sat in the catalogue since features/0012 with nothing
+ * reading it; this is the reader. Note what wiring it makes true: it is `true`
+ * only on Team, so **a Free or Pro customer creating an API key gets a `402`**.
+ * That is the catalogue working rather than a bug, and it is the first place a
+ * paid plan is visibly less *capable* rather than smaller.
+ *
+ * `402` and never `403`, like every other plan limit (features/0012): a `403`
+ * here would tell an owner they lack permission for something no permission can
+ * grant. The distinction is asserted in `tests/integration/api-keys.spec.ts`.
+ *
+ * Through `effectivePlan` like every other check, so `DEV_PLAN_KEY` governs it -
+ * and `DEV_PLAN` grants it, so local development never sees the `402` unless
+ * `DEV_PLAN_KEY=free|pro` is set on purpose.
+ */
+export async function assertHasApiAccess(organizationId: string): Promise<void> {
+  const plan = await planFor(organizationId)
+  if (plan.hasApiAccess) return
+
+  throw new AppError(
+    402,
+    `The ${plan.name} plan does not include API access. Upgrade to use the API.`
+  )
+}
+
+/**
  * Whether this organization's public forms must carry the "Made with VuePDF"
  * mark (features/0014).
  *

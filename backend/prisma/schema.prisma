@@ -18,6 +18,7 @@ model User {
   memberships   Membership[]
   sentInvitations Invitation[]
   refreshTokens RefreshToken[]
+  createdApiKeys ApiKey[]
 
   @@map("users")
 }
@@ -53,8 +54,63 @@ model Organization {
   invitations Invitation[]
   usageCounters UsageCounter[]
   subscription  Subscription?
+  apiKeys       ApiKey[]
 
   @@map("organizations")
+}
+
+/// A credential that authenticates an **organization**, not a person
+/// (features/0019).
+///
+/// This is the second way into this API and the only one with no user behind
+/// it. Everything under `/api/*` resolves a `Membership` from `req.userId`
+/// (`middleware/formOwnership.ts`); `/api/v1/*` resolves this row instead and
+/// scopes on `organizationId` directly. Giving a key a user id was rejected
+/// deliberately: it would tie a customer's integration to one employee, so
+/// removing that person from the organization would silently break production.
+///
+/// `createdByUserId` is provenance and never an authorization input, exactly
+/// like `Form.createdByUserId` — and nullable for the same reason, so deleting
+/// a user does not delete the organization's working credentials.
+///
+/// **`hash` is a SHA-256 of the secret, not bcrypt.** The same decision, for the
+/// same reason, as `RefreshToken.tokenHash`: the secret is 32 bytes of CSPRNG
+/// output rather than a human password, so there is nothing to brute force, and
+/// this one is verified on *every* API request — a deliberately slow hash there
+/// is a CPU sink an attacker feeds with invalid keys.
+///
+/// `prefix` is the public half: it identifies which row to check without being
+/// a credential, so verification is one indexed lookup plus one constant-time
+/// comparison rather than a scan of every key in the table.
+model ApiKey {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  /// Chosen by the customer, so a key can be recognised in a list before it is
+  /// revoked. Not unique: naming two keys "CI" is their business.
+  name           String
+  /// Public identifier, embedded in the secret the customer holds.
+  prefix         String    @unique
+  /// SHA-256 of the full secret, hex. The secret itself is returned once, when
+  /// the key is created, and stored nowhere.
+  hash           String
+  /// Provenance only. Null once that user is deleted; the key keeps working,
+  /// because it belongs to the organization.
+  createdByUserId String?  @map("created_by_user_id")
+  /// Roughly when the key was last accepted. Written at most once a minute per
+  /// key (`services/api-key.ts`), because an API that is mostly reads must not
+  /// turn every read into a write on this row.
+  lastUsedAt     DateTime? @map("last_used_at")
+  /// Revocation is a timestamp rather than a delete, so a customer can still
+  /// see that a key existed and when it stopped working. A revoked key is
+  /// refused on the next request - there is no cache in front of this table.
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("api_keys")
 }
 
 /// One row per organization per calendar month: how many responses that

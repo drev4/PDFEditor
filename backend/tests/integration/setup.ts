@@ -22,9 +22,12 @@ beforeEach(async () => {
   // organization's monthly allowance. `stripe_events` is named for the same
   // reason and is *not* reached by any cascade — it deliberately has no
   // relation to an organization — so a Stripe event id left behind would make
-  // the next test's replay look like a duplicate and write nothing.
+  // the next test's replay look like a duplicate and write nothing. `api_keys`
+  // is named for the visibility reason rather than the correctness one: it does
+  // cascade from `organizations`, but a live credential surviving into the next
+  // test is the kind of thing a reader should see cleared rather than infer.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "usage_counters", "subscriptions", "stripe_events", "invitations", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "usage_counters", "subscriptions", "stripe_events", "invitations", "api_keys", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
   )
 })
 

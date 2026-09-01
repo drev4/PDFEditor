@@ -1,8 +1,9 @@
-import { rateLimit, MemoryStore, MINUTE, HOUR, type Store } from 'express-rate-limit'
-import type { RequestHandler } from 'express'
+import { rateLimit, ipKeyGenerator, MemoryStore, MINUTE, HOUR, type Store } from 'express-rate-limit'
+import type { Request, RequestHandler } from 'express'
 import { RedisStore } from 'rate-limit-redis'
 import { envInt } from '../config/env.js'
 import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from '../services/redis.js'
+import type { ApiKeyRequest } from './apiKeyAuth.js'
 
 // Rate limiters for the unauthenticated write paths. These are the whole of the
 // external attack surface that costs an attacker nothing: credential stuffing
@@ -50,7 +51,7 @@ function rateLimitClient(): Promise<Redis> {
  * limiter counts separately, so a burst of form submissions cannot consume
  * somebody's login budget (features/0018).
  */
-export type LimiterName = 'login' | 'register' | 'refresh' | 'invitation' | 'responses'
+export type LimiterName = 'login' | 'register' | 'refresh' | 'invitation' | 'responses' | 'api'
 
 interface LimiterConfig {
   /** Environment variable holding the window length, in milliseconds. */
@@ -67,6 +68,11 @@ interface LimiterConfig {
    * bite on failed attempts.
    */
   skipSuccessfulRequests?: boolean
+  /**
+   * What identity the count belongs to. Defaults to the client address, which
+   * is right for a browser and wrong for a machine — see `api` below.
+   */
+  keyBy?: (req: Request) => string
 }
 
 const LIMITERS: Record<LimiterName, LimiterConfig> = {
@@ -115,6 +121,42 @@ const LIMITERS: Record<LimiterName, LimiterConfig> = {
     limitEnv: 'RATE_LIMIT_INVITATION_MAX',
     limitDefault: 20,
     message: 'Too many invitation attempts from this address. Please try again in a few minutes.'
+  },
+
+  /**
+   * `/api/v1/*` - the published API (features/0019).
+   *
+   * **Keyed on the API key, not on the address**, which is the one limiter here
+   * that is not per-IP and the reason `keyBy` exists. A customer's integration
+   * calls from one server, so a per-IP limit would be a per-customer limit by
+   * accident and would collapse the moment two customers sat behind the same
+   * NAT or the same cloud egress address.
+   *
+   * The fallback matters as much as the rule: a request with **no** valid key
+   * has no id to count against, so it falls back to the address. Without that,
+   * an attacker gets an unlimited budget simply by not authenticating - the
+   * cheapest possible bypass.
+   *
+   * The number is generous because it is *published* (see
+   * docs/sot/06-api-reference.md): a limit an integration trips over during
+   * normal use is a support ticket, and this exists to stop a runaway loop
+   * rather than to ration.
+   */
+  api: {
+    windowEnv: 'RATE_LIMIT_API_WINDOW_MS',
+    windowDefault: 1 * MINUTE,
+    limitEnv: 'RATE_LIMIT_API_MAX',
+    limitDefault: 120,
+    keyBy: (req: Request) => {
+      // `apiKey` is set by `middleware/apiKeyAuth.ts`, which runs before this
+      // limiter on the same router.
+      const keyId = (req as ApiKeyRequest).apiKey?.id
+      // `ipKeyGenerator` rather than `req.ip`: it normalises IPv6 to a subnet,
+      // which is what the library's own default does and what stops one client
+      // rotating through addresses inside its /56.
+      return keyId ? `key:${keyId}` : `ip:${ipKeyGenerator(req.ip ?? '')}`
+    },
+    message: 'Too many API requests. Slow down and try again shortly.'
   },
 
   /** `POST /api/responses` - garbage submissions into a published form. */
@@ -216,6 +258,7 @@ function createLimiter(name: LimiterName): RequestHandler {
 
     store: entry.store,
     skipSuccessfulRequests: config.skipSuccessfulRequests ?? false,
+    ...(config.keyBy ? { keyGenerator: config.keyBy } : {}),
 
     // **A store that errors rejects the request; it does not wave it through.**
     // The default, made explicit because it is the security decision this
@@ -259,6 +302,7 @@ export const registerRateLimit = buildRateLimiter('register')
 export const refreshRateLimit = buildRateLimiter('refresh')
 export const invitationRateLimit = buildRateLimiter('invitation')
 export const responseRateLimit = buildRateLimiter('responses')
+export const apiRateLimit = buildRateLimiter('api')
 
 /**
  * Clears every limiter's hit counts. For tests only — the suites share one

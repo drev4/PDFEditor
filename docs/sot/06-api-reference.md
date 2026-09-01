@@ -6,6 +6,11 @@ Base URL: `VITE_API_URL` on the frontend, default `http://localhost:3000/api`.
 
 Nothing gets added to this file without opening the route file first — see the `api-contract-guard` skill.
 
+> **Two audiences, and only one of them is a promise** ([`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md)).
+>
+> - **`/api/v1/**` is the published API.** It is authenticated by an API key, it is what customers integrate against, and its shapes cannot change without breaking somebody. Adding a field is fine; renaming or removing one is a versioned, announced event.
+> - **Everything else under `/api/*` is internal.** It exists to serve `frontend/`, it is authenticated by a session, and it may change in any release. This document describes it for *our* benefit, not as a contract. Do not point an integration at it, and do not point the SPA at `/api/v1` "for consistency" — that would make every internal change a public API change.
+
 
 > **Every route that returns a form returns its `_count`** (`fields` excluding archived, and `responses`). This was not true — only `GET /api/forms` included it — and the share dialog, which reads `_count.responses`, showed 0 for a form with hundreds the moment it was published, because `PATCH /:id/status` returned a form without counts and the client wrote that over the row it had. The shape is defined once as `formCounts` in `backend/src/routes/forms.ts`. Covered by `backend/tests/integration/form-counts.spec.ts`, which needs a real database because `_count` is computed by one.
 
@@ -20,6 +25,7 @@ Nothing gets added to this file without opening the route file first — see the
 /api/responses  -> responsesRouter
 /uploads/pdfs/:token/:filename  -> signed PDF download (no auth; the signature IS the capability)
 /uploads/*                      -> 404 (the old unauthenticated static mount is gone)
+/api/v1         -> v1Router             (published; API key auth — see below)
 /health         -> { status, timestamp }
 ```
 
@@ -254,6 +260,47 @@ Unauthenticated on purpose: an anonymous respondent has to load the PDF of a pub
 **Every response that carries a form carries a freshly signed `pdfUrl`** — `GET /api/forms`, `GET /api/forms/:id`, `GET /api/forms/public/:shareId`, `POST /api/forms`, `PUT /api/forms/:id`, `PATCH /api/forms/:id/status`. All of them go through one `toApiForm` serializer in `routes/forms.ts`. Conversely `POST /api/forms` and `PUT /api/forms/:id` normalise an incoming `pdfUrl` back to canonical form before writing, so a client echoing back a value it read cannot persist a signature.
 
 TTL is configuration — [08-operations](./08-operations.md#configuration).
+
+## The published API — `routes/v1/`
+
+**The only part of this document that is a contract.** Authenticated by an API key, never by a session token; a session token here answers `401`, and an API key on any other route answers `401` too.
+
+```
+Authorization: Bearer vpk_<prefix>_<secret>
+```
+
+Keys are minted from the internal API (below), belong to an **organization** rather than to a person, and are read from the database on every request — so revoking one takes effect on the next call.
+
+| Endpoint | Answers |
+|---|---|
+| `GET /api/v1/forms` | `{ data: Form[], pagination }` — the calling organization's forms, newest first |
+| `GET /api/v1/forms/:id` | One form plus its live `fields`; `404` if it belongs to anybody else |
+| `GET /api/v1/forms/:id/responses` | `{ data: Response[], pagination }`, answers keyed by **field name** |
+| `GET /api/v1/forms/:id/responses.csv` | The same export the SPA downloads, unpaginated |
+
+`Form` is `{ id, title, description, status, shareId, createdAt, updatedAt }` and `Field` is `{ id, name, label, type, required, order, options?, archived }`. **Field ids are stable across saves** ([`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md)), which is what makes them safe for an integration to store. `archived: true` means the question is no longer asked but its past answers remain.
+
+Deliberately absent from every response: `organizationId`, `createdByUserId`, `planKey`, and anything else about the tenant or its billing. Bodies are built explicitly rather than serialised from Prisma rows, so adding a column never publishes it by accident.
+
+**Pagination** is `?limit=` (default 20, maximum 100) and `?offset=`, and every list answers `{ data, pagination: { total, limit, offset } }`.
+
+**Rate limit: 120 requests per minute per key** (`RATE_LIMIT_API_MAX` / `RATE_LIMIT_API_WINDOW_MS`). It counts **per API key**, not per IP address — an integration calling from one server is one caller, and two customers behind the same address do not share a budget. A request with no valid key is limited by address instead, so not authenticating is not a way around it. Over the limit is a `429` in the shape described under *The 429 response* above.
+
+**Errors** use the same `{ error }` shape as the rest of the API. `401` covers every authentication failure — missing, malformed, unknown, revoked — without distinguishing them. `402` is different and is not an authentication failure: the key is valid and the caller is who they say they are, but the organization's plan no longer includes API access. **It is checked on every request, not only when the key was minted**, so a downgrade stops the integration at the next call rather than whenever somebody remembers to revoke the key. `404` covers both "no such form" and "not yours", deliberately: a `403` would confirm that an id exists.
+
+**Read-only, for now.** There are no write endpoints and no webhooks; both are tracked in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+## API keys — `routes/organizations.ts`
+
+Managed from the **internal** API, with a session, because a credential that could mint more credentials would turn one leaked key into permanent access. Owner or admin only.
+
+| Endpoint | Answers |
+|---|---|
+| `GET /api/organizations/api-keys` | `{ apiKeys: [{ id, name, prefix, lastUsedAt, revokedAt, createdAt }] }` — never a secret, never a hash |
+| `POST /api/organizations/api-keys` | `201 { apiKey: { id, name, prefix, secret, createdAt } }`. **`secret` appears here and nowhere else, ever.** `402` when the plan has no API access, `403` when the caller is not an owner or admin |
+| `DELETE /api/organizations/api-keys/:id` | Revokes. `404` for a key belonging to another organization. Works even when the plan has since lost API access — turning a credential off is never gated |
+
+`402` and `403` are never collapsed: `403` is a permission failure, `402` is a plan limit ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)). `Plan.hasApiAccess` is true only on **Team**, so a Free or Pro organization gets the `402`.
 
 ## Error format — `middleware/errorHandler.ts`
 

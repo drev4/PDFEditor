@@ -249,6 +249,19 @@ There is exactly one exception today, and it is the shape to copy: `GET /uploads
 
 **Do not add a CSP to API responses.** This process serves JSON, not documents; a policy there constrains nothing while making the security posture look better than it is. That absence is asserted in `backend/tests/security-headers.spec.ts` so it cannot be quietly "fixed". The policy that matters is on the SPA — [07-security-and-privacy](./07-security-and-privacy.md#where-the-headers-actually-are).
 
+## 11a. There are two ways to authenticate, and they resolve different things
+
+`middleware/auth.ts` resolves a **user** from a session token, and every authorization check downstream turns that user into an organization: `callerCanReachForm` is literally `organization: { memberships: { some: { userId } } }` (§9). `middleware/apiKeyAuth.ts` resolves an **organization** from an API key, with no user anywhere ([`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md)).
+
+They are not interchangeable, and a session token on `/api/v1` or an API key on `/api/*` is a `401` in both directions. That is asserted, not assumed (`tests/integration/api-v1.spec.ts`).
+
+**Why the key got its own router rather than a flag on the existing one**, because it is the decision most likely to be undone by somebody being helpful:
+
+- Giving the key a user id — its creator's, say — makes the existing middleware work unchanged, and ties a customer's integration to one employee: remove that person from the organization and production breaks, reporting a missing form. It also makes `Membership.role` apply to a machine.
+- Widening `callerCanReachForm` to take either a user or an organization is two lines, and changes the authorization input of **every authenticated route in the product** for the benefit of a handful of new ones.
+
+So `routes/v1/` scopes on `organizationId` directly, reuses the *services* rather than the session middleware, and leaves every existing route untouched. Note the one place it also departs from §2: the guards are mounted on the router rather than per handler, because every route there has the same answer and the risk being managed is a *future* endpoint added without them — the opposite of the internal routers, where an anonymous endpoint sits beside authenticated ones and the guard has to be readable per handler.
+
 ## 12. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.

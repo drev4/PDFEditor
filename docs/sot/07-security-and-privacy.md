@@ -41,12 +41,20 @@ Authenticated user (access token)
   └── /api/forms/**                           scoped to the ORGANIZATIONS they are a member of
                                               (not to what they created)
 
+Authenticated MACHINE (API key — no user behind it)
+  └── GET /api/v1/**                          scoped to the key's ORGANIZATION, read only,
+                                              rate limited per KEY (falling back to IP)
+
 Tenant boundary
   └── Organization ──< Membership >── User    the only thing an authorization check reads
 
 Server-side, no boundary
   └── PDF processing, filesystem writes
 ```
+
+**The API key is the second credential, and the first that is not a person** ([`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md)). Its properties, in one place: 32 bytes of CSPRNG output, presented as `vpk_<prefix>_<secret>`; stored as a SHA-256 with an indexed public prefix, never in plaintext; shown once at creation and never retrievable again; revocable, and read from the database on every request so revocation is immediate; and carrying no user, so `Membership.role` does not apply to it and no employee's departure can break a customer's integration. Its entitlement is re-checked per request, so an organization that downgrades stops reading at the next call rather than whenever somebody remembers the key exists — a `402`, not a `401`, because nothing about authentication failed. It reaches **read-only** endpoints, scoped to one organization, and it cannot mint further keys — key management stays on the session-authenticated API precisely so that one leaked key is not permanent access.
+
+Two consequences of it being a bearer credential that lives in somebody's CI system: `lastUsedAt` exists so a forgotten key can be told from a live one before revoking it, and the `vpk_` marker exists so a leaked key is recognisable as *this product's* credential in a log or a repository scan.
 
 These are the whole external attack surface. Three of the four write paths are rate limited; the two read paths are not, which is a deliberate gap — a limit on `GET /api/forms/public/:shareId` has to be reconciled with `viewCount` (S11) and with legitimately popular forms, and the PDF route now requires a signature this service issued, which bounds who can call it at all.
 
@@ -214,6 +222,8 @@ Needed for any privacy policy, DPA or security questionnaire, so it is maintaine
 | Uploaded PDF | Account holder | Local disk, served only through a signed expiring URL | Contract | Indefinite |
 | Form and field definitions | Account holder | `forms`, `fields` | Contract | Until the form is deleted |
 | Answer values | **Respondent** | `answers` | The form author's basis; we are the processor | Indefinite |
+| Answer values, **again, as an export path** | **Respondent** | `GET /api/v1/forms/:id/responses` and `.csv`, reachable by an API key | The form author's basis; we are the processor | Not stored by this route — but it is a standing, machine-usable way out of the building, held by a credential that may sit in a customer's CI system for a year ([`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md)). It is bounded by two live checks rather than by anything remembered at mint time: the key row is read on every request (so revocation is immediate) and so is the plan (so a downgrade closes the path at the next call) |
+| API key hash, prefix, name, usage timestamps | Account holder (the organization) | `api_keys` | Contract | Until revoked and the organization is deleted (`onDelete: Cascade`) |
 | IP address, user agent | **Respondent** | `responses` | Legitimate interest (anti-abuse) — **but not documented, not disclosed, and not currently used for anti-abuse** | Indefinite |
 | Stripe customer and subscription identifiers | Account holder (the paying organization) | `subscriptions` | Contract | Until the organization is deleted (`onDelete: Cascade`) |
 | Stripe event ids | — | `stripe_events` | Legitimate interest (correct billing) | Indefinite, and deliberately not linked to an organization — see [03-domain-model](./03-domain-model.md) |
@@ -230,6 +240,8 @@ For form responses the customer is the data controller and this product is the p
 
 1. **Every new route declares its authentication and authorization explicitly.** A route with neither is a deliberate, reviewed decision, not an omission.
 2. **Every new public endpoint ships with rate limiting, or an argument in this document for why not.** Add a named limiter in `middleware/rateLimit.ts` and apply it at the route, the way `authenticate` is applied. Its limit and window come from the environment, so the test suites and CI can set their own without weakening the production default. There is exactly one endpoint without one — the Stripe webhook — and its argument is above; copy that standard of proof, including a test that the absence is intentional, or add the limiter.
+
+   `/api/v1` carries one, and it is the only limiter here that does not count per IP: an integration calls from one address, so counting by address would give one customer another's budget. It counts per API key and **falls back to the address when there is no valid key**, because the alternative is an unlimited budget for anyone who simply does not authenticate. That fallback is not theoretical — the first draft of the router rejected unauthenticated requests *before* the limiter ran, and `tests/integration/api-rate-limit.spec.ts` is what caught it.
 3. **New personal data added to a model updates the inventory above in the same PR.** A field that appears in the schema but not in this table cannot be answered for in an audit.
 4. **Never log a whole request, error or entity object.** Log identifiers and the fields you actually need.
 5. **User-supplied code-like input** — regex, templates, formulas, file names — is untrusted input with a resource cost, not just a value to validate. Compile it through one audited helper (`services/pattern-validator.ts` is the model), never at the call site, and remember that a synchronous evaluator **cannot** be bounded by a timeout on the same thread.

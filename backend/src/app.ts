@@ -12,6 +12,7 @@ import { uploadRouter } from './routes/upload.js'
 import { responsesRouter } from './routes/responses.js'
 import { organizationsRouter } from './routes/organizations.js'
 import { billingRouter, webhookRouter } from './routes/billing.js'
+import { v1Router } from './routes/v1/index.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
@@ -217,5 +218,11 @@ app.use('/api/responses', responsesRouter)
 app.use('/api/organizations', organizationsRouter)
 // The webhook is NOT here — see the raw-body mount above `express.json()`.
 app.use('/api/billing', billingRouter)
+
+// The published API (features/0019). Everything above this line serves the SPA
+// and may change in any release; everything under `/api/v1` is a contract with
+// people outside this repository, authenticated by an API key rather than a
+// session. See docs/sot/06-api-reference.md.
+app.use('/api/v1', v1Router)
 
 app.use(errorHandler)
