@@ -50,7 +50,22 @@ async function main() {
     await close()
     await prisma.$disconnect()
     console.log('[worker] pdf-embed worker stopped')
-    process.exit(0)
+
+    // **No `process.exit(0)` here**, and that is not tidiness. When stdout is a
+    // file or a pipe - which is what it is under any process manager - Node
+    // buffers it and `process.exit` discards whatever has not been flushed. The
+    // logs lost that way are the only evidence a worker ever ran, and this
+    // feature's whole story about a dead worker being visible depends on them
+    // (docs/sot/08-operations.md). Every handle is closed above, so the process
+    // ends on its own.
+    //
+    // The timer is the safety net for a handle that does not close. It is
+    // `unref`d, so it cannot itself keep the process alive - it only fires if
+    // something else already did.
+    setTimeout(() => {
+      console.error('[worker] still alive 10s after shutdown; forcing exit')
+      process.exit(1)
+    }, 10_000).unref()
   }
 
   process.on('SIGTERM', () => { void shutdown('SIGTERM') })

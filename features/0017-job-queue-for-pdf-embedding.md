@@ -1,8 +1,8 @@
 # 0017 — A job queue, and the one PDF operation that can actually go on it
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Job queue (BullMQ + Redis) for PDF extraction and embedding*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0017-job-queue-for-pdf-embedding`
 **Related:** [02-architecture](../docs/sot/02-architecture.md) · [04-backend-patterns §5](../docs/sot/04-backend-patterns.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [08-operations](../docs/sot/08-operations.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [10-saas-roadmap](../docs/sot/10-saas-roadmap.md) · [`features/0016`](0016-object-storage-for-uploaded-pdfs.md)
 
 ## Context
@@ -164,4 +164,69 @@ It also creates a state that does not exist today: **a job that has exhausted it
 
 ## Outcome
 
-*(filled in when the work is finished)*
+**Shipped**, in two commits: the seam (`c55da35`) and the worker with the queued path (`f56984a`).
+
+### What shipped
+
+- `backend/src/services/pdf-embed.ts` — the embed itself, moved out of `routes/form-fields.ts`. `embedFormFields(formId)` reads the form, its live fields and the stored PDF for itself and **throws**; `embedInline(formId)` is the old behaviour, in-process lock and swallowed errors.
+- `backend/src/services/embed-queue.ts` — the only module that imports `bullmq` or `ioredis`. `requestEmbed(formId)` is what the route calls and the only entry point: it enqueues when `REDIS_URL` is set and runs `embedInline` when it is not. `createEmbedWorker()`, `embedQueueStatus()` and `closeEmbedQueue()` are the rest of the surface.
+- `backend/src/worker.ts` + `npm run worker` / `worker:dev` — the same image, a second entrypoint. It refuses to start without `REDIS_URL` rather than idling and looking healthy.
+- `backend/src/process-guards.ts`, installed by both entrypoints.
+- `POST /api/forms/:formId/fields/bulk` now calls `requestEmbed(formId)` and nothing else changed in it; `routes/upload.ts`, `syncFieldsFromPDF` and `useFormManagement.ts` were not touched at all.
+- Redis in `docker-compose.yml` (required by nothing, no volume), four new variables in `backend/.env.example`, and `REDIS_URL: ''` pinned in both vitest configs.
+
+### What the queue library actually did about duplicate jobs
+
+**It was not used for deduplication, and that is the main design decision of this feature.** BullMQ ignores an `add` whose `jobId` matches a job that is *already running*, so the obvious "one stable job id per form" collapses a save made during an in-flight embed into nothing: the fields never reach the PDF and the document is permanently behind the database — the same lost update [`features/0016`](0016-object-storage-for-uploaded-pdfs.md) closed, reached from the other side and with no error anywhere.
+
+So every save enqueues its own job, and serialisation is a **Redis lock per form** (`SET NX PX` + a random token, compare-and-delete release, renewed while the work runs) taken inside the job. Duplicate jobs are harmless: the job re-reads the fields and the embed is idempotent, so a second job rewrites the same document from the same truth. That is also what makes the lock genuinely cross-process, which the in-process lock never was.
+
+### The test that had to fail first, and the way it did not
+
+Written before the lock, and **its first version passed against a worker with no lock at all** — the exact trap this spec warned about, arrived at differently from 0016's. The reason: both `bulkSave` requests return as soon as they have enqueued, so both jobs started *after* both saves had committed, and since a job re-reads the fields when it runs they both embedded the same final field set and agreed by accident. `waitForActiveJob()` is what fixes it: the second save is made only once a job is genuinely active and holding the pre-`beta` document.
+
+With that in place, and the lock removed from the worker:
+
+```
+AssertionError: expected 1 to be 2
+  × does not drop a save made while an embed is already running
+  Tests  1 failed | 2 passed (3)
+```
+
+which is the lost update exactly. With the lock restored, 3 passed.
+
+### Which path each test covered
+
+| Test | Path |
+|---|---|
+| `tests/integration/pdf-embed-concurrency.spec.ts` (unchanged) | **inline** — two overlapping saves, in-process lock |
+| Every other backend, integration and E2E spec | **inline** — `REDIS_URL` pinned empty |
+| `tests/integration/pdf-embed-queue.spec.ts` (new, 3 tests) | **queued** — real Redis, in-process worker: response unchanged, a save during an in-flight embed still reaches the PDF, and the embed is idempotent |
+| `tests/process-guards.spec.ts` (new, 2 tests) | neither — a real child process, for a rejection that must be survived and an exception that must not be |
+
+```
+npm run test:backend        16 specs, 206 tests passed
+npm run test:integration    14 specs, 140 passed, 1 spec (3 tests) skipped   # offline
+  with TEST_REDIS_URL set   15 specs, 143 tests passed
+npm run test:frontend       38 specs, 321 tests passed
+npm run test:e2e            50 passed (21.4s)
+npm run build --workspace=frontend    built in 10.33s
+cd backend && npx tsc --noEmit && npm run typecheck:tests    clean
+```
+
+### Verified by hand, against a real Redis and a real worker
+
+1. **Save with no worker running** → `STATUS { waiting: 1, active: 0, delayed: 0, failed: 0 }` and `EMBEDDED 0 / DATABASE 2`. The documented silent failure, reproduced on purpose: nothing errored.
+2. **Start the worker** → `embed job 17 done (form 5b67140c…)`, then `EMBEDDED 2 / DATABASE 2` and an empty queue. So stopping the worker, saving, and restarting it does still embed.
+3. **`SIGKILL` mid-run** (60 jobs queued): 5 jobs were left `active` by the dead process, and a restarted worker drained everything to zero with the document matching the database. Nothing was lost — BullMQ recovers a stalled job and the embed is idempotent, which is why re-running it is safe.
+4. **Graceful shutdown** was verified through `close()` directly — 15 active jobs before, `{ waiting: 0, active: 0 }` after, nothing abandoned. **A real `SIGTERM` could not be tested on this machine**: Windows has no signals, and `kill -TERM` from the shell terminates the process outright (exit 143, none of the shutdown logging), so the signal handler's own path is unverified here. What it calls is the code that was verified.
+
+That last check found and fixed one real defect: the shutdown path ended in `process.exit(0)`, which discards buffered stdout when it is a file or a pipe — losing exactly the shutdown logs this feature relies on to make a dead worker visible. The worker now lets the process end on its own, with an `unref`d 10-second forced exit as the safety net.
+
+### What was deliberately not done
+
+Extraction stays inline (a new backlog row carries the async UX it needs); the shared rate-limit store and email delivery keep their own rows; no status column, no route change, no user-visible "your PDF is out of sync" signal — that is still the instrumentation row.
+
+**The cross-replica embed race row was not closed**, and the reason matters: it is closed on the queued path and untouched on the inline one, and the inline one is the default. It is now a deployment rule — more than one API replica means `REDIS_URL` and a worker — which [08-operations](../docs/sot/08-operations.md) states.
+
+**The queued spec is not in CI.** It skips unless `TEST_REDIS_URL` is set and no workflow sets it; filed as a gap in [09-quality-and-testing](../docs/sot/09-quality-and-testing.md).

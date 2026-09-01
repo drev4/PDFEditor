@@ -49,15 +49,24 @@ Browser ── Vite dev server / static build (Vue SPA)
                   ├── /api/*      JSON API
                   ├── /health     liveness probe
                   ├── /uploads/pdfs/:token/:filename  ← signed, expiring (0006)
-                  └── Prisma ──> PostgreSQL (docker-compose in dev)
+                  ├── Prisma ──> PostgreSQL (docker-compose in dev)
+                  └── services/embed-queue.ts ──> Redis  [only when REDIS_URL is set]
+                                                    │
+                    dist/worker.js (`npm run worker`) ─┘   ← same image, second
+                      └── services/pdf-embed.ts               entrypoint (0017)
+                            └── Prisma + services/pdf-storage.ts
 
 Storage:    services/pdf-storage.ts  ← `local` (backend/uploads/pdfs) or `s3`
+Queue:      services/embed-queue.ts  ← absent unless `REDIS_URL` is set
 ```
+
+The worker is the **same image with a different entrypoint**, not a second service: it imports the same `pdf-embed`, `pdf-storage` and Prisma modules the API does. It is needed only when `REDIS_URL` is set, and then it is **required** — with a queue configured and no worker alive, jobs accumulate and no form's PDF is ever rewritten, silently ([08-operations.md](./08-operations.md)).
 
 Three properties of this topology are load-bearing and each is a constraint on scaling:
 
 1. **PDF bytes go through one module, and where they land is configuration** ([`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)). `services/pdf-storage.ts` is the only thing in the backend that reads or writes them; `PDF_STORAGE_DRIVER` chooses `local` (this process's own disk, the default) or `s3` (any S3-compatible store — AWS, R2, MinIO). On `local` the old constraint still applies in full: one replica, and a redeploy on ephemeral disk loses every PDF. On `s3` it does not, which is what makes more than one replica possible. Two things to know before switching: **the files already on disk are not moved by the switch** — `npm run storage:migrate` copies them, and it is run *before* — and an unrecognised driver name **refuses to boot** rather than falling back, because falling back to local disk would accept uploads and lose them. See [08-operations.md](./08-operations.md).
-2. **PDF processing is synchronous and inline in the request.** `extractFieldsFromPDF` on upload and `embedFieldsInPDF` on bulk save both run inside the HTTP handler. A large or pathological PDF blocks the Node event loop for every other request, not just its own. **Still true, and the other half of build-order step 9** — [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md) moved the bytes and deliberately did not move the work. The embed is now serialised per form and re-reads the fields inside that serialisation, which makes it converge instead of losing an update, but it is still in the request and still in this process.
+2. **PDF processing is *mostly* synchronous and inline in the request** — one of the three operations has moved ([`features/0017`](../../features/0017-job-queue-for-pdf-embedding.md)). `extractFieldsFromPDF` still runs inside `POST /api/upload` and inside the first `GET /api/forms/:id` (`syncFieldsFromPDF`), and that is deliberate rather than pending: both responses *carry* the fields they just extracted, and the editor draws them the moment the upload finishes (`frontend/src/composables/useFormManagement.ts`). Making those asynchronous is not a refactor, it is a product change with a UX attached — a processing state, polling or a socket, and an answer for an extraction that fails after the author has started drawing — and it is filed as its own backlog row. **The embed on bulk save is queued when `REDIS_URL` is set**, and runs inline exactly as before when it is not; there are two code paths for it on purpose, and both are exercised ([09-quality-and-testing.md](./09-quality-and-testing.md)). So a large or pathological PDF still blocks the event loop on upload, and no longer does on save.
+
 3. **Reading a PDF is a capability carried in the URL, not a session.** The `express.static` mount is gone ([`features/0006`](../../features/0006-signed-expiring-urls-for-uploaded-pdfs.md)): the only way to the bytes is `GET /uploads/pdfs/:token/:filename`, whose token `services/pdf-url.ts` mints per read and which expires after `UPLOAD_URL_TTL_SECONDS`. It is deliberately unauthenticated, because an anonymous respondent has to load the PDF of a published form. What is still open is *per-file* revocation — withdrawing one document today means rotating `JWT_SECRET`, which invalidates every outstanding link ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
 ## Data flows
