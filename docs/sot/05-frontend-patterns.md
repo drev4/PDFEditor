@@ -175,7 +175,6 @@ The editor's menu button opens the **application's** navigation, not the rail: f
 
 Nobody should read the canvas as a description of the product. What is drawn and not built:
 
-- **The organization switcher** in the sidebar. No endpoint returns an organization's name — `frontend/src/services/organization.ts` can list members and invitations and nothing else — so there is nothing to render.
 - **The prices — and only the prices.** The purchase actions are built as of [`features/0013`](../../features/0013-stripe-subscriptions.md): the `Plans` artboard's *Change plan* control is on `SettingsView.vue`, *Manage billing* appears beside it once a subscription exists, and the `LimitReached` artboard's *Upgrade to Pro* is on `LimitReachedDialog.vue`. **No price is rendered anywhere**, and that is now a permanent rule rather than a gap: the amount lives in Stripe, the application stores only a price id in configuration, and the customer sees the real figure on Stripe's own Checkout page — which is the only place it is true. A constant here would quote a number [`docs/BACKLOG.md`](../BACKLOG.md) records that nobody has agreed to. `LimitReachedDialog.spec.ts` asserts that no currency figure appears in the dialog at all.
 - **The mark is now conditional.** `PublicFormView.vue` renders "Made with VuePDF" only when the server says so ([`features/0014`](../../features/0014-close-the-subscription-surface.md)). Nothing in the SPA computes it: the client is deliberately given no plan to compute it from, because the endpoint is anonymous. Note for local work — `DEV_PLAN_KEY=dev` grants the entitlement, so the mark disappears in development. That is the override working.
 - **The saved card, the billing history and *Update card*** on the `Plans` artboard. Deliberately not built: they live in Stripe's hosted Customer Portal, which *Manage billing* opens. Building them here would mean handling card data on this origin, which is a security decision and not a UI one ([07-security-and-privacy](./07-security-and-privacy.md)).
@@ -223,6 +222,18 @@ Four things that are load-bearing:
 - **Deleting says what it destroys first.** The delivery history cascades with the endpoint, and the secret is unrecoverable, so the row asks before it goes.
 
 `consecutiveFailures` is rendered as *failures since the last success*, never as a total: the queue zeroes it on any successful delivery, and a `0` read as "this has never failed" would contradict the log directly below it.
+
+### The organization switcher
+
+**Built** ([`features/0023`](../../features/0023-active-organization.md)). `components/ui/OrganizationSwitcher.vue`, at the top of `AppShell.vue`'s sidebar where the canvas draws it, over `GET /api/organizations` and `POST /api/organizations/active`.
+
+Three things about it:
+
+- **It renders nothing for an account with one organization**, which is almost every account. A switcher with a single entry is furniture: it implies a choice that does not exist and takes the eye at the top of the sidebar.
+- **Switching reloads what is now another tenant's.** The plan card and the forms list, plus the members list inside the store. Every count, meter and limit in this product is per organization, so leaving the previous tenant's numbers under a new name is worse than a moment of loading.
+- **The state lives in `organization.store.ts`**, beside members and the caller's role, rather than in a store of its own — a second store for the same resource would be a second answer to *which organization am I in*, which is the class of bug 0023 fixed on the server.
+
+Note what the switch is: a **server-side, per-account** change, so it applies on every device and survives a reload, and two tabs cannot sit in two organizations. That is the deliberate trade — the alternative, a header the client sends per request, is an authorization input in the caller's hands and reintroduces the original defect wherever a call site forgets it.
 
 ### Plan and usage
 

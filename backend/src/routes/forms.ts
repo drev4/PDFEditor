@@ -76,7 +76,7 @@ const formCounts = {
 formsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
   try {
     const forms = await prisma.form.findMany({
-      where: callerCanReachForm(req),
+      where: await callerCanReachForm(req),
       orderBy: { createdAt: 'desc' },
       include: formCounts
     })
@@ -162,7 +162,7 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
     const id = req.params.id as string
 
     const form = await prisma.form.findFirst({
-      where: { id, ...callerCanReachForm(req) },
+      where: { id, ...(await callerCanReachForm(req)) },
       include: {
         fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } },
         ...formCounts
@@ -378,7 +378,7 @@ formsRouter.get('/:id/responses/export', authenticate, async (req: AuthRequest, 
     // No `deletedAt` filter, on purpose: an archived field keeps its column and
     // its original label in the export, so historical rows stay readable.
     const form = await prisma.form.findFirst({
-      where: { id, ...callerCanReachForm(req) },
+      where: { id, ...(await callerCanReachForm(req)) },
       include: { fields: { orderBy: { order: 'asc' } } }
     })
 

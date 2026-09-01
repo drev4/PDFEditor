@@ -3,6 +3,7 @@ import request from 'supertest'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockReset, type DeepMockProxy } from 'vitest-mock-extended'
+import { mockCallerMembership } from './mock-caller.js'
 import { PrismaClient } from '@prisma/client'
 import { passThroughTransaction } from './mock-transaction'
 
@@ -51,6 +52,7 @@ function submit(value: string) {
 describe('Author-supplied regex is bounded and cannot break the service', () => {
   beforeEach(() => {
     mockReset(prismaMock)
+    mockCallerMembership(prismaMock)
     prismaMock.response.create.mockResolvedValue({ id: 'resp-1', answers: [] } as any)
     // Submitting writes inside a transaction since features/0012. This spec is
     // about the regex engine, not about plan limits.
@@ -148,6 +150,7 @@ describe('Author-supplied regex is bounded and cannot break the service', () => 
 describe('Author-supplied regex is validated when it is stored', () => {
   beforeEach(() => {
     mockReset(prismaMock)
+    mockCallerMembership(prismaMock)
     prismaMock.form.findFirst.mockResolvedValue({ id: FORM_ID, userId: 'user-1' } as any)
     prismaMock.field.create.mockResolvedValue({ id: 'field-1' } as any)
   })

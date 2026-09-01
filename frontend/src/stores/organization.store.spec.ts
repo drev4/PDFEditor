@@ -159,4 +159,80 @@ describe('Organization Store', () => {
       expect(store.members.find(m => m.id === 'u1')!.role).toBe('owner')
     })
   })
+
+  /**
+   * The active organization (features/0023).
+   *
+   * Most accounts have one organization and none of this shows. What is asserted
+   * is the case that used to be ambiguous: two memberships, and a switch that
+   * has to leave nothing of the previous tenant on screen.
+   */
+  describe('switching organization', () => {
+    const organizations = [
+      { id: 'org-1', name: 'Personal', slug: 'personal', role: 'owner' as const },
+      { id: 'org-2', name: 'Acme', slug: 'acme', role: 'member' as const }
+    ]
+
+    beforeEach(() => {
+      vi.mocked(organizationService.list).mockResolvedValue({
+        organizations,
+        activeOrganizationId: 'org-1'
+      })
+      vi.mocked(organizationService.setActive).mockResolvedValue(undefined)
+    })
+
+    it('knows which organization it is acting in', async () => {
+      const store = useOrganizationStore()
+
+      await store.loadOrganizations()
+
+      expect(store.activeOrganizationId).toBe('org-1')
+      expect(store.activeOrganization?.name).toBe('Personal')
+      expect(store.hasMultipleOrganizations).toBe(true)
+    })
+
+    it('does not offer a switch to an account with one organization', async () => {
+      vi.mocked(organizationService.list).mockResolvedValue({
+        organizations: [organizations[0]!],
+        activeOrganizationId: 'org-1'
+      })
+      const store = useOrganizationStore()
+
+      await store.loadOrganizations()
+
+      // A switcher with one entry implies a choice that does not exist.
+      expect(store.hasMultipleOrganizations).toBe(false)
+    })
+
+    it('clears the previous organization members and re-reads them', async () => {
+      const store = useOrganizationStore()
+      await store.loadOrganizations()
+      await store.load()
+      expect(store.members).toHaveLength(2)
+
+      vi.mocked(organizationService.members).mockResolvedValue([
+        { id: 'u9', email: 'someone@acme.example', name: null, role: 'admin', joinedAt: '2026-02-01' }
+      ])
+      await store.setActiveOrganization('org-2')
+
+      expect(organizationService.setActive).toHaveBeenCalledWith('org-2')
+      expect(store.activeOrganizationId).toBe('org-2')
+      // Everything on screen is now about a different tenant. Leaving the old
+      // members under a new organization name is worse than a moment of loading.
+      expect(store.members.map(m => m.id)).toEqual(['u9'])
+    })
+
+    it('surfaces a refused switch and does not pretend it happened', async () => {
+      vi.mocked(organizationService.setActive).mockRejectedValue(
+        new Error('Organization not found')
+      )
+      const store = useOrganizationStore()
+      await store.loadOrganizations()
+
+      await expect(store.setActiveOrganization('org-3')).rejects.toThrow()
+
+      expect(store.activeOrganizationId).toBe('org-1')
+      expect(store.error).toMatch(/not found/i)
+    })
+  })
 })

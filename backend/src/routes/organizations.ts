@@ -40,6 +40,89 @@ const acceptSchema = z.object({
   name: z.string().optional()
 })
 
+/**
+ * GET /api/organizations — the caller's organizations, and which one is active
+ * (features/0023).
+ *
+ * Any member, because it is what the sidebar switcher reads and everyone has a
+ * sidebar. It carries names and slugs, which are the customer's own — one
+ * organization's name is not a secret from somebody who is inside it, and the
+ * list is scoped to memberships the caller holds.
+ *
+ * `activeOrganizationId` here is the **resolved** one, from
+ * `requireMembership`, and not the raw column: a stale choice falls back, and a
+ * screen that showed the raw value would highlight an organization the API is
+ * not actually acting in.
+ */
+organizationsRouter.get('/', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireMembership(req)
+
+    const memberships = await prisma.membership.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        role: true,
+        organization: { select: { id: true, name: true, slug: true } }
+      }
+    })
+
+    res.json({
+      organizations: memberships.map(m => ({
+        id: m.organization.id,
+        name: m.organization.name,
+        slug: m.organization.slug,
+        role: m.role
+      })),
+      activeOrganizationId: organizationId
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+const activeSchema = z.object({
+  organizationId: z.string().min(1)
+})
+
+/**
+ * POST /api/organizations/active — switch which organization the caller acts in.
+ *
+ * The membership check is the authorization: writing an organization the caller
+ * does not belong to would be storing a claim, and `requireMembership` would
+ * ignore it anyway — but answering `404` here says so at the moment it is asked
+ * rather than leaving a switcher that appears to work and silently does not.
+ *
+ * `404` and not `403`, like every other cross-tenant answer in this codebase: a
+ * `403` would confirm the organization exists.
+ */
+organizationsRouter.post('/active', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const validation = activeSchema.safeParse(req.body)
+    if (!validation.success) {
+      return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
+    }
+
+    const { organizationId } = validation.data
+
+    const membership = await prisma.membership.findFirst({
+      where: { userId: req.userId, organizationId },
+      select: { role: true }
+    })
+
+    if (!membership) throw new AppError(404, 'Organization not found')
+
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: { activeOrganizationId: organizationId }
+    })
+
+    res.json({ activeOrganizationId: organizationId, role: membership.role })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // GET /api/organizations/entitlements — any member may see the plan and usage.
 //
 // Not owner-only: the sidebar card and the plan screen are visible to everyone
@@ -415,6 +498,16 @@ async function joinOrganization(
         data: { organizationId: invitation.organizationId, userId, role: invitation.role }
       })
     }
+
+    // Land them where they were invited (features/0023). Without this, somebody
+    // who already had an account keeps acting in their personal organization —
+    // the invitation appears to have done nothing, which is exactly the defect
+    // this feature exists to fix. It is a *choice* being recorded, not a grant:
+    // the membership created above is what grants anything.
+    await tx.user.update({
+      where: { id: userId },
+      data: { activeOrganizationId: invitation.organizationId }
+    })
 
     await tx.invitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date() } })
   })

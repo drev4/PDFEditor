@@ -3,6 +3,7 @@ import request from 'supertest'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
+import { mockCallerMembership } from './mock-caller.js'
 import { PrismaClient } from '@prisma/client'
 
 // Mock Prisma
@@ -26,6 +27,7 @@ const prismaMock = prisma as unknown as DeepMockProxy<PrismaClient>
 describe('Fields Routes', () => {
   beforeEach(() => {
     mockReset(prismaMock)
+    mockCallerMembership(prismaMock)
   })
 
   const mockForm = {

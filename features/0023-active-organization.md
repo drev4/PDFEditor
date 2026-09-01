@@ -1,6 +1,7 @@
 # 0023 — The active organization, without which belonging to two is broken
 
-**Status:** backlog
+**Status:** done
+**Branch:** `feature/0023-active-organization`
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *A user who belongs to two organizations reads from both and writes to one*)
 **Related:** [03-domain-model](../docs/sot/03-domain-model.md) · [04-backend-patterns §9](../docs/sot/04-backend-patterns.md) · [05-frontend-patterns §8](../docs/sot/05-frontend-patterns.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [10-saas-roadmap §what comes next](../docs/sot/10-saas-roadmap.md#what-comes-next) · [`features/0009`](0009-organizations-own-resources.md) · [`features/0010`](0010-member-invitations-and-role-enforcement.md)
 
@@ -117,4 +118,16 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified. The failing test came first and is the record of what was wrong.
+
+**What the failing test found, and one thing the spec's own test got wrong.** Written against `origin/develop`, two of its three assertions failed immediately — the form created by an invited colleague landed in their personal organization, and entitlements reported `free` inside a `team` account. The third, *"is switched into the organization it just joined"*, **passed against the broken code**, because the inviting organization had one form and the invitee's personal organization had none, so a list merged across both still had length 1. That is exactly the failure mode `features/README.md` warns about — a test that passes for the wrong reason proves nothing — so the fixture gained a form in the invitee's own organization, and then it failed properly. Worth keeping in mind when writing the next one: *see it fail* is not enough, it has to fail **for the reason you think**.
+
+**One deviation, in the tests rather than the code.** 29 tests in the mocked backend suite broke, all with the same cause: `verifyFormOwnership` now goes through `requireMembership`, and a mocked Prisma answers `undefined` to the two reads it makes, so every route test became a `404` for a reason unrelated to what it was testing. Rather than stub it 29 times, `backend/tests/mock-caller.ts` states the default state of the world once — a signed-in person, in one organization, who has never switched — and five specs call it after `mockReset`. It says in its own comment that a spec which cares about *tenancy* does not belong there at all: that needs a real database.
+
+**The security property is the load-bearing part, and it has three tests of its own** in `tenancy.spec.ts`: a column pointing at an organization the caller is not in selects nothing and falls back; a member removed with the column still naming that organization stops acting in it on the very next request; and switching into an organization you do not belong to answers `404` and writes nothing. Those are what keep `activeOrganizationId` a choice rather than a grant.
+
+**Verified:** frontend 45 specs / 382 tests, backend 18 / 231, integration 212 (202 passed, 10 skipped — the Redis-dependent ones), E2E 52, `npm run build --workspace=frontend`, `tsc --noEmit` and `typecheck:tests`. `grep -rn activeOrganizationId backend/src` names two files, as criterion 9 required. The migration is `20260901181953_user_active_organization`, applied to both the development and the `vuepdf_test` databases.
+
+**One interruption worth recording:** `prisma generate` failed with `EPERM` because a `npm run worker` process held the query-engine DLL open. It was stopped with the user's agreement and has **not** been restarted — `npm run worker` if it is wanted again.
+
+**Not verified by hand:** the switcher in a browser. Every account in the E2E suite has exactly one organization, so the switcher deliberately renders nothing there and the component tests are the only coverage of it drawing. The manual check the spec asks for — register two accounts, invite, accept, watch the forms and plan card change — has not been run.

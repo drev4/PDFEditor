@@ -6,6 +6,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { signPdfUrl, verifyPdfToken, canonicalPdfUrl } from '../src/services/pdf-url'
 import { mockReset, type DeepMockProxy } from 'vitest-mock-extended'
+import { mockCallerMembership } from './mock-caller.js'
 import { PrismaClient } from '@prisma/client'
 
 vi.mock('../src/services/db', async () => {
@@ -41,6 +42,7 @@ afterAll(() => {
 
 beforeEach(() => {
   mockReset(prismaMock)
+  mockCallerMembership(prismaMock)
 })
 
 afterEach(() => {

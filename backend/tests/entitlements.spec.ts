@@ -3,6 +3,7 @@ import request from 'supertest'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
+import { mockCallerMembership } from './mock-caller.js'
 import { PrismaClient } from '@prisma/client'
 import { PLANS, DEV_PLAN, resolvePlan, effectivePlan, isWithin } from '../src/services/plans'
 import { currentPeriod } from '../src/services/entitlements'
@@ -34,6 +35,7 @@ const prismaMock = prisma as unknown as DeepMockProxy<PrismaClient>
 describe('plan limits', () => {
   beforeEach(() => {
     mockReset(prismaMock)
+    mockCallerMembership(prismaMock)
   })
 
   const membership = { organizationId: 'org-1', role: 'owner' as const }
