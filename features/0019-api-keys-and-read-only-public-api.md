@@ -1,8 +1,8 @@
 # 0019 — API keys, and a public API that is read-only on purpose
 
-**Status:** backlog
+**Status:** in progress
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Public API with per-organization API keys*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0019-api-keys-and-read-only-public-api`
 **Related:** [10-saas-roadmap §build order](../docs/sot/10-saas-roadmap.md#build-order) · [04-backend-patterns](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [03-domain-model](../docs/sot/03-domain-model.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md) · [`features/0018`](0018-shared-rate-limit-store.md)
 
 ## Context
@@ -40,7 +40,9 @@ The two tempting shortcuts are both wrong:
 
 A key that cannot be revoked is not a key, so **the session token machinery is exactly the wrong thing to reuse**: `services/session-cookie.ts` and the access token are stateless by design, and statelessness is the property this must not have. A key is a database row that can be deleted; that is the entire point.
 
-But `services/refresh-token.ts`'s neighbour, bcrypt, is the wrong answer in the other direction. Refresh tokens are hashed with bcrypt because they are exchanged rarely; **an API key is presented on every single request**, and a bcrypt verification is tens of milliseconds of CPU *by design*. That turns the API's own rate limit into a CPU sink an attacker can drive with invalid keys. Use a fast keyed hash (SHA-256 over a high-entropy secret is enough — the secret is 256 bits of randomness, not a human password, so there is nothing to brute force) and compare in constant time (`crypto.timingSafeEqual`).
+Nor is it a password. bcrypt is used in exactly one place in this backend — `routes/auth.ts`, on human-chosen passwords — and reaching for it here is the other way to get this wrong: **an API key is presented on every single request**, and a bcrypt verification is tens of milliseconds of CPU *by design*, which turns the API's own rate limit into a CPU sink an attacker drives with invalid keys.
+
+`services/refresh-token.ts` already made this decision and is the precedent to follow: it stores a SHA-256 of a 32-byte CSPRNG token, and the note on `RefreshToken` in `schema.prisma` says a fast hash is the right choice *there and nowhere else in this codebase* — this feature is the second place it is right, for the same reason. There is nothing to brute force in 256 bits of randomness; the hash exists so that a database leak is not a set of live credentials. Compare in constant time (`crypto.timingSafeEqual`).
 
 The row needs a **lookup key that is not the secret**: store a short public prefix, index it, find the row by prefix, then compare the hash. Scanning every key row and hashing each one is the alternative, and it gets slower as customers are added.
 
@@ -123,7 +125,7 @@ Nothing about that blocks the feature, and it changes two things that must be do
 > - `backend/src/middleware/formOwnership.ts`, `middleware/membership.ts`, `middleware/auth.ts` — how tenancy is resolved today, always from a user.
 > - `backend/src/services/plans.ts` and `services/entitlements.ts` — `hasApiAccess`, and the rule that a limit check is an explicit call in the handler and `402` is not `403`.
 > - `backend/src/middleware/rateLimit.ts` — the named-limiter catalogue and its shared store after [`features/0018`](0018-shared-rate-limit-store.md); the new limiter is an entry with its own `keyGenerator`.
-> - `backend/src/services/refresh-token.ts` — how a revocable secret is already stored here, and why bcrypt is right there and wrong for this.
+> - `backend/src/services/refresh-token.ts` — how a revocable secret is already stored here (SHA-256 over a CSPRNG token), and the note on `RefreshToken` in `schema.prisma` about when a fast hash is the right choice.
 > - `backend/tests/integration/tenancy.spec.ts` — the standard of proof for a tenancy boundary; `/api/v1` needs its own equivalent.
 >
 > **Apply the skills:** `prisma-schema-migration` for the table, `backend-endpoint-pattern` for the routes, `api-contract-guard` before documenting anything, then `sot-sync` and `ship-checklist`.
