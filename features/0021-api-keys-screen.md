@@ -1,8 +1,8 @@
 # 0021 — The API keys screen, so a customer can reach what step 10 built
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *The `webhooks` and `API keys` tabs in the SPA*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0021-api-keys-screen`
 **Related:** [10-saas-roadmap §what comes next](../docs/sot/10-saas-roadmap.md#what-comes-next) · [05-frontend-patterns §8](../docs/sot/05-frontend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [04-backend-patterns §10](../docs/sot/04-backend-patterns.md) · [`features/0019`](0019-api-keys-and-read-only-public-api.md) · [`features/0015`](0015-team-plan-and-purchased-seats.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md)
 
 ## Context
@@ -107,4 +107,18 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified, with one deviation and one defect the tests caught.
+
+**The deviation: `LimitReachedDialog` gained a third mode.** The spec said a `402` opens the dialog; the dialog only knew `forms` and `seats`, so `limit="api"` was added the same way [`features/0015`](0015-team-plan-and-purchased-seats.md) added `seats`. It renders **no meters** — an API refusal is a capability the plan lacks, not an allowance that ran out, and drawing the forms and responses bars beside it would invite the customer to read a number as the reason. Its action is owner-only and splits on whether a subscription exists: Checkout for Team on a first purchase, the portal for a switch, because changing an existing subscription is the portal's job.
+
+**The defect: the `402` produced a red error banner *and* the dialog.** `useAsyncAction` sets `error` for every rejection, including the one that is not a failure. `MembersView.vue` already solves it — its banner is `v-if="store.error && seatLimitReached === null"` — and the panel had not copied that half of the pattern. `ApiKeysPanel.spec.ts` caught it before review: *treats a 402 as a limit rather than a failure* asserts the banner is absent, and *shows any other failure as an error* asserts a `500` still gets one. This is the trap 1 argument arriving in a second form — a limit is not a failure, in the store's error state as much as in the copy.
+
+**Tabs, not a framework.** Settings now has `General` and `API keys`, with the active tab in `?tab=` so a link can point at it and a reload keeps it. Built for the two that exist; the webhooks tab will add the third and can decide then what it needs.
+
+**The spec said not to add an E2E test. That was wrong, and here is why.** It reasoned that the flow ends in a credential and Playwright is not where that belongs — but `e2e/form-management.spec.ts` already asserted the exact Settings copy this change edits (*"Nothing else here yet"*), so the suite had to be touched regardless. Once open, the honest test was the reachable one: the suite pins `DEV_PLAN_KEY: 'team'`, so its organizations *do* have API access, and *mints an API key and shows the secret once* walks the whole path in a real browser — create, `vpk_…` shown, dismissed, gone, key still listed. That is the manual check the spec asked for, automated. The refusal path stays in `ApiKeysPanel.spec.ts`, which can choose its plan; the E2E cannot.
+
+**Verified:** frontend 41 specs / 343 tests, backend 18 / 231, integration 193 (183 passed, 10 skipped — the Redis-dependent ones), E2E 51, `npm run build --workspace=frontend` (vue-tsc), `tsc --noEmit` on the backend and `typecheck:tests`. Three existing suites needed updating: `backend/tests/entitlements.spec.ts` asserts the entitlements payload by **exact shape**, which is what made adding a field a deliberate act rather than a silent one, and two frontend fixtures are typed `Entitlements`.
+
+**Still not verified by hand:** the upgrade state in a browser. Nothing here runs a plan without API access — the E2E pins Team, and the dev `.env` leaves `DEV_PLAN_KEY` empty (which is Free, but is not what the E2E starts). It is covered at the behavioural level by `ApiKeysPanel.spec.ts` and nowhere else.
+
+**One stale reference to know about:** the line numbers in Context (`:421`, `:448`, `:478`) were right when this was written and moved by the comment block this feature added to the entitlements handler. The handlers are now at `:435`, `:462` and `:492`.

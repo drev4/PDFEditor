@@ -111,9 +111,39 @@ test.describe('The shell', () => {
     await expect(page.locator('text=Not built yet')).toBeVisible();
 
     await page.goto('/dashboard/settings');
-    await expect(page.locator('text=Nothing else here yet')).toBeVisible();
+    // Scoped to the General tab now (features/0021): the API keys tab beside it
+    // is built, so "nothing else" is a claim about this tab and not the screen.
+    await expect(page.locator('text=Nothing else on this tab yet')).toBeVisible();
     // The one real thing on it.
     await expect(page.locator(`text=${user.email}`).first()).toBeVisible();
+  });
+
+  // The API keys tab (features/0021). This suite pins `DEV_PLAN_KEY: 'team'`
+  // (see playwright.config.ts), so these organizations do have API access and
+  // the reachable path is the one worth walking: mint a key and see the secret
+  // exactly once. The refusal on a plan without the API is covered by
+  // ApiKeysPanel.spec.ts, which can choose its plan.
+  test('mints an API key and shows the secret once', async ({ page }) => {
+    await page.goto('/dashboard/settings');
+
+    await page.locator('[data-testid="settings-tab-api-keys"]').click();
+    // The tab is in the URL, so a link can point at it and a reload keeps it.
+    await expect(page).toHaveURL(/tab=api-keys/);
+
+    await page.locator('[data-testid="api-key-name"]').fill('E2E integration');
+    await page.locator('[data-testid="create-key-submit"]').click();
+
+    // The whole credential, and the only time it is ever shown: the server
+    // keeps `sha256(secret)` and cannot reproduce it.
+    const secret = page.locator('[data-testid="api-key-secret"]');
+    await expect(secret).toBeVisible();
+    await expect(secret).toHaveValue(/^vpk_[0-9a-f]+_.+/);
+
+    await page.locator('[data-testid="dismiss-api-key"]').click();
+
+    // Gone for good, and the key itself still listed.
+    await expect(secret).toHaveCount(0);
+    await expect(page.locator('[data-testid="api-keys-table"]')).toContainText('E2E integration');
   });
 
   // The editor is its own route now, and its rail is part of the screen rather

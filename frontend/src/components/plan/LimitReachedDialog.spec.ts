@@ -30,7 +30,8 @@ describe('LimitReachedDialog', () => {
       name: 'Free',
       maxPublishedForms: 1,
       maxResponsesPerMonth: 50,
-      seats: 1
+      seats: 1,
+      hasApiAccess: false
     },
     usage: { publishedForms: 1, responsesThisPeriod: 10, seats: 1 },
     subscription: null
@@ -45,7 +46,10 @@ describe('LimitReachedDialog', () => {
       maxResponsesPerMonth: 25000,
       // The **effective** limit the server resolved from what was bought — not
       // the catalogue floor (features/0015).
-      seats: 4
+      seats: 4,
+      // Team, so the API is included - not what this file is testing,
+      // but the fixture has to be a plan that could exist.
+      hasApiAccess: true
     },
     usage: { publishedForms: 2, responsesThisPeriod: 10, seats: 4 },
     subscription: { status: 'active', currentPeriodEnd: null, cancelAtPeriodEnd: false }

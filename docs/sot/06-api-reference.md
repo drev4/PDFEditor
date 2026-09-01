@@ -54,7 +54,7 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| GET | `/organizations/entitlements` | Bearer, any member | — | `200 {plan: {key, name, maxPublishedForms, maxResponsesPerMonth, seats}, usage: {publishedForms, responsesThisPeriod, seats}, subscription: {status, currentPeriodEnd, cancelAtPeriodEnd} \| null}` · `404` if the caller is in no organization |
+| GET | `/organizations/entitlements` | Bearer, any member | — | `200 {plan: {key, name, maxPublishedForms, maxResponsesPerMonth, seats, hasApiAccess}, usage: {publishedForms, responsesThisPeriod, seats}, subscription: {status, currentPeriodEnd, cancelAtPeriodEnd} \| null}` · `404` if the caller is in no organization |
 | GET | `/organizations/members` | Bearer, any member | — | `200 {members: [{id, email, name, role, joinedAt}]}` · `404` if the caller is in no organization |
 | PATCH | `/organizations/members/:userId` | Bearer, **owner** | `{role}` | `200 {member}` · `400` if it would leave no owner · `403` wrong role · `404` not a member of this organization |
 | DELETE | `/organizations/members/:userId` | Bearer, **owner** | — | `204` · `400` if it would leave no owner · `403` · `404` |
@@ -64,6 +64,8 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 | POST | `/organizations/invitations/accept` | — | `{token, password?, name?}` | `200 {organizationId}` when signed in · `201 {user, token, organizationId}` for a new account · `400` invalid/expired/revoked/used or missing password · `401` the account exists, sign in first · `409` signed in as a different address · `429` |
 
 **`plan.seats` is the *effective* limit, not always the catalogue's number.** For a per-seat plan it is what the customer actually bought, resolved server-side by `seatLimitFor`; for every other plan it is the catalogue value unchanged. The client is deliberately not told which of the two it received and must not try to work it out — a second copy of that rule in the browser is a rule that can disagree with the one enforcing the limit ([`features/0015`](../../features/0015-team-plan-and-purchased-seats.md)). `usage.seats` is members plus pending invitations.
+
+**`plan.hasApiAccess` says what the plan includes, and decides nothing** ([`features/0021`](../../features/0021-api-keys-screen.md)). It is on this payload so the API keys screen knows whether to draw a create form at all — a button whose only possible answer is `402` reads as a broken product rather than an enforced rule. `assertHasApiAccess` inside `POST /organizations/api-keys` remains the only enforcer, and every client acting on this flag must still handle the `402`, because the plan can change between a page loading and a button being pressed. Note where it is **not** sent: `GET /forms/public/:shareId` is anonymous and carries nothing about the owner's plan but `showBranding`.
 
 **`/organizations/entitlements` is readable by any member, not just an owner.** The sidebar plan card and the plan screen are visible to everyone in the organization, and a member who cannot see why publishing was refused has no way to understand the product. It carries no organization id. `null` in any limit means **unlimited** — the same representation the backend catalogue uses, because `Infinity` does not survive JSON and a sentinel like `-1` invites a comparison that accidentally works.
 

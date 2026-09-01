@@ -23,7 +23,12 @@
         {{ explanation }}
       </p>
 
-      <div v-if="planStore.plan" class="grid grid-cols-2 gap-5 mt-5">
+      <!--
+        No meters for `api`: it is a capability, not a quantity. Drawing the
+        forms and responses bars beside "your plan does not include the API"
+        would invite the customer to read a number as the reason it was refused.
+      -->
+      <div v-if="planStore.plan && limit !== 'api'" class="grid grid-cols-2 gap-5 mt-5">
         <UsageMeter
           v-if="limit === 'seats'"
           label="Members"
@@ -51,7 +56,27 @@
         which is the only place it is true (trap 7).
       -->
       <p class="mt-5 pt-4 border-t border-line text-meta text-faint">
-        <template v-if="limit === 'seats'">
+        <!--
+          The API is Team-only (features/0019), and Team is a different plan
+          rather than a bigger allowance - so the way out is a plan change, and
+          for somebody who already pays that is the portal's job, not a second
+          checkout (features/0015).
+        -->
+        <template v-if="limit === 'api'">
+          <template v-if="isOwner && planStore.hasSubscription">
+            The API is part of Team. Change plan in the billing portal - you'll
+            see the price there, before anything is charged.
+          </template>
+          <template v-else-if="isOwner">
+            The API is part of Team. You'll see the price on the next screen,
+            before anything is charged.
+          </template>
+          <template v-else>
+            The API is part of Team, and only an owner of this organization can
+            change the plan. Ask them, and your key will mint straight away.
+          </template>
+        </template>
+        <template v-else-if="limit === 'seats'">
           <!--
             Seats are **bought, not billed after the fact** (features/0015): the
             owner sets the number in Stripe's portal and the invitation is sent
@@ -99,7 +124,7 @@
       <div class="flex items-center justify-end gap-2">
         <Button label="Not now" text severity="secondary" @click="$emit('close')" />
         <Button
-          v-if="limit !== 'seats'"
+          v-if="limit === 'forms'"
           label="Manage forms"
           severity="secondary"
           outlined
@@ -116,6 +141,25 @@
           data-testid="add-seats-from-limit"
           :loading="planStore.billingRedirecting"
           @click="planStore.openBillingPortal()"
+        />
+        <!--
+          Owner only, like every other control here. An existing subscriber goes
+          to the portal to switch plan; a first purchase opens Checkout for Team
+          directly, because the portal cannot make one.
+        -->
+        <Button
+          v-else-if="limit === 'api' && isOwner && planStore.hasSubscription"
+          label="Manage billing"
+          data-testid="manage-billing-from-limit"
+          :loading="planStore.billingRedirecting"
+          @click="planStore.openBillingPortal()"
+        />
+        <Button
+          v-else-if="limit === 'api' && isOwner"
+          label="Upgrade to Team"
+          data-testid="upgrade-team-from-limit"
+          :loading="planStore.billingRedirecting"
+          @click="planStore.startCheckout('team')"
         />
         <Button
           v-else-if="canUpgrade"
@@ -165,8 +209,12 @@ const props = withDefaults(
      * screen for an invitation that came back `402`: same reasoning — a limit is
      * not a failure — and a different action, because seats are bought in the
      * portal rather than by upgrading.
+     *
+     * `api` is the third (features/0021): a `402` from minting an API key, which
+     * is a capability the plan does not have rather than an allowance that ran
+     * out. It renders no meters for that reason.
      */
-    limit?: 'forms' | 'seats'
+    limit?: 'forms' | 'seats' | 'api'
   }>(),
   { message: null, formTitle: null, limit: 'forms' }
 )
@@ -204,9 +252,10 @@ const canUpgrade = computed(() => isOwner.value && planStore.plan?.key === 'free
 const heading = computed(() => {
   const planName = planStore.plan?.name ?? 'your plan'
 
-  return props.limit === 'seats'
-    ? `${planName} doesn't have a seat for this person yet`
-    : `You've reached the form limit on ${planName}`
+  if (props.limit === 'seats') return `${planName} doesn't have a seat for this person yet`
+  if (props.limit === 'api') return `${planName} doesn't include the API`
+
+  return `You've reached the form limit on ${planName}`
 })
 
 const explanation = computed(() => {
@@ -216,6 +265,13 @@ const explanation = computed(() => {
     return (
       props.message ??
       'This organization has no free seat, so the invitation was not sent. Nobody was removed.'
+    )
+  }
+
+  if (props.limit === 'api') {
+    return (
+      props.message ??
+      'No key was created. The keys this organization already has are unaffected.'
     )
   }
 

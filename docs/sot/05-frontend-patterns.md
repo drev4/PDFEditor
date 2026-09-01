@@ -161,7 +161,7 @@ Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as 
 | `/dashboard`, `/dashboard/forms` | `FormsManagementView` | `AppShell` sidebar |
 | `/dashboard/responses` | `ResponsesIndexView` | `AppShell` sidebar |
 | `/dashboard/team` | `MembersView` | `AppShell` sidebar |
-| `/dashboard/settings` | `SettingsView` | `AppShell` sidebar |
+| `/dashboard/settings` | `SettingsView` — **General** and **API keys** tabs, the tab in `?tab=` | `AppShell` sidebar |
 | `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
 | `/dashboard/editor` | `EditorView` | none — its own top bar and left rail |
 
@@ -183,9 +183,26 @@ Nobody should read the canvas as a description of the product. What is drawn and
 - **Seats are bought, so the SPA has no seat control.** There is no quantity field anywhere in this client, and there must not be: the customer sets the number in Stripe's portal, `Subscription.quantity` is only ever read back off the webhook, and this application never sends Stripe a quantity ([04-backend-patterns §10](./04-backend-patterns.md)). What the SPA does instead: the *Members* meter on Settings shows seats used against the **effective** limit the server resolved (`plan.seats`, which on Team is what was bought, not the catalogue floor), the Settings copy says where seats are bought and that lowering the number removes nobody, and a `402` from inviting opens `LimitReachedDialog` in its `limit="seats"` mode — the same "a limit is not a failure" treatment a publish limit gets, with *Add seats* opening the portal rather than an *Upgrade* that would sell a second subscription. `MembersView.vue` branches on `ApiError.status === 402`, never on the message.
 - **Purchase controls are owner-only, matching the API.** `POST /api/billing/*` answers `403` to anyone but an owner, so the UI reads the caller's role — through `organizationStore.currentRole`, the same way `MembersView.vue` does, never a second source — and shows a member the plan and the usage with no way to spend money. A button guaranteed to fail tells someone the product is broken when it is enforcing a rule.
 - **Returning from Checkout asserts nothing.** `?checkout=complete` on the Settings screen says activation is in progress and re-reads entitlements a few times; it never writes and never claims success on its own, because the redirect is a URL anyone can visit and a customer who closes the tab never visits it at all. The plan on screen is always the one the server reported.
-- **The `API keys` tab** on the Settings artboard. Step 10 of the build order.
+- **The `webhooks` tab.** The endpoints exist (`POST`/`GET`/`DELETE /api/organizations/webhooks`) and no screen reaches them, so an endpoint is still configured through the API alone. Its delivery log needs an endpoint of its own: the only one that exists, `GET /api/v1/webhooks/deliveries`, is authenticated by an API key, and a customer cannot be asked to mint a key in order to see whether their webhook works. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
+
+### API keys
+
+**Built** ([`features/0021`](../../features/0021-api-keys-screen.md)) — the `API keys` tab the Settings artboard draws, over the endpoints [`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md) shipped without one.
+
+| | |
+|---|---|
+| `services/apiKeys.ts` | `list`, `create`, `revoke` over `/organizations/api-keys` — the session API, never `/api/v1`, because a credential that could mint credentials would turn one leaked key into permanent access |
+| `stores/apiKeys.store.ts` | The list and `lastCreatedKey`. `persist: false`, deliberately |
+| `components/settings/ApiKeysPanel.vue` | The tab itself |
+
+Four things about it are load-bearing:
+
+- **The secret lives in the store, not in the component.** `POST` returns it once and the server keeps only `sha256(secret)`, so a value lost to an unmount is a key that can never be used — only revoked. Same decision, same reason, as `lastCreatedInvitation` in `organization.store.ts`, down to the clipboard fallback: a rejected `navigator.clipboard` leaves selectable text rather than a dead button.
+- **`plan.hasApiAccess` chooses what is drawn; the server chooses what is allowed.** The flag hides the create form on a plan that would refuse it, and the `402` handler stays anyway — the plan can change between the page loading and the button being pressed. The panel branches on `ApiError.status`, never on a message.
+- **`403` and `402` are different screens.** An owner or admin without the plan sees the upgrade state; a plain member sees *ask an owner or admin*. Collapsing them sends the customer to the wrong place, and the panel does not even request a list the server would refuse.
+- **A revoked key keeps its row.** The server revokes rather than deletes, and the row plus its timestamp are the only record of when access stopped. `lastUsedAt` is rendered as relative time or *never used* and nothing finer, because it is written at most once a minute and its failures are swallowed.
 
 ### Plan and usage
 
