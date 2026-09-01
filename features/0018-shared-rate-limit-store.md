@@ -1,8 +1,8 @@
 # 0018 — One rate limit for the whole service, not one per replica
 
-**Status:** backlog
+**Status:** in progress
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Shared rate-limit store (Redis)*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0018-shared-rate-limit-store`
 **Related:** [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [04-backend-patterns §7](../docs/sot/04-backend-patterns.md) · [08-operations](../docs/sot/08-operations.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [`features/0002`](0002-rate-limiting-on-public-write-paths.md) · [`features/0017`](0017-job-queue-for-pdf-embedding.md)
 
 ## Context
