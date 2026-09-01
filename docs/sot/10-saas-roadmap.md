@@ -146,7 +146,7 @@ Verified against the code on **2026-09-01**; every claim below names the file it
 | # | Next | Kind | Depends on |
 |---|---|---|---|
 | A1 | ~~**API keys and webhooks screens in the SPA**~~ — done ([`features/0021`](../../features/0021-api-keys-screen.md), [`features/0022`](../../features/0022-webhooks-screen.md)) | Product | — |
-| A2 | **An endpoint that returns the organization**, then the switcher and renaming | Product | Nothing |
+| A2 | **The active organization**, then the switcher ([`features/0023`](../../features/0023-active-organization.md)) | Correctness + Product | Nothing |
 | A3 | **Organization-wide responses listing**, then `/dashboard/responses` | Product | A paging decision |
 | B1 | **Structured logging (`pino`)** with request ids and redaction | Operability | Nothing — and it unblocks three other rows |
 | B2 | **`asyncHandler`** on every async route | Correctness | Nothing |
@@ -165,7 +165,7 @@ Verified against the code on **2026-09-01**; every claim below names the file it
 
 Two things the screens had to get right, and both were properties of the endpoints rather than of the design. **The secret is returned exactly once**, at creation, by both `POST` handlers — a screen that does not make the customer copy it there has lost it. And `GET /webhooks` returns a `deliverable` boolean, false when `REDIS_URL` or `WEBHOOK_SIGNING_KEY` is missing, which the screen surfaces as its own state: otherwise the customer configures an endpoint that will never fire and nothing says so. Both held, and both are now asserted by tests.
 
-**A2. An endpoint that returns the organization.** `SettingsView.vue:186` says out loud that renaming the organization is not built because no endpoint returns its name, and the design canvas puts a switcher at the top of the sidebar that has nothing to read. A small endpoint that two screens are waiting on.
+**A2. The active organization.** ~~A small endpoint two screens are waiting on.~~ **That description was wrong, and finding out why is the reason specs are written against the code** ([`features/0023`](../../features/0023-active-organization.md)). Nothing in this application decides which organization a request acts in: reads span **every** membership (`memberOfCallerOrganization`) while writes and entitlements take the **oldest** (`requireMembership`), and invitations made belonging to two organizations reachable. Measured against a real database, a registered user who accepts an invitation into a Team organization sees its forms, creates forms into their own personal organization instead, and is metered against Free. So A2 is a `P1` correctness fix with a switcher on top, not a small endpoint — and the switcher is part of it rather than a follow-up, because without one the fix strands a two-organization user in whichever the fallback picks. Renaming stays a separate row.
 
 **A3. Responses across the organization.** `ResponsesIndexView.vue` is a `NotBuiltYet` placeholder, and the only listings are per-form: `GET /api/forms/:id/responses` and `GET /api/forms/:id/responses/export` (`backend/src/routes/forms.ts:338`, `:374`). It is third rather than first because it is the one of the three that needs a decision — paging and ordering the server agrees to, rather than one request per form merged in the browser.
 
