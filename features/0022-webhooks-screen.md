@@ -1,8 +1,8 @@
 # 0022 — The webhooks screen, and the two endpoints it turns out to need
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *The `webhooks` tab in the SPA*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0022-webhooks-screen`
 **Related:** [10-saas-roadmap §what comes next](../docs/sot/10-saas-roadmap.md#what-comes-next) · [05-frontend-patterns §8](../docs/sot/05-frontend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [04-backend-patterns](../docs/sot/04-backend-patterns.md) · [`features/0020`](0020-outbound-webhooks.md) · [`features/0021`](0021-api-keys-screen.md) · [`features/0019`](0019-api-keys-and-read-only-public-api.md)
 
 ## Context
@@ -112,4 +112,14 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified. Both endpoints the spec predicted were needed turned out to be needed, and nothing else was.
+
+**The `PATCH` is as narrow as it was drawn.** It clears `disabledAt`, `consecutiveFailures` and `lastError`, ignores a body entirely, and re-runs `assertDeliverableUrl` on the **stored** URL first — a test sends `{ url: 'https://attacker.example.com/hook', events: [...] }` and asserts the row is unchanged, and another moves the stored URL to `https://localhost/hook` and asserts a `400` with the endpoint still disabled. The guard asymmetry with `DELETE` is deliberate and tested both ways: re-enabling turns delivery *on*, so it needs the queue (`503`) and the plan (`402`); deleting turns it off and must keep working on a deployment that has neither.
+
+**One deviation from the spec, and it is the store's loading rule.** The spec said to copy the API keys tab, whose panel does not fetch when the plan lacks the entitlement. Doing that here would have hidden **live endpoints from a downgraded organization** — `DELETE` deliberately works without the plan precisely so they can be turned off, and a screen that does not list them makes that impossible. So the webhooks panel gates its load on the *role* only. `WebhooksPanel.spec.ts` asserts it: on a Free plan the list is still fetched and Delete is still offered.
+
+**The three refusals are the whole design of the panel** and six of its fourteen tests. The one worth naming: `deliverable: false` renders **with an empty list too**, because that is exactly the moment somebody is about to configure an endpoint that would never fire. Collapsing it into the plan state would have been the easy mistake — both end in "you cannot create one", but one is a bug report and the other is a purchase.
+
+**Verified:** frontend 44 specs / 373 tests, backend 18 / 231, integration 206 (196 passed, 10 skipped — the Redis-dependent ones), E2E 52, `npm run build --workspace=frontend` (vue-tsc), `tsc --noEmit` and `typecheck:tests` on the backend. The E2E asserts the `deliverable: false` state, which is the one the suite's pinned `REDIS_URL: ''` actually produces — the spec said not to change that pin to get a happier test, and it was not changed.
+
+**Not verified by hand:** the delivering path. It needs a real Redis, a running `npm run worker` and a receiving server, and none of that exists in this environment; the spec's manual check — create an endpoint, submit a response, watch a `2xx` row appear and verify the signature — has not been run. `tests/integration/webhook-delivery.spec.ts` covers delivery itself against a real Redis when `TEST_REDIS_URL` is set, and it is one of the ten skipped here.
