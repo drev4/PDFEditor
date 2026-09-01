@@ -1,6 +1,6 @@
 # 0019 — API keys, and a public API that is read-only on purpose
 
-**Status:** in progress
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Public API with per-organization API keys*)
 **Branch:** `feature/0019-api-keys-and-read-only-public-api`
 **Related:** [10-saas-roadmap §build order](../docs/sot/10-saas-roadmap.md#build-order) · [04-backend-patterns](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [03-domain-model](../docs/sot/03-domain-model.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md) · [`features/0018`](0018-shared-rate-limit-store.md)
@@ -168,4 +168,58 @@ Nothing about that blocks the feature, and it changes two things that must be do
 
 ## Outcome
 
-*(filled in when the work is finished)*
+**Shipped.** Build-order step 10 is half closed; outbound webhooks are the other half and are untouched.
+
+### What shipped
+
+- `ApiKey` (migration `20260901092401_api_keys`) — organization, name, indexed public `prefix`, SHA-256 `hash`, nullable `createdByUserId`, `lastUsedAt`, `revokedAt`. Cascades: `Cascade` from `Organization`, **`SetNull` from `User`**, so no employee's departure breaks a customer's integration.
+- `backend/src/services/api-key.ts` — mint, parse, verify (constant-time), revoke, and a `lastUsedAt` write throttled to once a minute per key.
+- `backend/src/middleware/apiKeyAuth.ts` — `identifyApiKey` (never rejects) and `requireApiKey` (rejects), split for the reason in the second finding below.
+- `backend/src/routes/v1/` — `GET /api/v1/forms`, `/forms/:id`, `/forms/:id/responses`, `/forms/:id/responses.csv`, all scoped on `organizationId`, all returning explicitly built bodies.
+- `backend/src/routes/organizations.ts` — `GET`/`POST`/`DELETE /api-keys`, owner or admin, with `assertHasApiAccess` in `services/entitlements.ts` finally reading the `hasApiAccess` flag that had sat unread since features/0012.
+- A sixth limiter, `api`, keyed on the API key with an IP fallback.
+- Four new specs, 30 tests: `api-v1.spec.ts` (13), `api-keys.spec.ts` (7), `api-rate-limit.spec.ts` (3), plus the additions to the existing counts.
+
+### Two bugs the tests found that the design did not
+
+**1. The credential format cut secrets in half — sometimes.** `vpk_<prefix>_<secret>` was parsed by splitting on `_` and requiring three parts. Both halves were `base64url`, whose alphabet *includes* `_`, so roughly a third of minted keys were rejected as malformed while the rest worked. It presented as a bewildering mix — the same code path passing four tests and failing seven in one run. The prefix is now hex, and the secret is everything after the second separator, underscores included.
+
+**2. The middleware order was the cheapest possible rate-limit bypass.** The first router did `authenticate` then `limit`, which reads as obviously right and means **an unauthenticated caller never reaches the limiter** — an unlimited budget of requests, each still costing a parse and a database lookup, in exchange for simply not sending a key. The test written for goal 9's fallback caught it (`expected [ 401, 401, 401, 401, 401, 401 ] to include 429`). The order is now identify → limit → require, and the authentication middleware is split in two so that "identify" has something to do before rejection happens.
+
+Neither was in the spec's list of traps. Both are recorded in the code where somebody would otherwise re-introduce them.
+
+### The failing test, first — and its own vacuous version
+
+The cross-tenant tests were written before the router existed and all thirteen failed. But three of them then **passed against no router at all**, because Express answers `404` for an unmounted path exactly as it does for another organization's form. A test that asserts only the `404` proves nothing here. They now assert both halves — the owner gets `200` on the same URL, the stranger gets `404` — which is what makes the `404` mean *scoped out* rather than *no such route*.
+
+### Verification
+
+```
+npm run test:backend                                      16 specs, 206 tests passed
+npm run test:integration                                  19 specs, 168 passed, 2 specs skipped
+TEST_REDIS_URL=… npm run test:integration                 21 specs, 174 tests passed
+npm run test:frontend                                     38 specs, 321 tests passed
+npm run test:e2e                                          50 passed (19.2s)
+npm run build --workspace=frontend                        built in 5.53s
+cd backend && npx tsc --noEmit && npm run typecheck:tests  clean
+```
+
+By hand, against a running API:
+
+```
+free plan     POST /api/organizations/api-keys  -> 402 "The Free plan does not include API access."
+team plan     POST /api/organizations/api-keys  -> 201, secret vpk_40867288d411...
+              GET  /api/v1/forms                -> 200 {"data":[],"pagination":{...}}
+              DELETE /api/organizations/api-keys/:id -> 200
+              GET  /api/v1/forms                -> 401, no restart in between
+              api_keys row: last_used_at set, revoked_at set
+              grep -c "vpk_" server.log         -> 0   (the secret is never logged)
+```
+
+### Two things a reader should know before building on this
+
+**No customer can mint a key from the product yet.** The SPA's `API keys` tab is drawn on the canvas and was deliberately not built here, so the only way to a key is calling the management endpoint with a session. Filed in [`docs/BACKLOG.md`](../docs/BACKLOG.md), and it is small.
+
+**The API is Team-only, by the catalogue.** `hasApiAccess` is `false` on Free and Pro, so wiring it makes a Pro customer's key request a `402`. That was flagged in the spec as a product decision rather than a technical one and shipped as the catalogue says; changing it is one boolean in `services/plans.ts`.
+
+Also worth recording: the test database needed `prisma migrate deploy` by hand before the new table existed there, which is the backlog row *Nothing migrates the integration test database locally* biting again — and `tests/integration/setup.ts` gained `api_keys` in its truncation list.
