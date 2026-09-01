@@ -1,8 +1,8 @@
 # 0025 — Structured logging, so a failure can be found
 
-**Status:** backlog
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Structured logging (`pino`) with request ids and redaction*, S9)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0025-structured-logging`
 **Related:** [08-operations §Observability](../docs/sot/08-operations.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [04-backend-patterns §5](../docs/sot/04-backend-patterns.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [`features/0017`](0017-job-queue-for-pdf-embedding.md) · [`features/0020`](0020-outbound-webhooks.md)
 
 ## Context
@@ -111,4 +111,18 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified. All six traps were real, and two of them were caught by the tooling rather than by care.
+
+**The type checker caught what a blind conversion would have lost.** `console.error('msg:', err)` and `logger.error('msg:', err)` look identical and are not: pino's signature is `(obj, msg)`, so the error object becomes a printf argument with no placeholder and is **dropped silently**. A regex swap of all 47 remaining calls left six multi-line sites that `tsc` refused — each one an error object about to disappear — and they were rewritten by hand as `logger.error({ err }, 'msg')`. Worth remembering: this conversion is only safe on a codebase that type-checks.
+
+**`process-guards.spec.ts` turned trap 6 into an assertion instead of a manual check.** It runs a real child process, and it failed twice for two different real reasons: pino writes every level to **stdout**, not stderr, so the assertions moved; and the child inherited `NODE_ENV=test`, which silenced the logger — so the spec now sets `NODE_ENV=production` and `LOG_LEVEL=info` explicitly, and measures the guards rather than how the runner is configured. Its uncaught-exception test now proves the line survives the 100ms flush before `process.exit`, which the spec had listed as a thing to check by hand.
+
+**Two self-inflicted wounds, both from the same script.** The regex that inserted `import { logger }` after "the last import line" put it *inside* a multi-line `import { … }` block in two specs, which esbuild reported as `Expected "as" but found "{"`. Fixed by hand. A cheaper lesson than it looks: the suites caught it immediately.
+
+**Redaction is tested through the real configuration.** `REDACT` is exported from `services/logger.ts` and the spec builds a pino instance with it over a memory stream — a spec asserting one list against another list would only prove somebody typed the same thing twice. The stronger assertion is elsewhere: `request-log.spec.ts` checks that no `Authorization`, cookie, or answer value is ever *handed* to the logger, which is stricter than checking the bytes it writes, because redaction would hide a value that had still been collected.
+
+**Verified:** backend 19 specs / 239 tests, integration 221 (211 passed, 10 skipped), frontend 47 / 393, E2E 53, `npm run build --workspace=frontend`, `tsc --noEmit` and `typecheck:tests`. By hand: `NODE_ENV=production LOG_LEVEL=info` boots to one JSON object per line, and the E2E suite's own dev server output shows the `pino-pretty` format, so both halves of criterion 9 were observed rather than assumed.
+
+**The runbook strings all survive byte-identical** — `[worker] started, waiting for jobs`, `[worker] stopped`, `embed job … done`, `EMBED GAVE UP`, `will retry`, `WEBHOOK GAVE UP`, `Rate limiting is counting in …` — with structured fields added beside them, so every grep in [08-operations](../docs/sot/08-operations.md) still works. That was the cheaper half of trap 1 and it is the half that was taken.
+
+**Not done, deliberately:** `frontend/src` still uses `console`, and the 150 calls in `backend/src/scripts/` still do too. Both are in Out of scope, and the second is the one somebody will be tempted to "finish" later — the line is whether an operator or a machine is reading.

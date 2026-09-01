@@ -1,3 +1,4 @@
+import { logger } from './services/logger.js'
 /**
  * The last line of defence in a long-running process (features/0017, trap 4).
  *
@@ -31,16 +32,20 @@
  * restart. The exit is deferred by a tick so the log line actually flushes.
  */
 export function installProcessGuards(processName: string): void {
+  const log = logger.child({ process: processName })
+
   process.on('unhandledRejection', reason => {
-    console.error(
-      `[${processName}] unhandled promise rejection - staying up, but this is a bug:`,
-      reason
+    log.error(
+      { err: reason },
+      `[${processName}] unhandled promise rejection - staying up, but this is a bug`
     )
   })
 
   process.on('uncaughtException', error => {
-    console.error(`[${processName}] uncaught exception - shutting down:`, error)
-    // Give the log a tick to flush before the process disappears.
+    log.error({ err: error }, `[${processName}] uncaught exception - shutting down`)
+    // Give the log a tick to flush before the process disappears. It matters
+    // more with pino than it did with `console`: the write is asynchronous, so
+    // exiting immediately would lose the one line explaining why (features/0025).
     setTimeout(() => process.exit(1), 100).unref()
   })
 }

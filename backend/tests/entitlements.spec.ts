@@ -7,6 +7,7 @@ import { mockCallerMembership } from './mock-caller.js'
 import { PrismaClient } from '@prisma/client'
 import { PLANS, DEV_PLAN, resolvePlan, effectivePlan, isWithin } from '../src/services/plans'
 import { currentPeriod } from '../src/services/entitlements'
+import { logger } from '../src/services/logger'
 
 vi.mock('../src/services/db', async () => {
   const { mockDeep } = await import('vitest-mock-extended')
@@ -77,7 +78,7 @@ describe('plan limits', () => {
     })
 
     it('resolves an unknown plan downward, never upward', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
 
       expect(resolvePlan('enterprise').key).toBe('free')
       expect(warn).toHaveBeenCalled()

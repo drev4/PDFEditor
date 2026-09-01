@@ -2,6 +2,7 @@ import Stripe from 'stripe'
 import { prisma } from './db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { DEFAULT_PLAN_KEY, type PlanKey } from './plans.js'
+import { logger } from './logger.js'
 
 /**
  * Everything that knows Stripe exists (features/0013).
@@ -54,7 +55,7 @@ const announced = new Set<string>()
 function announceOnce(message: string): void {
   if (announced.has(message)) return
   announced.add(message)
-  console.error(message)
+  logger.error(message)
 }
 
 /** Only for tests, which assert the first occurrence of a message. */
@@ -215,7 +216,7 @@ export function planKeyForStatus(status: string, priceId: string | null | undefi
   const planKey = planKeyForPrice(priceId)
 
   if (!planKey) {
-    console.error(
+    logger.error(
       `Stripe subscription is "${status}" on price "${priceId}", which this ` +
       `deployment does not recognise (check STRIPE_PRICE_PRO and ` +
       `STRIPE_PRICE_TEAM). Falling back to "${DEFAULT_PLAN_KEY}".`
@@ -517,7 +518,7 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<HandledEve
   const organizationId = await organizationIdFor(metadataOrganizationId, stripeCustomerId)
 
   if (!organizationId) {
-    console.error(
+    logger.error(
       `Stripe event ${event.id} (${event.type}) names no organization this ` +
       `application knows: metadata="${metadataOrganizationId ?? ''}", ` +
       `customer="${stripeCustomerId ?? ''}".`

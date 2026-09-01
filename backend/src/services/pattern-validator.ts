@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { logger } from './logger.js'
 
 /**
  * The one place that knows how an author-supplied `pattern` is compiled.
@@ -39,12 +40,12 @@ let RE2: RE2Constructor | null = null
 try {
   RE2 = require('re2') as RE2Constructor
 } catch (error) {
-  console.error(
+  logger.error(
+    { err: error },
     'Could not load the re2 regex engine. Field `pattern` validation is DISABLED: ' +
     'patterns are still checked for syntax when saved, but are not enforced when ' +
     'a response is submitted. The usual cause is a native module built for a ' +
-    'different Node version - reinstall dependencies.',
-    error
+    'different Node version - reinstall dependencies.'
   )
 }
 

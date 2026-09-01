@@ -12,9 +12,11 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 47 specs, 393 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 18 specs, 231 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| Backend route (mocked Prisma) | 19 specs, 239 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 24 specs, 221 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 53 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
+
+**The suites run silent.** `LOG_LEVEL` defaults to `silent` under `NODE_ENV=test` ([`features/0025`](../../features/0025-structured-logging.md)), so anything a suite prints is its own. A test that needs to assert on a log line spies on `services/logger.ts` — `backend/tests/middleware-errorHandler.spec.ts` is the model — and `tests/process-guards.spec.ts`, which runs a real child process, sets `NODE_ENV=production` and `LOG_LEVEL=info` explicitly, so it measures the guards rather than how the runner happens to be configured.
 
 **The suites run offline, and the storage driver is what keeps that true.** `PDF_STORAGE_DRIVER` defaults to `local`, so every suite reads and writes real files under `backend/uploads/pdfs` exactly as before — `tests/security-headers.spec.ts` writes a fixture and fetches it through the signed route, and the E2E suite uploads real PDFs. The `s3` driver is never exercised by `npm test` and that is deliberate: mocking the AWS SDK would assert that the code calls the mock the way the code calls the mock. It is verified against a real S3-compatible endpoint instead — MinIO from `docker-compose.yml` — and what that run covered is recorded in [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)'s Outcome.
 

@@ -5,6 +5,7 @@ import { AppError } from '../middleware/errorHandler.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { pdfStorage } from '../services/pdf-storage.js'
 import { canonicalPdfUrl } from '../services/pdf-url.js'
+import { logger } from '../services/logger.js'
 
 export const uploadRouter = Router()
 
@@ -32,9 +33,9 @@ uploadRouter.post('/', authenticate, upload.single('pdf'), async (req: AuthReque
     let extractedFields: Awaited<ReturnType<typeof pdfProcessor.extractFieldsFromPDF>> = []
     try {
       extractedFields = await pdfProcessor.extractFieldsFromPDF(pdfBuffer)
-      console.log(`Extracted ${extractedFields.length} fields from uploaded PDF`)
+      logger.info(`Extracted ${extractedFields.length} fields from uploaded PDF`)
     } catch (error) {
-      console.warn('Could not extract fields from PDF:', error)
+      logger.warn({ err: error }, 'Could not extract fields from PDF')
       // Continue even if extraction fails - some PDFs may not have form fields
     }
 

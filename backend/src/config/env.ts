@@ -1,3 +1,4 @@
+import { logger } from '../services/logger.js'
 /**
  * Reads a boolean from the environment. Accepts `true`/`false` and `1`/`0`.
  *
@@ -13,7 +14,7 @@ export function envBool(name: string, fallback: boolean): boolean {
   if (value === 'true' || value === '1') return true
   if (value === 'false' || value === '0') return false
 
-  console.warn(
+  logger.warn(
     `Invalid ${name}="${raw}" (expected true/false); using ${fallback}`
   )
   return fallback
@@ -33,7 +34,7 @@ export function envInt(name: string, fallback: number, min = 1): number {
 
   const parsed = Number(raw)
   if (!Number.isInteger(parsed) || parsed < min) {
-    console.warn(
+    logger.warn(
       `Invalid ${name}="${raw}" (expected an integer >= ${min}); using ${fallback}`
     )
     return fallback

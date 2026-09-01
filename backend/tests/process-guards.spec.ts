@@ -21,10 +21,19 @@ import path from 'path'
 describe('process guards', () => {
   const FIXTURE = path.join(process.cwd(), 'tests', 'fixtures', 'guarded-process.ts')
 
+  /**
+   * The child runs as a **production-like process**, not as part of this suite.
+   *
+   * `NODE_ENV` and `LOG_LEVEL` are set explicitly because the logger is silent
+   * under `NODE_ENV=test` (features/0025) — and a child that inherited that
+   * would make these tests pass or fail on how the *runner* is configured
+   * rather than on what the guards do.
+   */
   function run(mode: string) {
     return spawnSync(process.execPath, ['--import', 'tsx', FIXTURE, mode], {
       encoding: 'utf-8',
-      timeout: 60_000
+      timeout: 60_000,
+      env: { ...process.env, NODE_ENV: 'production', LOG_LEVEL: 'info' }
     })
   }
 
@@ -38,7 +47,12 @@ describe('process guards', () => {
 
     // And it is not silent. A swallowed rejection would be worse than a crash,
     // because nothing would ever say the job was lost.
-    expect(result.stderr).toContain('unhandled promise rejection')
+    //
+    // **stdout, not stderr, since features/0025.** `pino` writes every level to
+    // stdout as one JSON object per line; separating streams by severity is a
+    // console habit that a log collector does not want, since it splits one
+    // stream of events into two that have to be re-merged by timestamp.
+    expect(result.stdout).toContain('unhandled promise rejection')
   })
 
   it('exits on an uncaught exception, deliberately unlike a rejection', () => {
@@ -51,6 +65,10 @@ describe('process guards', () => {
     // the supervisor.
     expect(result.stdout).not.toContain('STILL ALIVE')
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain('uncaught exception')
+    // This assertion is doing double duty now: it says the guard explained
+    // itself, and it says the line **survived the exit**. `pino` writes
+    // asynchronously, so the 100ms the handler waits before `process.exit` is
+    // load-bearing in a way it was not with `console.error` (features/0025).
+    expect(result.stdout).toContain('uncaught exception')
   })
 })

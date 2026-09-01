@@ -11,6 +11,7 @@ import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
 import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
 import { pdfStorage } from '../services/pdf-storage.js'
+import { logger } from '../services/logger.js'
 
 export const formsRouter = Router()
 
@@ -132,7 +133,7 @@ async function syncFieldsFromPDF(formId: string, pdfUrl: string) {
 
   if (extractedFields.length === 0) return null
 
-  console.log(`Found ${extractedFields.length} fields in PDF, syncing to database...`)
+  logger.info(`Found ${extractedFields.length} fields in PDF, syncing to database...`)
 
   await prisma.field.createMany({
     data: extractedFields.map((field, index) => ({
@@ -152,7 +153,7 @@ async function syncFieldsFromPDF(formId: string, pdfUrl: string) {
     }))
   })
 
-  console.log(`✓ Successfully synced ${extractedFields.length} fields from PDF to database`)
+  logger.info(`✓ Successfully synced ${extractedFields.length} fields from PDF to database`)
   return extractedFields.length
 }
 
@@ -188,7 +189,7 @@ formsRouter.get('/:id', authenticate, async (req: AuthRequest, res, next) => {
         })
         return res.json({ form: updatedForm ? toApiForm(updatedForm) : updatedForm })
       } catch (error) {
-        console.error('Error syncing fields from PDF:', error)
+        logger.error({ err: error }, 'Error syncing fields from PDF')
       }
     }
 

@@ -6,6 +6,7 @@ import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from './redis.
 import { assertDeliverableUrl, deliver } from './webhook-egress.js'
 import { decryptSecret, isWebhookSigningConfigured, signPayload } from './webhooks.js'
 import { assertHasApiAccess } from './entitlements.js'
+import { logger } from './logger.js'
 
 /**
  * The second job type on the queue features/0017 brought (features/0020).
@@ -135,7 +136,7 @@ export async function queueResponseCreated(input: {
       )
     )
   } catch (error) {
-    console.error(`Could not queue response.created for form ${input.formId}:`, error)
+    logger.error({ err: error }, `Could not queue response.created for form ${input.formId}`)
   }
 }
 
@@ -291,7 +292,7 @@ async function record(delivery: {
   } catch (error) {
     // The log is evidence, not control flow: failing to write it must not turn
     // a delivered webhook into a retried one.
-    console.error('Could not record webhook delivery:', error)
+    logger.error({ err: error }, 'Could not record webhook delivery')
   }
 }
 
@@ -316,7 +317,7 @@ export async function createWebhookWorker(): Promise<WebhookWorkerHandle> {
 
   worker.on('failed', (job, error) => {
     if (!job) {
-      console.error('webhook delivery failed before it could be read:', error)
+      logger.error({ err: error }, 'webhook delivery failed before it could be read')
       return
     }
 
@@ -324,21 +325,26 @@ export async function createWebhookWorker(): Promise<WebhookWorkerHandle> {
     if (job.attemptsMade >= attempts) {
       // The line an operator greps for, distinct from a failure that will be
       // retried — the same distinction the embed queue draws.
-      console.error(
+      logger.error(
+        {
+          err: error,
+          endpointId: job.data?.endpointId,
+          eventId: job.data?.eventId,
+          attempts: job.attemptsMade
+        },
         `WEBHOOK GAVE UP after ${job.attemptsMade} attempts: endpoint ${job.data?.endpointId}, ` +
-        `event ${job.data?.eventId}. The customer was not told about this event.`,
-        error
+        `event ${job.data?.eventId}. The customer was not told about this event.`
       )
     } else {
-      console.warn(
-        `webhook delivery ${job.id} failed (attempt ${job.attemptsMade}/${attempts}), will retry`,
-        error
+      logger.warn(
+        { err: error, jobId: job.id, attempt: job.attemptsMade },
+        `webhook delivery ${job.id} failed (attempt ${job.attemptsMade}/${attempts}), will retry`
       )
     }
   })
 
   worker.on('error', error => {
-    console.error('webhook worker error:', error)
+    logger.error({ err: error }, 'webhook worker error')
   })
 
   return {
