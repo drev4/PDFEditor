@@ -27,6 +27,15 @@ export default defineConfig({
             // and four of them failed before this line existed. Empty rather
             // than absent: dotenv does not overwrite a key already present.
             DEV_PLAN_KEY: '',
+            // The job queue is OFF in every suite, whatever the developer's
+            // `.env` says. Same reason as `DEV_PLAN_KEY` above: `src/app.ts`
+            // calls `dotenv.config()`, so a local `REDIS_URL` would reach these
+            // specs and move the PDF embed onto a worker that is not running -
+            // every embed assertion would then be measuring a document nothing
+            // ever wrote. Empty rather than absent: dotenv does not overwrite a
+            // key that is already present. The queued path has its own spec,
+            // which sets this deliberately (features/0017).
+            REDIS_URL: '',
             // Stripe credentials are pinned for the same reason `DEV_PLAN_KEY`
             // is: `src/app.ts` calls `dotenv.config()`, so a developer's real
             // `.env` reaches every suite. Without these three lines a live

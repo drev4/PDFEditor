@@ -4,11 +4,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../services/db.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { verifyFormOwnership, verifyFieldOwnership } from '../middleware/formOwnership.js'
-import { pdfProcessor, type ExtractedField } from '../services/pdf-processor.js'
 import { checkPattern } from '../services/pattern-validator.js'
-import { pdfFilenameFrom } from '../services/pdf-url.js'
-import { pdfStorage } from '../services/pdf-storage.js'
-import { withOrganizationLock } from '../services/organization-lock.js'
+import { requestEmbed } from '../services/embed-queue.js'
 
 export const formFieldsRouter = Router()
 
@@ -52,105 +49,6 @@ const updateFieldSchema = createFieldSchema.partial()
 const bulkFieldSchema = createFieldSchema.extend({
   id: z.string().uuid().optional()
 })
-
-interface EmbeddableField {
-  type: ExtractedField['type']
-  name: string
-  label: string
-  required: boolean
-  position: unknown
-  options: unknown
-  validation: unknown
-}
-
-/**
- * Rewrites the stored PDF so its AcroForm matches the form's fields.
- *
- * **Serialised per form, and it re-reads the fields inside that serialisation**
- * (features/0016, trap 2). Both halves are load-bearing and neither works
- * alone:
- *
- *   - Serialising stops two saves interleaving their read-modify-write. Without
- *     it, both read the document, both embed their own view, and the later
- *     write silently discards the earlier one's fields — a successful save that
- *     lost the author's work, with no error anywhere.
- *   - Re-reading *inside* the lock is what makes the result converge. Taking
- *     the caller's already-read `savedFields` would just move the race: the
- *     request that happened to be queued second would still embed whatever it
- *     read before waiting, so the PDF would settle on a stale field set even
- *     though the writes were ordered.
- *
- * The lock is `services/organization-lock.ts`, keyed by form rather than by
- * organization — it is a general in-process queue whose first caller happened
- * to be billing. Read its own comment on what it does not cover: it serialises
- * one Node process, not a fleet. Two replicas embedding the same form at the
- * same instant can still lose an update, and that residual is filed in
- * docs/BACKLOG.md. It is not closed here because the honest fix is not a bigger
- * lock: this work is moving to the job queue in the next feature, and a queue
- * with one in-flight job per form is the serialiser that actually spans
- * processes.
- *
- * Everything here stays best-effort and swallows its errors, unchanged from
- * before: the fields are already saved in the database, which is the record
- * that matters, and the embedded AcroForm is a convenience for anyone who
- * downloads the PDF itself (docs/sot/04-backend-patterns.md §5).
- */
-async function embedFieldsInPDF(form: { pdfUrl: string | null }, formId: string) {
-  if (!form.pdfUrl) return
-
-  try {
-    const filename = pdfFilenameFrom(form.pdfUrl)
-    if (!filename) return
-
-    await withOrganizationLock(`form-embed:${formId}`, () => embedNow(filename, formId))
-  } catch (error) {
-    console.error('Error embedding fields in PDF:', error)
-  }
-}
-
-/** The read-modify-write itself. Only ever called inside the per-form lock. */
-async function embedNow(filename: string, formId: string) {
-  try {
-    // Read here, not in the caller: this is inside the lock, so it sees every
-    // save that has already been applied and the document converges on the
-    // database rather than on whoever was scheduled last.
-    const fieldsData = await prisma.field.findMany({
-      where: { formId, deletedAt: null },
-      orderBy: { order: 'asc' }
-    })
-
-    if (!(await pdfStorage().exists(filename))) {
-      console.warn(`PDF not found in storage: ${filename}`)
-      return
-    }
-
-    const pdfBuffer = await pdfStorage().get(filename)
-
-    const fieldsToEmbed: ExtractedField[] = fieldsData.map(field => {
-      const validation = field.validation as ExtractedField['validation'] | null
-      return {
-        type: field.type,
-        name: field.name,
-        label: field.label,
-        required: field.required,
-        position: field.position as ExtractedField['position'],
-        options: (field.options as string[] | null) || undefined,
-        validation: validation ? {
-          minLength: validation.minLength || undefined,
-          maxLength: validation.maxLength || undefined,
-          pattern: validation.pattern || undefined
-        } : undefined
-      }
-    })
-
-    const modifiedPdfBuffer = await pdfProcessor.embedFieldsInPDF(pdfBuffer, fieldsToEmbed)
-    await pdfStorage().put(filename, modifiedPdfBuffer)
-
-    console.log(`✓ Successfully embedded ${fieldsToEmbed.length} fields in PDF: ${filename}`)
-  } catch (error) {
-    console.error('Error embedding fields in PDF:', error)
-  }
-}
 
 // POST /api/forms/:formId/fields - Create field
 formFieldsRouter.post('/:formId/fields', authenticate, async (req: AuthRequest, res, next) => {
@@ -232,7 +130,7 @@ formFieldsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequ
   try {
     const formId = req.params.formId as string
 
-    const form = await verifyFormOwnership(req, formId)
+    await verifyFormOwnership(req, formId)
 
     const validation = z.array(bulkFieldSchema).safeParse(req.body.fields)
     if (!validation.success) {
@@ -333,7 +231,12 @@ formFieldsRouter.post('/:formId/fields/bulk', authenticate, async (req: AuthRequ
       orderBy: { order: 'asc' }
     })
 
-    await embedFieldsInPDF(form, formId)
+    // Rewriting the stored PDF so its AcroForm matches these fields. Where it
+    // runs is `services/embed-queue.ts`'s decision, not this handler's: queued
+    // when `REDIS_URL` is set, inline and locked when it is not (features/0017).
+    // Either way it is best-effort and the response does not depend on it - the
+    // fields are already committed, which is the record that matters.
+    await requestEmbed(formId)
 
     res.json({ fields: savedFields, archived })
   } catch (error) {
