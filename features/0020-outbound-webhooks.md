@@ -1,8 +1,8 @@
 # 0020 — Outbound webhooks, and the first request this server makes to an address a customer chose
 
-**Status:** backlog
+**Status:** in progress
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Webhooks with signed payloads, retries and a delivery log*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0020-outbound-webhooks`
 **Related:** [10-saas-roadmap §build order](../docs/sot/10-saas-roadmap.md#build-order) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [04-backend-patterns §5](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [08-operations](../docs/sot/08-operations.md) · [`features/0017`](0017-job-queue-for-pdf-embedding.md) · [`features/0019`](0019-api-keys-and-read-only-public-api.md) · [`features/0013`](0013-stripe-subscriptions.md)
 
 ## Context
