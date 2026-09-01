@@ -1,8 +1,8 @@
 # 0024 — Responses across the organization, and what a row may say
 
-**Status:** backlog
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *No endpoint lists responses across the organization*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0024-organization-responses`
 **Related:** [05-frontend-patterns §8](../docs/sot/05-frontend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [03-domain-model](../docs/sot/03-domain-model.md) · [10-saas-roadmap §what comes next](../docs/sot/10-saas-roadmap.md#what-comes-next) · [`features/0023`](0023-active-organization.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md)
 
 ## Context
@@ -102,4 +102,14 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified, with no deviation from the design. **This closes the A track**: nothing in the navigation now leads to a screen that says it is not built.
+
+**The privacy decision held all the way through, and is tested at both ends.** `backend/tests/integration/organization-responses.spec.ts` submits with a real `ipAddress` and `userAgent` and asserts not only that the row lacks `answers`, `ipAddress` and `userAgent` by name, but that the values appear nowhere in the serialised payload at all — a stringify check, because a nested include would pass a property check and still leak. The component test asserts the screen renders no IP or user-agent column and no export control, so the two ends of the same decision are pinned independently.
+
+**Two things came from reading the existing tests rather than the source.** The first draft of the integration spec hand-wrote `prisma.field.create` and failed on a missing `position` — `backend/tests/integration/helpers.ts` already had `createField` and `fieldPayload`, and using them removed a third of the fixture code. The second: the composable's refs read badly in the template as `responses.total.value`, so the view destructures them; it builds either way, but only one of them looks like the rest of this codebase.
+
+**One test in the E2E suite failed once and is not this feature's.** *offers to save an unsaved document on the way out* timed out waiting 30s for `/dashboard` on a run where the whole suite took 43s instead of the usual 20 — other suites were running in parallel on the same machine. It passed five times afterwards, twice inside the full suite, and it passes on `develop` under the same conditions. Filed in `docs/BACKLOG.md` as a timing flake rather than left as an unexplained red: CI machines are loaded by definition, and the step it waits on creates a form and uploads a PDF.
+
+**Verified:** frontend 47 specs / 393 tests, backend 18 / 231, integration 221 (211 passed, 10 skipped — the Redis-dependent ones), E2E 53, `npm run build --workspace=frontend`, `tsc --noEmit` and `typecheck:tests`.
+
+**Not verified by hand:** the manual check the spec asks for — submitting to two published forms and watching both appear, filtering, and following a row into the per-form screen. The E2E covers the empty state on a fresh account, which is the state that suite actually has; the populated one is covered by component and integration tests only.

@@ -159,7 +159,7 @@ Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as 
 | Route | Screen | Chrome |
 |---|---|---|
 | `/dashboard`, `/dashboard/forms` | `FormsManagementView` | `AppShell` sidebar |
-| `/dashboard/responses` | `ResponsesIndexView` | `AppShell` sidebar |
+| `/dashboard/responses` | `ResponsesIndexView` — every response in the organization | `AppShell` sidebar |
 | `/dashboard/team` | `MembersView` | `AppShell` sidebar |
 | `/dashboard/settings` | `SettingsView` — **General**, **API keys** and **Webhooks** tabs, the tab in `?tab=` | `AppShell` sidebar |
 | `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
@@ -183,7 +183,7 @@ Nobody should read the canvas as a description of the product. What is drawn and
 - **Purchase controls are owner-only, matching the API.** `POST /api/billing/*` answers `403` to anyone but an owner, so the UI reads the caller's role — through `organizationStore.currentRole`, the same way `MembersView.vue` does, never a second source — and shows a member the plan and the usage with no way to spend money. A button guaranteed to fail tells someone the product is broken when it is enforcing a rule.
 - **Returning from Checkout asserts nothing.** `?checkout=complete` on the Settings screen says activation is in progress and re-reads entitlements a few times; it never writes and never claims success on its own, because the redirect is a URL anyone can visit and a customer who closes the tab never visits it at all. The plan on screen is always the one the server reported.
 - **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
-- **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
+- **Settings still admits one gap.** The navigation is the shape of the product and a hole in it is harder to read than an admitted gap, so its General tab renders `NotBuiltYet.vue`, which names what is missing and where it is tracked. **It renders no empty table and no invented number** — an empty table says "you have no data", which is a different and false claim. (Responses was the other one and is built: [`features/0024`](../../features/0024-organization-responses.md).)
 
 ### API keys
 
@@ -222,6 +222,18 @@ Four things that are load-bearing:
 - **Deleting says what it destroys first.** The delivery history cascades with the endpoint, and the secret is unrecoverable, so the row asks before it goes.
 
 `consecutiveFailures` is rendered as *failures since the last success*, never as a total: the queue zeroes it on any successful delivery, and a `0` read as "this has never failed" would contradict the log directly below it.
+
+### Responses across the organization
+
+**Built** ([`features/0024`](../../features/0024-organization-responses.md)) — `views/ResponsesIndexView.vue` over `composables/useOrganizationResponses.ts` and `GET /api/organizations/responses`. A composable rather than a store, because it is one screen's state and nothing else reads it.
+
+Three things are load-bearing:
+
+- **A row carries no respondent data.** Which form, when, how many answers, and a link into that form's own responses screen — where the answers are, because that is the screen with columns to render them in. The endpoint sends no answer values, no IP and no user agent, so this screen could not show them if it wanted to; that is deliberate and is argued in [06-api-reference](./06-api-reference.md).
+- **There is no export control here.** Two forms share no fields, so a combined CSV is either one column per field in the organization or a generic file answering nothing. The per-form export stays where the columns exist.
+- **The total is not the plan meter.** It counts rows that exist; `UsageCounter` counts submissions accepted in a period and does not refund a deleted form. They disagree honestly, so this number never sits beside a meter and is never used to compute one.
+
+The empty state says nothing has been submitted yet rather than drawing an empty table — the same rule the screen used to obey by saying it was not built.
 
 ### The organization switcher
 
