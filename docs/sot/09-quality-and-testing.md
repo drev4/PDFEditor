@@ -12,13 +12,22 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 38 specs, 321 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 15 specs, 204 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 14 specs, 140 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| Backend route (mocked Prisma) | 16 specs, 206 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| **Backend database-backed** | 15 specs, 143 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 50 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **The suites run offline, and the storage driver is what keeps that true.** `PDF_STORAGE_DRIVER` defaults to `local`, so every suite reads and writes real files under `backend/uploads/pdfs` exactly as before — `tests/security-headers.spec.ts` writes a fixture and fetches it through the signed route, and the E2E suite uploads real PDFs. The `s3` driver is never exercised by `npm test` and that is deliberate: mocking the AWS SDK would assert that the code calls the mock the way the code calls the mock. It is verified against a real S3-compatible endpoint instead — MinIO from `docker-compose.yml` — and what that run covered is recorded in [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)'s Outcome.
 
-**One test in the database-backed suite widens a race on purpose.** `tests/integration/pdf-embed-concurrency.spec.ts` installs a storage driver that stalls the first reader *after* it has the bytes, so two overlapping bulk saves reliably interleave. Without that the lost update reproduces perhaps once in fifty runs, and a test that flaky is not a regression test. The delay is on that side of the read for a reason recorded in the file: sleeping *before* it makes the stalled request read last, get the fresher document, and pass against broken code — which is what the first draft did.
+**The job queue is off in every suite, and the queued path has its own spec.** `REDIS_URL` is pinned empty in both vitest configs, so the PDF embed runs inline and the suites keep needing nothing but PostgreSQL — the same reasoning as the storage driver above. That leaves a real risk, because features/0017 deliberately keeps *two* implementations of one operation and only one of them is exercised by everything else. So `tests/integration/pdf-embed-queue.spec.ts` runs the queued path against a **real Redis**, asserting the same invariant as the inline concurrency spec: it skips itself unless `TEST_REDIS_URL` is set, and it sets `REDIS_URL` for its own duration and runs a worker in-process.
+
+```bash
+docker compose up -d redis
+TEST_REDIS_URL=redis://localhost:6379 npm run test:integration --workspace=backend
+```
+
+Note the variable is deliberately **not** `REDIS_URL`: that name is the one pinned empty, so a developer's `.env` cannot move the other fourteen specs onto a worker that is not running.
+
+**One test in the database-backed suite widens a race on purpose.** `tests/integration/pdf-embed-concurrency.spec.ts` installs a storage driver that stalls the first reader *after* it has the bytes, so two overlapping bulk saves reliably interleave. Without that the lost update reproduces perhaps once in fifty runs, and a test that flaky is not a regression test. The delay is on that side of the read for a reason recorded in the file: sleeping *before* it makes the stalled request read last, get the fresher document, and pass against broken code — which is what the first draft did. Its queued twin needs one thing more, and its absence is how *that* draft passed against a worker with no lock at all: it waits until a job is genuinely **active** before making the second save. Both requests return as soon as they have enqueued, so without that wait both jobs start after both saves have committed, re-read the same final field set, and agree by accident.
 
 The two placement conventions are different on purpose and must not be mixed: **frontend tests sit next to their subject, backend tests sit in `backend/tests/`.**
 
@@ -119,7 +128,7 @@ Test stores and composables through their public surface — call an action, ass
 
 This is not hypothetical: adding `DEV_PLAN_KEY=dev` to a local `.env` turned plan enforcement off inside the suites and four tests in `tests/entitlements.spec.ts` failed — the tests were right and the environment was wrong, which is the confusing direction for that to happen in.
 
-Anything that can switch a behaviour off is therefore **pinned in the test configuration**, not left to the environment: `backend/vitest.config.ts`, `backend/vitest.integration.config.ts` and `playwright.config.ts` all set `RATE_LIMIT_*` high and `DEV_PLAN_KEY: ''`. Set it to the empty string rather than leaving it out — dotenv fills in a key that is absent from `process.env` and leaves alone one that is already there.
+Anything that can switch a behaviour off is therefore **pinned in the test configuration**, not left to the environment: `backend/vitest.config.ts`, `backend/vitest.integration.config.ts` and `playwright.config.ts` all set `RATE_LIMIT_*` high and `DEV_PLAN_KEY: ''`, and the two vitest configs also pin `REDIS_URL: ''` — a local `REDIS_URL` would otherwise queue every embed onto a worker no suite is running, and every embed assertion would be measuring a document nothing ever wrote. Set it to the empty string rather than leaving it out — dotenv fills in a key that is absent from `process.env` and leaves alone one that is already there.
 
 **Add a line to all three whenever you add a setting that can disable something.** A suite that passes because a feature was switched off is worse than a failing one.
 
@@ -145,6 +154,7 @@ The last row is the remaining coverage gap of this kind: nothing verifies the ca
 | **No PDF round-trip test** | Nothing verifies that embedded AcroForm positions match what the editor showed |
 | **Coverage collected but not enforced** | Coverage can fall silently; Codecov failures are ignored |
 | **Database-backed coverage is narrow** | Only the bulk save and archived-field visibility are covered. Form deletion, response submission and the `syncFieldsFromPDF` side effect still have no real-database test |
+| **The queued embed path is not in CI** | `tests/integration/pdf-embed-queue.spec.ts` skips unless `TEST_REDIS_URL` is set, and no workflow sets it. The path is verified by hand and locally; a Redis service in the integration job would close this |
 
 When lint is added, use flat config (`eslint.config.js`) — the rest of the toolchain is on versions that assume it.
 

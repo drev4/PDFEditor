@@ -54,6 +54,10 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `PDF_STORAGE_ACCESS_KEY_ID` / `PDF_STORAGE_SECRET_ACCESS_KEY` | no | unset | Leave both empty to use the SDK's own credential chain (instance roles, IRSA, `~/.aws/credentials`) |
 | `PDF_STORAGE_FORCE_PATH_STYLE` | no | `false` | `true` for MinIO, which has no wildcard DNS so the bucket goes in the path |
 | `PDF_STORAGE_PREFIX` | no | `pdfs/` | Key prefix, so a shared bucket stays legible and a lifecycle rule can target these objects |
+| `REDIS_URL` | no | unset | **Unset means there is no job queue** and the PDF embed runs inline in the request, exactly as it always has. Set it and bulk save enqueues instead — which means a worker process must be running. See below |
+| `REDIS_KEY_PREFIX` | no | `vuepdf` | Namespace for every key this application writes in Redis, so one Redis can be shared |
+| `EMBED_WORKER_CONCURRENCY` | no | `5`, min `1` | Embed jobs one worker runs at once. Jobs for the same form never overlap regardless — that is a lock, not a consequence of this number |
+| `EMBED_JOB_ATTEMPTS` | no | `5`, min `1` | Tries before an embed job is given up on, with exponential backoff. Exhausting them logs `EMBED GAVE UP` — see below |
 | `TRUST_PROXY_HOPS` | no | `0` | **Number of reverse proxies in front of this process.** See below — it decides whether rate limiting works |
 | `RATE_LIMIT_LOGIN_MAX` | no | `10` | Failed logins per window per IP. Successful logins are refunded |
 | `RATE_LIMIT_LOGIN_WINDOW_MS` | no | `900000` (15 min) | |
@@ -88,6 +92,34 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 **Rolling back** is setting `PDF_STORAGE_DRIVER` back to `local` — but be clear about what that does *not* recover: anything uploaded while the `s3` driver was live is in the bucket and not on the disk, so those forms lose their PDFs on the way back. A rollback is only clean if nothing was uploaded in between.
 
 For local work on the `s3` driver, `docker compose up -d minio createbuckets` brings up MinIO and creates a private `vuepdf-pdfs` bucket (console on `http://localhost:9001`, `minioadmin` / `minioadmin`). Nothing requires it — with the container stopped, the default driver is unaffected.
+
+### The job queue and its worker, and the failure that makes no noise
+
+`REDIS_URL` decides where the PDF embed runs ([`features/0017`](../../features/0017-job-queue-for-pdf-embedding.md)). Unset, it runs inline inside `POST /api/forms/:formId/fields/bulk`, which is what this application has always done and what every test suite runs on. Set, the request enqueues a job and **a worker process must be running to do the work**:
+
+```bash
+npm run worker --workspace=backend        # dist/worker.js, the same image as the API
+npm run worker:dev --workspace=backend    # tsx watch, for development
+docker compose up -d redis                # a local Redis; nothing else requires it
+```
+
+**With `REDIS_URL` set and no worker alive, nothing fails.** No request errors, no endpoint 5xxs, no user sees anything wrong — the queue simply fills up and every saved form's PDF quietly stops matching its fields. That is the failure mode to design monitoring around, and it is why the worker refuses to start without `REDIS_URL` rather than idling and looking healthy.
+
+**Is a worker alive?** Three signals, in the order to check them:
+
+1. Its log says `[worker] pdf-embed worker started, waiting for jobs` at startup and `[worker] pdf-embed worker stopped` on a clean shutdown. A process whose last line is the first one and which is no longer running died the hard way.
+2. Each finished job logs `embed job <id> done (form <formId>)`. Silence while forms are being saved means nothing is consuming.
+3. The queue depth itself: `embedQueueStatus()` in `services/embed-queue.ts` returns `waiting`, `active`, `delayed` and `failed`. A `waiting` count that only grows is a dead worker seen from the API's side. It is not exposed over HTTP yet — that belongs with the readiness endpoint in *Observability* below.
+
+**`EMBED GAVE UP`.** A job that exhausts `EMBED_JOB_ATTEMPTS` logs that line and names the form. It means that form's stored PDF no longer matches its fields — the database is correct and is the record that matters, but anyone downloading the PDF itself gets a stale AcroForm. It is logged differently from an ordinary failure (`will retry`) precisely so it can be grepped for. What to do about one:
+
+1. Find out why. The error is on the same line; a missing object in storage, expired credentials and a corrupt document all look different.
+2. Fix the cause, then **re-trigger the embed by saving the form's fields again** — any bulk save queues a fresh job, and the job reads the current fields, so nothing has to be replayed. There is no admin re-run command, and that is the gap to close if this ever happens twice.
+3. The user is not told any of this. The user-visible "your PDF is out of sync" signal is still unbuilt ([04-backend-patterns.md §5](./04-backend-patterns.md)).
+
+**Rolling back to inline is an environment variable**: empty `REDIS_URL`, restart the API, stop the worker. Nothing needs migrating — a queued job is reconstructible, and any later save embeds from the current fields. Jobs still sitting in Redis at that moment are abandoned, so drain the queue first if it is deep.
+
+**Deploying the worker.** It is the same build (`npm run build --workspace=backend`) with `node dist/worker.js` as the command, and it needs the same `DATABASE_URL`, the same PDF storage variables and the same `REDIS_URL` as the API. On `SIGTERM` it finishes the job it is running before exiting, so a rolling deploy does not abandon a half-written document — give it a termination grace period longer than one embed takes. Note that a **hard** kill (`SIGKILL`, an OOM) does not lose the job: BullMQ recovers it as stalled and another worker re-runs it, which is safe because the embed is idempotent.
 
 ### `DEV_PLAN_KEY`, and the allowlist that makes it safe
 
@@ -230,6 +262,8 @@ Minimum viable observability, in order:
 3. **Real health checks** — the current `/health` returns `ok` even when the database is unreachable. Split liveness from readiness, and have readiness check the database.
 4. **Business metrics** — forms published, responses received, PDF embed failures. These are also the numbers that plan metering will need.
 
+Two of these are now sharper than they were, because a second process exists. Readiness should answer for the queue as well as the database, and the "dead worker" case above has no signal at all today beyond reading logs — a queue depth that only grows is the metric to export first.
+
 ## Backups and recovery
 
 There are no backups, and nothing has been restored, so recovery time is unknown. Before the first paying customer: automated daily PostgreSQL backups with a tested restore, and versioned object storage for PDFs. An untested backup is an assumption, not a backup.
@@ -240,7 +274,7 @@ Note also that `DELETE /api/forms/:id` cascades to every response with no soft d
 
 Requirements that follow from what is already in the code:
 
-1. **Object storage first.** As long as PDFs live on the API process's disk ([02-architecture.md](./02-architecture.md)), the service cannot scale out and cannot survive a redeploy on ephemeral storage. This is the first blocker in the path.
+1. **Object storage first.** As long as PDFs live on the API process's disk ([02-architecture.md](./02-architecture.md)), the service cannot scale out and cannot survive a redeploy on ephemeral storage. This is the first blocker in the path. It is also a prerequisite for the queue: a worker in another container cannot read a file on the API container's local disk, so `PDF_STORAGE_DRIVER=s3` comes before `REDIS_URL` in any deployment that runs the two as separate processes.
 2. **`migrate deploy` in the release pipeline**, with `migrate resolve --applied 0_baseline` run once against any database that predates the baseline.
 3. **Per-environment frontend builds**, because `VITE_API_URL` is compile-time.
 4. **Secrets from a secret manager**, never from a committed file. `JWT_SECRET` rotation invalidates every session, so rotation needs the refresh-token work from [07](./07-security-and-privacy.md) first.

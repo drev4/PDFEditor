@@ -84,15 +84,24 @@ Pick by that rule, not by habit. A future `BillingService` or `EntitlementsServi
 Two operations mutate the stored PDF rather than only the database, and both are wrapped so they cannot fail the request:
 
 - `GET /api/forms/:id` re-syncs fields from the PDF when the form has a `pdfUrl` and has never had a field, archived ones included (`syncFieldsFromPDF`).
-- `POST /api/forms/:formId/fields/bulk` rewrites the PDF from the resulting live field set, embedding them as an AcroForm (`embedFieldsInPDF`). It runs **after** the transaction commits, so a failed embed cannot roll back a saved field set.
+- `POST /api/forms/:formId/fields/bulk` rewrites the PDF from the resulting live field set, embedding them as an AcroForm. It runs **after** the transaction commits, so a failed embed cannot roll back a saved field set. The handler calls `requestEmbed(formId)` from `services/embed-queue.ts` and does not know where the work runs; the work itself is `embedFormFields` in `services/pdf-embed.ts`.
 
 The embed is a read-modify-write of the whole document, which made it a lost update as soon as two saves overlapped: both read, both embedded their own view, and the later write silently discarded the earlier one's fields — a save the author was told had succeeded, on a PDF that did not contain their work. [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md) fixed it with two halves that do not work alone: it is **serialised per form** (`services/organization-lock.ts`, keyed by form), and it **re-reads the fields inside that serialisation**. Taking the caller's already-read field list would only move the race, since whichever request was queued second would still embed what it read before it started waiting. The local driver's `put` is also atomic — temporary file plus rename — so no reader can see a half-written document.
 
-That lock is in-process, and deliberately not more. Two replicas embedding one form at the same instant can still lose an update; that residual is in [`docs/BACKLOG.md`](../BACKLOG.md), and the honest fix is not a bigger lock but the job queue in step 9's other half, where one in-flight job per form is a serialiser that actually spans processes.
+**Where that serialisation lives is now configuration** ([`features/0017`](../../features/0017-job-queue-for-pdf-embedding.md)), and this is the part to read before changing anything here:
+
+- **`REDIS_URL` unset (the default, and what every test suite runs):** the embed runs inline in the request, serialised by the in-process lock exactly as described above.
+- **`REDIS_URL` set:** the handler enqueues a job carrying `formId` and nothing else, and a worker process runs it. The in-process lock is **not** used on this path and must not be added back to it — it would serialise the *enqueue*, which is instant, while the ordering that matters moved to workers it cannot see. The serialiser there is a Redis lock per form, taken inside the job.
+
+What that buys is the cross-replica case: two API replicas can no longer lose an update, because one lock now spans every process. What it costs is **two code paths for one operation**, and the inline one is the path every existing suite exercises — which is exactly why the queued one carries `backend/tests/integration/pdf-embed-queue.spec.ts`, run against a real Redis, asserting the same invariant.
+
+One thing about the queued path is easy to get wrong and was: **do not deduplicate with a stable job id per form.** BullMQ ignores an `add` whose id belongs to a job that is already *running*, so a save made during an in-flight embed would be discarded in silence and the document would be permanently behind the database — the same lost update, reached from the other direction. Every save enqueues its own job; duplicates are harmless because the job re-reads the fields and the embed is idempotent.
 
 Both are `try/catch` around a `console.error` that then continues. The UX reasoning is sound: a user should not get a 500 because a post-processing step failed.
 
 The consequence is an observability hole. When embedding fails, the database and the physical PDF silently disagree, the user is told the save succeeded, and the only trace is a line in stdout that nobody is reading. **These two call sites are the first things to instrument** when structured logging lands, and they need a user-visible signal — the saved form should be able to report that its PDF is out of sync.
+
+The queue narrows that hole without closing it. A transient failure — a storage blip, an S3 throttle — is now retried instead of lost. What it adds is a state that did not exist before: a job that has **exhausted its retries**, which is a form whose PDF is permanently behind its fields. That is logged distinctly (`EMBED GAVE UP`, naming the form) rather than mixed in with failures that will retry, and [08-operations.md](./08-operations.md) says what a human does about one. The user-visible signal is still missing, and is still the instrumentation row.
 
 ## 6. Transactions
 
