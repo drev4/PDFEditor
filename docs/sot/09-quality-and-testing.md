@@ -13,7 +13,7 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 |---|---|---|---|
 | Frontend unit / component | 38 specs, 321 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
 | Backend route (mocked Prisma) | 16 specs, 206 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 15 specs, 143 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| **Backend database-backed** | 16 specs, 145 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 50 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **The suites run offline, and the storage driver is what keeps that true.** `PDF_STORAGE_DRIVER` defaults to `local`, so every suite reads and writes real files under `backend/uploads/pdfs` exactly as before — `tests/security-headers.spec.ts` writes a fixture and fetches it through the signed route, and the E2E suite uploads real PDFs. The `s3` driver is never exercised by `npm test` and that is deliberate: mocking the AWS SDK would assert that the code calls the mock the way the code calls the mock. It is verified against a real S3-compatible endpoint instead — MinIO from `docker-compose.yml` — and what that run covered is recorded in [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)'s Outcome.
@@ -25,7 +25,9 @@ docker compose up -d redis
 TEST_REDIS_URL=redis://localhost:6379 npm run test:integration --workspace=backend
 ```
 
-Note the variable is deliberately **not** `REDIS_URL`: that name is the one pinned empty, so a developer's `.env` cannot move the other fourteen specs onto a worker that is not running.
+Note the variable is deliberately **not** `REDIS_URL`: that name is the one pinned empty, so a developer's `.env` cannot move the other fifteen specs onto a worker that is not running.
+
+**The third state — `REDIS_URL` set and no Redis there — has its own spec, and it needs no Redis, so CI runs it.** `tests/integration/pdf-embed-fallback.spec.ts` points `REDIS_URL` at a refused port and then at an unroutable address (TEST-NET-1) and asserts the save still answers *and* the PDF is still embedded. The second case is the one worth having: before it existed, a Redis that neither answered nor refused made the enqueue wait for ever and the bulk save never responded, while the "falls back to inline" claim sat in a comment above the code that could not deliver it.
 
 **One test in the database-backed suite widens a race on purpose.** `tests/integration/pdf-embed-concurrency.spec.ts` installs a storage driver that stalls the first reader *after* it has the bytes, so two overlapping bulk saves reliably interleave. Without that the lost update reproduces perhaps once in fifty runs, and a test that flaky is not a regression test. The delay is on that side of the read for a reason recorded in the file: sleeping *before* it makes the stalled request read last, get the fresher document, and pass against broken code — which is what the first draft did. Its queued twin needs one thing more, and its absence is how *that* draft passed against a worker with no lock at all: it waits until a job is genuinely **active** before making the second save. Both requests return as soon as they have enqueued, so without that wait both jobs start after both saves have committed, re-read the same final field set, and agree by accident.
 

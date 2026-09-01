@@ -77,16 +77,45 @@ export function isEmbedQueueEnabled(): boolean {
  * without Redis - which includes every test run - should not pay for, or fail
  * on, a dependency it never uses.
  */
-async function connect(): Promise<Redis> {
+async function connect(role: 'producer' | 'worker' | 'locks'): Promise<Redis> {
   const url = redisUrl()
   if (!url) throw new Error('REDIS_URL is not set')
 
   const { default: IORedis } = await import('ioredis')
 
-  // `maxRetriesPerRequest: null` is required by BullMQ: its blocking commands
-  // sit on a connection for minutes at a time, and ioredis' default would kill
-  // them as failed requests.
-  return new IORedis(url, { maxRetriesPerRequest: null })
+  // **The three roles need different failure behaviour, and giving them all the
+  // worker's is how the enqueue came to hang.** Found by `saas-readiness-reviewer`
+  // on this branch.
+  //
+  // `maxRetriesPerRequest: null` is required by BullMQ's *worker*: its blocking
+  // commands sit on a connection for minutes at a time and ioredis' default
+  // would kill them as failed requests. But ioredis' default `retryStrategy`
+  // also never gives up, so on the connection the **request path** uses, the two
+  // together mean a command waits for a connection that may never arrive. A
+  // Redis that refuses the TCP connection rejects quickly and the fallback below
+  // works; a Redis that is simply unreachable - a wrong host, a dropped route, a
+  // security group - does not refuse anything, so `queue.add()` never settles
+  // and `POST /api/forms/:formId/fields/bulk` never answers. The fields are
+  // already committed at that point, so nothing is lost, but the editor waits
+  // for a response that never comes, which to the author is a broken save.
+  if (role === 'worker') {
+    return new IORedis(url, { maxRetriesPerRequest: null })
+  }
+
+  // Both non-blocking roles: a command fails after a bounded number of attempts
+  // instead of queueing for ever, and reconnection keeps trying, so a blip
+  // recovers on its own.
+  //
+  //   - producer: a rejected `add` is what makes the inline fallback reachable.
+  //   - locks: a wedged `SET`/`EVAL` inside a job would hold a worker slot for
+  //     ever with no error and no `EMBED GAVE UP`, which is worse than the dead
+  //     worker this feature designed its logging around. Failing the job hands
+  //     it to BullMQ's retries instead.
+  return new IORedis(url, {
+    maxRetriesPerRequest: 2,
+    connectTimeout: 5_000,
+    commandTimeout: 10_000
+  })
 }
 
 let queuePromise: Promise<{ queue: Queue<EmbedJobData>; connection: Redis }> | null = null
@@ -94,7 +123,7 @@ let queuePromise: Promise<{ queue: Queue<EmbedJobData>; connection: Redis }> | n
 async function embedQueue() {
   if (!queuePromise) {
     queuePromise = (async () => {
-      const connection = await connect()
+      const connection = await connect('producer')
       const { Queue } = await import('bullmq')
       return {
         queue: new Queue<EmbedJobData>(QUEUE_NAME, { connection, prefix: keyPrefix() }),
@@ -123,22 +152,33 @@ async function embedQueue() {
  * than dropping the embed. It is the less-correct path (an in-process lock does
  * not span replicas) but it is the one that still updates the document, and a
  * silently skipped embed is exactly the failure this feature exists to stop.
+ *
+ * Two things make that guarantee real rather than stated, and both exist because
+ * the first version of this function had only the `try`/`catch` and would hang
+ * for ever on a Redis that neither answered nor refused: the connection options
+ * in `connect` above, and the wall-clock deadline in `withDeadline` below. The
+ * test that holds them honest is
+ * `tests/integration/pdf-embed-fallback.spec.ts`, which points `REDIS_URL` at
+ * an address that black-holes and asserts the save still answers and the PDF is
+ * still embedded.
  */
 export async function requestEmbed(formId: string): Promise<void> {
   if (isEmbedQueueEnabled()) {
     try {
-      const { queue } = await embedQueue()
+      await withDeadline(async () => {
+        const { queue } = await embedQueue()
 
-      // **No fixed job id, and that is not an oversight** - see `withFormLock`
-      // below for the reasoning, and for what serialises these instead.
-      await queue.add('embed', { formId }, {
-        attempts: envInt('EMBED_JOB_ATTEMPTS', 5),
-        backoff: { type: 'exponential', delay: 1000 },
-        removeOnComplete: 100,
-        // Failures are kept far longer than successes: a job that exhausted its
-        // retries is a form whose PDF is behind its database, and it should
-        // still be inspectable when somebody comes looking.
-        removeOnFail: 1000
+        // **No fixed job id, and that is not an oversight** - see `withFormLock`
+        // below for the reasoning, and for what serialises these instead.
+        await queue.add('embed', { formId }, {
+          attempts: envInt('EMBED_JOB_ATTEMPTS', 5),
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: 100,
+          // Failures are kept far longer than successes: a job that exhausted
+          // its retries is a form whose PDF is behind its database, and it
+          // should still be inspectable when somebody comes looking.
+          removeOnFail: 1000
+        })
       })
       return
     } catch (error) {
@@ -146,10 +186,69 @@ export async function requestEmbed(formId: string): Promise<void> {
         `Could not enqueue PDF embed for form ${formId}; running it inline instead:`,
         error
       )
+      // The client this failed on may be wedged rather than merely unlucky, so
+      // it is thrown away: the next save reconnects instead of inheriting it.
+      dropQueue()
     }
   }
 
   await embedInline(formId)
+}
+
+/** How long the request path will wait on Redis before giving up on it. */
+const ENQUEUE_TIMEOUT_MS = 5_000
+
+/**
+ * Bounds the enqueue in wall-clock time, on top of the bounded connection
+ * options in `connect`.
+ *
+ * Belt and braces on purpose. The connection options are the fix; this is the
+ * guarantee. "The request path never waits more than five seconds on Redis" is
+ * a property of this function alone, and it stays true if a future version of
+ * ioredis or BullMQ changes when a command settles - which is exactly the sort
+ * of assumption that produced the hang this replaces.
+ *
+ * Losing the race does not lose the embed: the caller falls back to running it
+ * inline. It can duplicate one - a slow `add` may still land after the deadline
+ * - and that is the deliberate trade, because a duplicate embed is idempotent
+ * and a skipped one is a document permanently behind its database.
+ */
+async function withDeadline<T>(work: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Redis did not answer within ${ENQUEUE_TIMEOUT_MS}ms`)),
+          ENQUEUE_TIMEOUT_MS
+        )
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/**
+ * Forgets the memoised queue, closing it in the background.
+ *
+ * Called when an enqueue fails, because the most likely reason is a client that
+ * will not recover on its own. Closing is best-effort and deliberately not
+ * awaited: the caller is a request that still has an embed to run.
+ */
+function dropQueue(): void {
+  const pending = queuePromise
+  queuePromise = null
+  if (!pending) return
+
+  void pending
+    .then(async ({ queue, connection }) => {
+      await queue.close().catch(() => undefined)
+      await connection.quit().catch(() => connection.disconnect())
+    })
+    .catch(() => undefined)
 }
 
 /**
@@ -286,10 +385,10 @@ export interface EmbedWorkerHandle {
  * Builds the worker. Called by `src/worker.ts` and by nothing else.
  */
 export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
-  const connection = await connect()
+  const connection = await connect('worker')
   // A second connection for the lock: the worker's own is occupied by blocking
   // commands, and a `SET`/`EVAL` would queue behind them.
-  const locks = await connect()
+  const locks = await connect('locks')
   const { Worker } = await import('bullmq')
 
   const worker = new Worker<EmbedJobData>(
