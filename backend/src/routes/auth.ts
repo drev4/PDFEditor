@@ -22,6 +22,7 @@ import {
   clearRefreshCookie
 } from '../services/session-cookie.js'
 import { organizationSlug, personalOrganizationName } from '../services/organization.js'
+import { asyncHandler } from '../middleware/asyncHandler.js'
 
 export const authRouter = Router()
 
@@ -59,98 +60,90 @@ async function startSession(res: Response, userId: string): Promise<string> {
 }
 
 // POST /api/auth/register
-authRouter.post('/register', registerRateLimit, async (req, res, next) => {
-  try {
-    const validation = registerSchema.safeParse(req.body)
-    if (!validation.success) {
-      return res.status(400).json({
-        error: 'Validation error',
-        details: validation.error.errors
-      })
-    }
+authRouter.post('/register', registerRateLimit, asyncHandler(async (req, res, next) => {
+  const validation = registerSchema.safeParse(req.body)
+  if (!validation.success) {
+    return res.status(400).json({
+      error: 'Validation error',
+      details: validation.error.errors
+    })
+  }
 
-    const { email, password, name } = validation.data
+  const { email, password, name } = validation.data
 
-    const existingUser = await prisma.user.findUnique({ where: { email } })
-    if (existingUser) {
-      throw new AppError(400, 'Email already registered')
-    }
+  const existingUser = await prisma.user.findUnique({ where: { email } })
+  if (existingUser) {
+    throw new AppError(400, 'Email already registered')
+  }
 
-    const passwordHash = await bcrypt.hash(password, 10)
+  const passwordHash = await bcrypt.hash(password, 10)
 
-    // The account, its organization and the membership joining them are one
-    // atomic act. A user without an organization cannot create a form and has
-    // no way to repair itself, so a partial failure here would leave a signed-up
-    // customer with a broken account and no error to explain it.
-    //
-    // A B2C account is simply an organization with one member — there is no
-    // separate "personal account" concept and nothing downstream branches on it.
-    const user = await prisma.$transaction(async tx => {
-      const created = await tx.user.create({
-        data: { email, passwordHash, name },
-        select: { id: true, email: true, name: true, createdAt: true }
-      })
-
-      const organization = await tx.organization.create({
-        data: {
-          name: personalOrganizationName(name, email),
-          slug: organizationSlug(name || email)
-        }
-      })
-
-      await tx.membership.create({
-        data: { organizationId: organization.id, userId: created.id, role: 'owner' }
-      })
-
-      return created
+  // The account, its organization and the membership joining them are one
+  // atomic act. A user without an organization cannot create a form and has
+  // no way to repair itself, so a partial failure here would leave a signed-up
+  // customer with a broken account and no error to explain it.
+  //
+  // A B2C account is simply an organization with one member — there is no
+  // separate "personal account" concept and nothing downstream branches on it.
+  const user = await prisma.$transaction(async tx => {
+    const created = await tx.user.create({
+      data: { email, passwordHash, name },
+      select: { id: true, email: true, name: true, createdAt: true }
     })
 
-    const token = await startSession(res, user.id)
+    const organization = await tx.organization.create({
+      data: {
+        name: personalOrganizationName(name, email),
+        slug: organizationSlug(name || email)
+      }
+    })
 
-    res.status(201).json({ user, token })
-  } catch (error) {
-    next(error)
-  }
-})
+    await tx.membership.create({
+      data: { organizationId: organization.id, userId: created.id, role: 'owner' }
+    })
+
+    return created
+  })
+
+  const token = await startSession(res, user.id)
+
+  res.status(201).json({ user, token })
+}))
 
 // POST /api/auth/login
-authRouter.post('/login', loginRateLimit, async (req, res, next) => {
-  try {
-    const validation = loginSchema.safeParse(req.body)
-    if (!validation.success) {
-      return res.status(400).json({
-        error: 'Validation error',
-        details: validation.error.errors
-      })
-    }
-
-    const { email, password } = validation.data
-
-    const user = await prisma.user.findUnique({ where: { email } })
-    if (!user) {
-      throw new AppError(401, 'Invalid credentials')
-    }
-
-    const validPassword = await bcrypt.compare(password, user.passwordHash)
-    if (!validPassword) {
-      throw new AppError(401, 'Invalid credentials')
-    }
-
-    const token = await startSession(res, user.id)
-
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        createdAt: user.createdAt
-      },
-      token
+authRouter.post('/login', loginRateLimit, asyncHandler(async (req, res, next) => {
+  const validation = loginSchema.safeParse(req.body)
+  if (!validation.success) {
+    return res.status(400).json({
+      error: 'Validation error',
+      details: validation.error.errors
     })
-  } catch (error) {
-    next(error)
   }
-})
+
+  const { email, password } = validation.data
+
+  const user = await prisma.user.findUnique({ where: { email } })
+  if (!user) {
+    throw new AppError(401, 'Invalid credentials')
+  }
+
+  const validPassword = await bcrypt.compare(password, user.passwordHash)
+  if (!validPassword) {
+    throw new AppError(401, 'Invalid credentials')
+  }
+
+  const token = await startSession(res, user.id)
+
+  res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt
+    },
+    token
+  })
+}))
 
 // POST /api/auth/refresh
 //
@@ -158,60 +151,48 @@ authRouter.post('/login', loginRateLimit, async (req, res, next) => {
 // — see middleware/csrf.ts. It is also the one route where a failure must not
 // explain itself: "unknown", "expired" and "replayed" all return the same 401,
 // or the endpoint becomes an oracle for probing captured tokens.
-authRouter.post('/refresh', refreshRateLimit, verifySameOrigin, async (req, res, next) => {
-  try {
-    const presented = req.cookies?.[REFRESH_COOKIE]
-    if (!presented) {
-      throw new AppError(401, 'Not authenticated')
-    }
-
-    const result = await rotateRefreshToken(presented)
-
-    if (!result.ok) {
-      // The cookie is dead whichever way it failed, including the replay case
-      // where rotateRefreshToken has just revoked the whole family.
-      clearRefreshCookie(res)
-      throw new AppError(401, 'Not authenticated')
-    }
-
-    setRefreshCookie(res, result.token)
-    res.json({ token: signAccessToken(result.userId) })
-  } catch (error) {
-    next(error)
+authRouter.post('/refresh', refreshRateLimit, verifySameOrigin, asyncHandler(async (req, res, next) => {
+  const presented = req.cookies?.[REFRESH_COOKIE]
+  if (!presented) {
+    throw new AppError(401, 'Not authenticated')
   }
-})
+
+  const result = await rotateRefreshToken(presented)
+
+  if (!result.ok) {
+    // The cookie is dead whichever way it failed, including the replay case
+    // where rotateRefreshToken has just revoked the whole family.
+    clearRefreshCookie(res)
+    throw new AppError(401, 'Not authenticated')
+  }
+
+  setRefreshCookie(res, result.token)
+  res.json({ token: signAccessToken(result.userId) })
+}))
 
 // POST /api/auth/logout
 //
 // Deliberately not behind `authenticate`: logging out must work when the access
 // token has already expired, which is exactly when a user reaches for it. The
 // cookie is the credential, so the CSRF guard applies here too.
-authRouter.post('/logout', verifySameOrigin, async (req, res, next) => {
-  try {
-    const presented = req.cookies?.[REFRESH_COOKIE]
-    if (presented) await revokeSession(presented)
+authRouter.post('/logout', verifySameOrigin, asyncHandler(async (req, res, next) => {
+  const presented = req.cookies?.[REFRESH_COOKIE]
+  if (presented) await revokeSession(presented)
 
-    clearRefreshCookie(res)
-    res.status(204).send()
-  } catch (error) {
-    next(error)
-  }
-})
+  clearRefreshCookie(res)
+  res.status(204).send()
+}))
 
 // GET /api/auth/me
-authRouter.get('/me', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { id: true, email: true, name: true, createdAt: true }
-    })
+authRouter.get('/me', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { id: true, email: true, name: true, createdAt: true }
+  })
 
-    if (!user) {
-      throw new AppError(404, 'User not found')
-    }
-
-    res.json({ user })
-  } catch (error) {
-    next(error)
+  if (!user) {
+    throw new AppError(404, 'User not found')
   }
-})
+
+  res.json({ user })
+}))

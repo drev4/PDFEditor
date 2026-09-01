@@ -17,22 +17,18 @@ Full reasoning with examples: `docs/sot/04-backend-patterns.md`. This is the ope
 ```ts
 const createThingSchema = z.object({ /* declared next to the route, not in a shared file */ })
 
-thingsRouter.post('/:formId/things', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const formId = req.params.formId as string
-    const form = await verifyFormOwnership(req, formId)   // returns the form; do not refetch
+thingsRouter.post('/:formId/things', authenticate, asyncHandler(async (req: AuthRequest, res) => {
+  const formId = req.params.formId as string
+  const form = await verifyFormOwnership(req, formId)   // returns the form; do not refetch
 
-    const validation = createThingSchema.safeParse(req.body)
-    if (!validation.success) {
-      return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
-    }
-
-    const thing = await prisma.thing.create({ data: { formId, ...validation.data } })
-    res.status(201).json({ thing })
-  } catch (error) {
-    next(error)
+  const validation = createThingSchema.safeParse(req.body)
+  if (!validation.success) {
+    return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
   }
-})
+
+  const thing = await prisma.thing.create({ data: { formId, ...validation.data } })
+  res.status(201).json({ thing })
+}))
 ```
 
 Non-negotiable points in that shape:
@@ -41,7 +37,7 @@ Non-negotiable points in that shape:
 - **Only `validation.data` reaches Prisma.** Never spread `req.body` into a write.
 - **Ownership is an awaited call inside the handler**, not middleware — it needs a route param. It returns the resource, so use it.
 - **Ownership failure is `404`, not `403`.** A 403 confirms that someone else's resource exists.
-- **Every path ends in `next(error)`.** A handler that formats its own error response in a `catch` is breaking the shared error contract.
+- **`asyncHandler` wraps every handler, and there is no `try`/`catch`.** Express 4 does not forward a rejected promise, so an unwrapped `async` handler leaves the request unanswered until it times out (`features/0026`). The wrapper sends it to the shared error handler, which is where `next(error)` was going. `tests/async-handler-coverage.spec.ts` fails if you forget. Async middleware mounted with `.use()` needs it too. A handler that formats its own error response is still breaking the shared error contract — the exception is an inner `catch` that swallows a best-effort failure on purpose, and those are rare and commented.
 - **Derive update schemas**: `const updateThingSchema = createThingSchema.partial()`. Do not restate fields.
 - Response bodies are wrapped in a named key — `{ thing }`, `{ things }` — matching the existing routes.
 

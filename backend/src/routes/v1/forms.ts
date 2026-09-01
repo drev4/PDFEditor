@@ -3,6 +3,7 @@ import { prisma } from '../../services/db.js'
 import { AppError } from '../../middleware/errorHandler.js'
 import { callerOrganizationId, type ApiKeyRequest } from '../../middleware/apiKeyAuth.js'
 import { exportResponsesToCSV } from '../../services/csv-exporter.js'
+import { asyncHandler } from '../../middleware/asyncHandler.js'
 
 /**
  * The published read-only API (features/0019).
@@ -93,46 +94,38 @@ function publicField(field: {
 }
 
 // GET /api/v1/forms
-v1FormsRouter.get('/', async (req: ApiKeyRequest, res, next) => {
-  try {
-    const organizationId = callerOrganizationId(req)
-    const { limit, offset } = pagination(req)
+v1FormsRouter.get('/', asyncHandler(async (req: ApiKeyRequest, res, next) => {
+  const organizationId = callerOrganizationId(req)
+  const { limit, offset } = pagination(req)
 
-    const where = { organizationId }
+  const where = { organizationId }
 
-    const [total, forms] = await Promise.all([
-      prisma.form.count({ where }),
-      prisma.form.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset
-      })
-    ])
+  const [total, forms] = await Promise.all([
+    prisma.form.count({ where }),
+    prisma.form.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset
+    })
+  ])
 
-    res.json({ data: forms.map(publicForm), pagination: { total, limit, offset } })
-  } catch (error) {
-    next(error)
-  }
-})
+  res.json({ data: forms.map(publicForm), pagination: { total, limit, offset } })
+}))
 
 // GET /api/v1/forms/:id
-v1FormsRouter.get('/:id', async (req: ApiKeyRequest, res, next) => {
-  try {
-    const organizationId = callerOrganizationId(req)
+v1FormsRouter.get('/:id', asyncHandler(async (req: ApiKeyRequest, res, next) => {
+  const organizationId = callerOrganizationId(req)
 
-    const form = await prisma.form.findFirst({
-      where: { id: req.params.id as string, organizationId },
-      include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
-    })
+  const form = await prisma.form.findFirst({
+    where: { id: req.params.id as string, organizationId },
+    include: { fields: { where: { deletedAt: null }, orderBy: { order: 'asc' } } }
+  })
 
-    if (!form) throw new AppError(404, 'Form not found')
+  if (!form) throw new AppError(404, 'Form not found')
 
-    res.json({ ...publicForm(form), fields: form.fields.map(publicField) })
-  } catch (error) {
-    next(error)
-  }
-})
+  res.json({ ...publicForm(form), fields: form.fields.map(publicField) })
+}))
 
 /**
  * Answers keyed by **field name**, not by field id.
@@ -161,75 +154,67 @@ function publicResponse(
 }
 
 // GET /api/v1/forms/:id/responses
-v1FormsRouter.get('/:id/responses', async (req: ApiKeyRequest, res, next) => {
-  try {
-    const organizationId = callerOrganizationId(req)
-    const formId = req.params.id as string
-    const { limit, offset } = pagination(req)
+v1FormsRouter.get('/:id/responses', asyncHandler(async (req: ApiKeyRequest, res, next) => {
+  const organizationId = callerOrganizationId(req)
+  const formId = req.params.id as string
+  const { limit, offset } = pagination(req)
 
-    // The tenancy check and the field lookup in one query: no archived filter,
-    // because an archived field still names the answers already collected
-    // through it.
-    const form = await prisma.form.findFirst({
-      where: { id: formId, organizationId },
-      include: { fields: { orderBy: { order: 'asc' } } }
-    })
+  // The tenancy check and the field lookup in one query: no archived filter,
+  // because an archived field still names the answers already collected
+  // through it.
+  const form = await prisma.form.findFirst({
+    where: { id: formId, organizationId },
+    include: { fields: { orderBy: { order: 'asc' } } }
+  })
 
-    if (!form) throw new AppError(404, 'Form not found')
+  if (!form) throw new AppError(404, 'Form not found')
 
-    const fieldNames = new Map(form.fields.map(field => [field.id, field.name]))
+  const fieldNames = new Map(form.fields.map(field => [field.id, field.name]))
 
-    const [total, responses] = await Promise.all([
-      prisma.response.count({ where: { formId } }),
-      prisma.response.findMany({
-        where: { formId },
-        include: { answers: true },
-        orderBy: { submittedAt: 'desc' },
-        take: limit,
-        skip: offset
-      })
-    ])
-
-    res.json({
-      data: responses.map(response => publicResponse(response, fieldNames)),
-      pagination: { total, limit, offset }
-    })
-  } catch (error) {
-    next(error)
-  }
-})
-
-// GET /api/v1/forms/:id/responses.csv
-v1FormsRouter.get('/:id/responses.csv', async (req: ApiKeyRequest, res, next) => {
-  try {
-    const organizationId = callerOrganizationId(req)
-    const formId = req.params.id as string
-
-    const form = await prisma.form.findFirst({
-      where: { id: formId, organizationId },
-      include: { fields: { orderBy: { order: 'asc' } } }
-    })
-
-    if (!form) throw new AppError(404, 'Form not found')
-
-    const responses = await prisma.response.findMany({
+  const [total, responses] = await Promise.all([
+    prisma.response.count({ where: { formId } }),
+    prisma.response.findMany({
       where: { formId },
       include: { answers: true },
-      orderBy: { submittedAt: 'desc' }
+      orderBy: { submittedAt: 'desc' },
+      take: limit,
+      skip: offset
     })
+  ])
 
-    // The same exporter the SPA's download uses, so the two files cannot drift
-    // apart. Deliberately not paginated: a partial export is a broken export,
-    // and this is the endpoint somebody automates a nightly backup with.
-    const csv = exportResponsesToCSV(form, responses)
+  res.json({
+    data: responses.map(response => publicResponse(response, fieldNames)),
+    pagination: { total, limit, offset }
+  })
+}))
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="responses-${form.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.csv"`
-    )
-    res.send(csv)
-  } catch (error) {
-    next(error)
-  }
-})
+// GET /api/v1/forms/:id/responses.csv
+v1FormsRouter.get('/:id/responses.csv', asyncHandler(async (req: ApiKeyRequest, res, next) => {
+  const organizationId = callerOrganizationId(req)
+  const formId = req.params.id as string
+
+  const form = await prisma.form.findFirst({
+    where: { id: formId, organizationId },
+    include: { fields: { orderBy: { order: 'asc' } } }
+  })
+
+  if (!form) throw new AppError(404, 'Form not found')
+
+  const responses = await prisma.response.findMany({
+    where: { formId },
+    include: { answers: true },
+    orderBy: { submittedAt: 'desc' }
+  })
+
+  // The same exporter the SPA's download uses, so the two files cannot drift
+  // apart. Deliberately not paginated: a partial export is a broken export,
+  // and this is the endpoint somebody automates a nightly backup with.
+  const csv = exportResponsesToCSV(form, responses)
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="responses-${form.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.csv"`
+  )
+  res.send(csv)
+}))

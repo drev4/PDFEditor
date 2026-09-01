@@ -1,8 +1,8 @@
 # 0026 — `asyncHandler`, and something that notices when it is missing
 
-**Status:** backlog
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *No `asyncHandler` wrapper, so every async route still depends on its own `try`/`catch`*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0026-async-handler`
 **Related:** [04-backend-patterns](../docs/sot/04-backend-patterns.md) · [08-operations](../docs/sot/08-operations.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [`features/0016`](0016-object-storage-for-uploaded-pdfs.md) · [`features/0017`](0017-job-queue-for-pdf-embedding.md) · [`features/0025`](0025-structured-logging.md)
 
 ## Context
@@ -103,4 +103,18 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified. 48 handlers and 2 middleware wrapped, 47 redundant `try`/`catch` blocks removed, and **not one test expectation changed** — which was criterion 7 and is the only evidence that mattered for a change touching every route in the product.
+
+**The failing test failed the way the spec said it would: it hung.** Written against `develop` it did not go red, it timed out at 5000ms and produced an `Unhandled Error` beside it. That is the defect exactly — the request is never answered — and it is worth having seen, because a reviewer reading "adds error handling" would not picture a hang.
+
+**Trap 5 was real and measurable.** Before the `res.headersSent` guard, an error after the response had started made the error handler throw `Cannot set headers after they are sent to the client` — a crash on top of a failure. It was measured with a throwaway handler rather than assumed, and the test now asserts the real outcome: the connection is aborted mid-body (which is what a broken stream *is*) and the server logs why, once.
+
+**Two typing consequences the spec did not predict.** `asyncHandler` erases the request-parameter types Express derives from the path string, so `req.params.token` and `req.params.shareId` became `string | string[]`. Two sites needed an annotation. It fails loudly at the use site rather than silently, which is the acceptable half of the trade, and it is recorded in the wrapper's own comment so the next person meets it as a note rather than a surprise.
+
+**The coverage scan earned its negative control within a minute of existing.** The first draft matched the literal `asyncHandler(` and flagged both `/api/v1` middleware, which are written `asyncHandler<ApiKeyRequest>(`. The control is now in the spec as a fixture the scan must flag, so a regex that quietly stops matching cannot report a clean codebase for ever.
+
+**The most important edit is not in `src/`.** `.claude/skills/backend-endpoint-pattern/SKILL.md` showed a handler with `try`/`catch` and said *"every path ends in `next(error)`"*. That skill is what the next handler gets written from, so it mattered more than the SoT document did; both are updated, and `04-backend-patterns §1` now carries the rule and the three deliberate exceptions.
+
+**Verified:** backend 21 specs / 248 tests, integration 221 (211 passed, 10 skipped), frontend 47 / 393, E2E 53, `npm run build --workspace=frontend`, `tsc --noEmit` and `typecheck:tests`. By hand against a running server: a 401, a 404 and a 400 return byte-identical bodies to `develop`.
+
+**Express 5 is filed rather than done**, with the compatibility check recorded so nobody repeats it: all 41 route paths are literals or plain `:param`, `req.query` is never assigned, `res.sendFile` is unused. Whoever upgrades should delete `middleware/asyncHandler.ts` and `tests/async-handler-coverage.spec.ts`, and both files say so themselves.

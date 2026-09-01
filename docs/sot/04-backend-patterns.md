@@ -13,17 +13,21 @@ const createFormSchema = z.object({
   pdfUrl: z.string().optional()
 })
 
-formsRouter.post('/', authenticate, async (req: AuthRequest, res, next) => {
-  try {
-    const validation = createFormSchema.safeParse(req.body)
-    if (!validation.success) {
-      return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
-    }
-    const { title, description, pdfUrl } = validation.data
-    // ...
-  } catch (error) { next(error) }
-})
+formsRouter.post('/', authenticate, asyncHandler(async (req: AuthRequest, res) => {
+  const validation = createFormSchema.safeParse(req.body)
+  if (!validation.success) {
+    return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
+  }
+  const { title, description, pdfUrl } = validation.data
+  // ...
+}))
 ```
+
+**`asyncHandler` is not optional, and there is no `try`/`catch`** ([`features/0026`](../../features/0026-async-handler.md)). Express 4 does not forward a rejected promise from an `async` handler: it never learns, the request is **never answered**, and the caller waits for a timeout. It shipped once, on the unauthenticated signed-PDF route. The wrapper sends the rejection to `middleware/errorHandler.ts`, which is where a `next(error)` was going anyway — so the outer `try` had nothing left to do and is gone from all 48 handlers.
+
+Two things about it. **Async middleware mounted with `.use()` needs it too** — `identifyApiKey` and `requireApiAccess` on `/api/v1` are as exposed as any handler. And **an inner `catch` that does something else stays**: three exist (the best-effort PDF sync in `routes/forms.ts`, extraction in `routes/upload.ts`, and `callerFromHeader`'s bare `catch` in `routes/organizations.ts`), and unwrapping them would turn a deliberately swallowed failure into a 500 the customer sees.
+
+`backend/tests/async-handler-coverage.spec.ts` fails when a handler is added without the wrapper, because a wrapper somebody has to remember fails exactly like a `try`/`catch` somebody has to remember. It is a lint rule in the only shape this repository can currently run one.
 
 `safeParse` rather than `parse`, so the 400 is produced deliberately at the call site instead of thrown into the error handler. Update schemas are derived, never duplicated: `const updateFieldSchema = createFieldSchema.partial()`.
 
@@ -67,9 +71,9 @@ The cost of ownership-as-a-call is that a new route can simply forget it. That i
 
 `AppError extends Error` carries a `statusCode`. A single `errorHandler` at the end of the chain distinguishes three cases: `AppError` (use its status), `ZodError` (400 with `details`), everything else (500 with a fixed `Internal server error` string that never leaks the internal message).
 
-Every handler ends with `catch (error) { next(error) }`. **A handler that formats its own error response in a catch block is breaking the pattern** — that is how response shapes start diverging between endpoints, and it is worth flagging in review even when the output happens to look right.
+Every handler is wrapped in `asyncHandler`, which is what reaches that handler now — the `catch (error) { next(error) }` it replaced is gone (§1). **A handler that formats its own error response in a catch block is breaking the pattern** — that is how response shapes start diverging between endpoints, and it is worth flagging in review even when the output happens to look right.
 
-Note the current error handler also `console.error`s the full error object. That is the only observability there is, and it is a log-hygiene risk — see [07-security-and-privacy.md](./07-security-and-privacy.md).
+The error handler logs 5xx at `error` with the stack and 4xx at `info`, both carrying the request id, and skips the response entirely when `res.headersSent` — a stream that failed mid-write cannot be answered twice. See [08-operations](./08-operations.md#observability) for what is never logged, and why redaction is the backstop rather than the mechanism.
 
 ## 4. Services: a class when there is configuration, a function when there is not
 

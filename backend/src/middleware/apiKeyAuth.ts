@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express'
 import { AppError } from './errorHandler.js'
 import { verifyApiKey, touchApiKey } from '../services/api-key.js'
 import { assertHasApiAccess } from '../services/entitlements.js'
+import { asyncHandler } from './asyncHandler.js'
 
 /**
  * Authentication for `/api/v1`, and the only credential in this product that
@@ -44,31 +45,23 @@ export interface ApiKeyRequest extends Request {
  * for a well-formed prefix, a database lookup. The order on the router is
  * therefore: identify, limit, require.
  */
-export async function identifyApiKey(
-  req: ApiKeyRequest,
-  _res: Response,
-  next: NextFunction
-) {
-  try {
-    const header = req.headers.authorization
-    if (!header || !header.startsWith('Bearer ')) return next()
+export const identifyApiKey = asyncHandler<ApiKeyRequest>(async (req, _res, next) => {
+  const header = req.headers.authorization
+  if (!header || !header.startsWith('Bearer ')) return next()
 
-    const verified = await verifyApiKey(header.slice('Bearer '.length))
-    if (!verified) return next()
+  const verified = await verifyApiKey(header.slice('Bearer '.length))
+  if (!verified) return next()
 
-    req.apiKey = { id: verified.id, organizationId: verified.organizationId }
+  req.apiKey = { id: verified.id, organizationId: verified.organizationId }
 
-    // Bookkeeping, deliberately not awaited: `lastUsedAt` is what lets a
-    // customer tell a live integration from a forgotten credential, and it is
-    // not worth a millisecond on the response path. It writes at most once a
-    // minute per key and swallows its own failures.
-    void touchApiKey(verified.id, verified.lastUsedAt)
+  // Bookkeeping, deliberately not awaited: `lastUsedAt` is what lets a
+  // customer tell a live integration from a forgotten credential, and it is
+  // not worth a millisecond on the response path. It writes at most once a
+  // minute per key and swallows its own failures.
+  void touchApiKey(verified.id, verified.lastUsedAt)
 
-    next()
-  } catch (error) {
-    next(error)
-  }
-}
+  next()
+})
 
 /**
  * Rejects anything that did not arrive with a usable key.
@@ -106,18 +99,10 @@ export function requireApiKey(req: ApiKeyRequest, _res: Response, next: NextFunc
  * (`DELETE /api/organizations/api-keys/:id`) still works after a downgrade.
  * Turning a credential off is never something to charge for.
  */
-export async function requireApiAccess(
-  req: ApiKeyRequest,
-  _res: Response,
-  next: NextFunction
-) {
-  try {
-    await assertHasApiAccess(callerOrganizationId(req))
-    next()
-  } catch (error) {
-    next(error)
-  }
-}
+export const requireApiAccess = asyncHandler<ApiKeyRequest>(async (req, _res, next) => {
+  await assertHasApiAccess(callerOrganizationId(req))
+  next()
+})
 
 /**
  * The organization this request speaks for.

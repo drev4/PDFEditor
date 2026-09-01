@@ -18,6 +18,7 @@ import { requestLog } from './middleware/requestLog.js'
 import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
 import { pdfStorage } from './services/pdf-storage.js'
+import { asyncHandler } from './middleware/asyncHandler.js'
 
 dotenv.config()
 
@@ -111,26 +112,31 @@ app.use(requestLog)
 // This route is deliberately unauthenticated: an anonymous respondent has to be
 // able to load the PDF of a published form. The capability is the signature, not
 // a session.
-app.get('/uploads/pdfs/:token/:filename', async (req, res) => {
-  // **Everything below is inside this try, and it must stay that way.** The
-  // handler became `async` when the bytes moved behind a storage driver
-  // (features/0016), and Express 4 does not catch a rejected promise from an
-  // async handler — it becomes an unhandled rejection, which Node 22 turns into
-  // `process.exit(1)`. This route is unauthenticated and the `s3` driver
-  // rethrows anything that is not a 404, so one organization's expired
-  // credential or throttled request would have taken the API down for every
-  // customer sharing the process. Found by review, reproduced, and covered by
-  // `tests/security-headers.spec.ts`.
-  try {
-    return await servePdf(req, res)
-  } catch (error) {
-    // Logged in full here, and described to nobody: which provider, bucket or
-    // credential failed is useful to an attacker and useless to a respondent,
-    // who can only try again.
-    req.log.error({ err: error }, 'Failed to serve an uploaded PDF')
-    return res.status(500).json({ error: 'Unable to read this file right now.' })
-  }
-})
+// The params are annotated because `asyncHandler` erases the types Express
+// derives from the path string. It fails loudly when it matters, which is the
+// acceptable half of that trade (features/0026).
+app.get(
+  '/uploads/pdfs/:token/:filename',
+  asyncHandler(async (req: Request<{ token: string; filename: string }>, res) => {
+    // **This `catch` is not the wrapper's job, and it stays.** `asyncHandler`
+    // now guarantees a rejection reaches the error handler (features/0026) —
+    // which is what features/0016 originally wrote this `try` for, when an
+    // unhandled rejection here meant `process.exit(1)` on a route anybody
+    // holding a link can call.
+    //
+    // What it still does that the wrapper does not: answer with a message that
+    // describes nothing. Which provider, bucket or credential failed is useful
+    // to an attacker and useless to a respondent, who can only try again; the
+    // generic 500 the error handler would produce is fine, but the log line and
+    // the deliberate wording are this route's own.
+    try {
+      return await servePdf(req, res)
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to serve an uploaded PDF')
+      return res.status(500).json({ error: 'Unable to read this file right now.' })
+    }
+  })
+)
 
 async function servePdf(req: Request<{ token: string; filename: string }>, res: Response) {
   const invalidLink = { error: 'This link is invalid or has expired.' }
