@@ -93,9 +93,33 @@ export async function connectRedis(role: RedisRole): Promise<Redis> {
     return new IORedis(url, { maxRetriesPerRequest: null })
   }
 
-  // Every other role: a command fails after a bounded number of attempts rather
-  // than queueing for ever, while reconnection keeps trying so a blip recovers
-  // on its own. See the module comment for what the unbounded version cost.
+  if (role === 'rate-limit') {
+    // The tightest bounds of the four, because this one sits in front of login
+    // and every second of it is a second the user stares at a spinner. A
+    // command that cannot be answered fails in about two seconds rather than
+    // ten, and the limiter is configured to reject rather than pass when that
+    // happens (`middleware/rateLimit.ts`, `passOnStoreError`).
+    //
+    // **`enableOfflineQueue` stays on**, and that is worth stating because
+    // turning it off is the obvious way to make an outage fail fast and it
+    // breaks the healthy case: with the offline queue disabled, the first
+    // command issued while the socket is still connecting - which is the first
+    // limited request after every start and every reconnect - fails against a
+    // perfectly good Redis with "Stream isn't writeable". Measured, not
+    // theorised: it turned the shared-store spec red the moment two spec files
+    // ran in one process. Bounding the wait is the right lever; refusing to
+    // wait at all is not.
+    return new IORedis(url, {
+      maxRetriesPerRequest: 1,
+      connectTimeout: 2_000,
+      commandTimeout: 2_000
+    })
+  }
+
+  // The queue's own roles: a command fails after a bounded number of attempts
+  // rather than queueing for ever, while reconnection keeps trying so a blip
+  // recovers on its own. See the module comment for what the unbounded version
+  // cost.
   return new IORedis(url, {
     maxRetriesPerRequest: 2,
     connectTimeout: 5_000,

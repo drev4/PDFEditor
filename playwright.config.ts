@@ -45,6 +45,14 @@ export default defineConfig({
                 // The refresh endpoint is hit by every page load that has a
                 // session, and by every expiry below.
                 RATE_LIMIT_REFRESH_MAX: '100000',
+                // No Redis in the E2E run, whatever the developer's `.env`
+                // says. `REDIS_URL` now drives two things (features/0018): the
+                // PDF embed moves to a worker that this suite does not start,
+                // and rate limiting moves to a store that fails closed if the
+                // Redis is not there — so a stray value turns a green suite red
+                // in a way that has nothing to do with the product. Empty
+                // rather than absent, because dotenv fills in an absent key.
+                REDIS_URL: '',
                 // Deliberately tiny. With a 15-minute token no E2E run would
                 // ever cross an expiry, and the refresh-and-retry path — the
                 // one that decides whether a short-lived token is invisible to
