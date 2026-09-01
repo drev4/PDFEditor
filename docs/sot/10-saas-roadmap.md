@@ -117,7 +117,7 @@ Steps 0 through 3 are correctness and safety, not features. They come first beca
 
 **The build order is finished.** [`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md) and [`features/0020`](../../features/0020-outbound-webhooks.md) closed step 10 between them, and both spent what step 9 built: the shared rate-limit store became load-bearing the moment a limit was *published*, and the queue is what makes webhook retries possible at all.
 
-**What replaces the chain is not another chain.** Everything left is either a product decision nobody has taken — the prices, the landing page, the legal facts behind it — or work that has no dependencies on anything else and can be picked in any order: the two customer-facing screens (API keys and webhooks) without which a customer cannot use step 10 at all; observability, which is the one that stops mattering last, because a customer's integration failing at 3am is answered today by reading stdout; and the P1 rows that were always outside the chain — the `asyncHandler` wrapper, read-then-write plan limits, and backups with a tested restore. [`docs/BACKLOG.md`](../BACKLOG.md) is now the whole picture, and the priority column is finally the right thing to read.
+**What replaces the chain is not another chain.** Everything left is either a product decision nobody has taken — the prices, the landing page, the legal facts behind it — or work that has no dependencies on anything else and can be picked in any order. [`docs/BACKLOG.md`](../BACKLOG.md) is now the whole picture, and the priority column is finally the right thing to read. **[What comes next](#what-comes-next), at the end of this document, is the shortlist** — the same items, ordered by a judgement about what is worth doing first, with the few real dependencies among them named so they are not mistaken for a chain.
 
 Step 8 took three features to close and the two follow-ups are both now done. `Plan.hasBranding` is enforced ([`features/0014`](../../features/0014-close-the-subscription-surface.md)) and `assertCanInvite` is wired ([`features/0015`](../../features/0015-team-plan-and-purchased-seats.md)) — it had been waiting not for "billing" but for a plan that can hold more than one person, which is Team. What remains open around billing is configuration and business decisions rather than code: live-mode Stripe setup, tax, and the amounts themselves — including how many seats Team's base price includes ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
@@ -134,3 +134,55 @@ What it does depend on is not code: a support address, a legal entity, a registe
 **The chain wins.** A priority is a judgement and can be revised; a dependency cannot. That is the whole reason this document exists next to a flat priority list, and it is the rule to apply whenever the two disagree. Concretely, the options were to live with the per-process limiter until step 9, or to pull Redis forward as its own step and pay for the infrastructure earlier — not to attempt the P1 item on its stated priority.
 
 **Resolved as of [`features/0017`](../../features/0017-job-queue-for-pdf-embedding.md).** The Redis is here, so the P1 item is now doable on its own priority; it was deliberately kept out of that feature, because a security-relevant change does not belong in a queue PR. Note one thing it inherits: the queue's Redis is **optional**, and a rate limiter's is not — a limiter that silently degrades to per-process when `REDIS_URL` is missing is the failure this repository has already reasoned about once with `TRUST_PROXY_HOPS`.
+
+## What comes next
+
+**Read this as a shortlist, not as a chain.** The build order above earns its ordering from dependencies: each step could not be attempted before the one above it. Nothing below has that property except where the row says so, so the order here is a *judgement about what is worth doing first* — revisable, unlike the chain, and that is why this section is kept separate rather than continuing the table with a step 11.
+
+The ordering principle: **first close the gap between what is built and what a customer can reach, then make a failure diagnosable, then take the decisions that are not code.** Step 10 shipped an API and webhooks that no screen exposes — the largest distance in the product today between work already paid for and value delivered.
+
+Verified against the code on **2026-09-01**; every claim below names the file it came from.
+
+| # | Next | Kind | Depends on |
+|---|---|---|---|
+| A1 | **API keys and webhooks screens in the SPA** | Product | Nothing |
+| A2 | **An endpoint that returns the organization**, then the switcher and renaming | Product | Nothing |
+| A3 | **Organization-wide responses listing**, then `/dashboard/responses` | Product | A paging decision |
+| B1 | **Structured logging (`pino`)** with request ids and redaction | Operability | Nothing — and it unblocks three other rows |
+| B2 | **`asyncHandler`** on every async route | Correctness | Nothing |
+| B3 | **Atomic plan limits** for publish and invite | Correctness | Nothing |
+| B4 | **Boot-time configuration validation** | Operability | Nothing |
+| B5 | **Backups with a tested restore** | Operability | A deployment target |
+| C1 | **Decide the prices, the legal entity, the support address** | Business | Nobody but the owner |
+| C2 | **Decide the landing technology**, then build the landing | Product | C1 for its content |
+| C3 | **Email delivery** | Product | A provider account |
+
+### A — close the distance to the customer
+
+**A1. The API keys and webhooks screens.** The endpoints exist and are complete: `GET`/`POST`/`DELETE /api/organizations/api-keys` (`backend/src/routes/organizations.ts:421`, `:448`, `:478`) and the same three for `/webhooks` (`:567`, `:586`, `:628`), plus `GET /api/v1/webhooks/deliveries` (`backend/src/routes/v1/webhooks.ts:27`) for the delivery log. The SPA reaches none of them — `frontend/src/services/` has no client for either, `frontend/src/views/` has no screen, and `useAppNav.ts` lists four destinations. So a Team customer who is *paying for API access* cannot mint a key from the product. This is first because it is the cheapest conversion of finished backend work into something sellable.
+
+Two things the screens must get right, and both are properties of the endpoints rather than of the design. **The secret is returned exactly once**, at creation, by both `POST` handlers — a screen that does not make the customer copy it there has lost it. And `GET /webhooks` returns a `deliverable` boolean, false when `REDIS_URL` or `WEBHOOK_SIGNING_KEY` is missing, which the screen has to surface: otherwise the customer configures an endpoint that will never fire and nothing says so.
+
+**A2. An endpoint that returns the organization.** `SettingsView.vue:186` says out loud that renaming the organization is not built because no endpoint returns its name, and the design canvas puts a switcher at the top of the sidebar that has nothing to read. A small endpoint that two screens are waiting on.
+
+**A3. Responses across the organization.** `ResponsesIndexView.vue` is a `NotBuiltYet` placeholder, and the only listings are per-form: `GET /api/forms/:id/responses` and `GET /api/forms/:id/responses/export` (`backend/src/routes/forms.ts:338`, `:374`). It is third rather than first because it is the one of the three that needs a decision — paging and ordering the server agrees to, rather than one request per form merged in the browser.
+
+### B — make a failure diagnosable, and close the two shapes that are wrong
+
+**B1. Structured logging.** Nothing in `backend/` imports `pino`; the log is `console` and stdout. It is the highest-leverage row in P1 because three other items wait on it and cannot be done well without it: CSP violation reporting has nowhere to send reports, error tracking has nothing to correlate, and **the queued embed fails silently** — with `REDIS_URL` set and no worker running, no request errors and every form's PDF quietly stops matching its fields. Today the answer to "what happened to our submission at 14:32" is to read stdout.
+
+**B2. `asyncHandler`.** `grep -rn asyncHandler backend/src` finds nothing: every async route depends on its own `try`/`catch`. Express 4 does not forward a rejected promise, so one missing `catch` is an unhandled rejection — and it has shipped before, in [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md). `process-guards.ts` keeps the process up on a rejection, which contains the blast radius but does not answer the request.
+
+**B3. Atomic plan limits.** `assertCanPublishForm` (`backend/src/services/entitlements.ts:234`) and `assertCanInvite` (`:278`) read a count and let the caller write in a separate statement, with no transaction and no row lock — two requests on the last slot both pass. The fix already exists in the same file: `assertResponseWithinLimit` (`:386`) takes a transaction and claims the month with an atomic upsert-and-compare, precisely because check-then-write does not hold. The impact is milder here — one seat or one published form over, by a paying customer — which is why it sits below logging rather than above it.
+
+**B4. Configuration validated at boot.** `backend/src/config/env.ts` is a pair of readers (`envBool`, `envInt`) that warn and fall back, which is right for a tunable; what is missing is the schema for values that must be present and well-formed. Only `JWT_SECRET` refuses to boot (`backend/src/app.ts:24`), so a wrong `BASE_URL` still produces broken PDF links quietly.
+
+**B5. Backups with a tested restore.** Unchanged from the backlog: none exist, and recovery time is unknown. Last in this group only because it needs a deployment target to be real — not less important than the rest.
+
+### C — the decisions that are not code
+
+These block on the owner, not on engineering, and they are ordered by what the others need. **C1** — the prices, the legal entity, the registered address, the support email — is what the landing cannot ship without, and the amounts also decide how many seats Team's base price includes ([`docs/BACKLOG.md`](../BACKLOG.md)). Note that no price is rendered from a constant anywhere in the code, deliberately, so deciding them is a Stripe change rather than a deploy. **C2** is the landing, which stays a [parallel track](#parallel-track--the-landing-page): its technology is an open decision ([02-architecture](./02-architecture.md)), and if it stays open it gets taken by whoever opens an editor first. **C3**, email delivery, is the row that keeps growing — it started as invitations the inviter copies and sends themselves, and step 10 added a second customer for it: an endpoint auto-disabled after ten consecutive failures, with nothing that tells its owner ([`features/0020`](../../features/0020-outbound-webhooks.md)).
+
+### What is deliberately not on this list
+
+Write endpoints on `/api/v1`, per-key scopes and key expiry, more webhook event types, and replaying a delivery are all real and all filed — but each extends a surface **no customer can reach from the product yet**. They are worth doing after A1, not before it. The same applies to the two P2 rows that assume scale this deployment does not have: moving PDF extraction off the request path, and the cross-replica embed race that now remains only on the inline path.
