@@ -162,10 +162,13 @@ Authorization on a form is "is the caller a member of the organization that owns
 
 ```ts
 // middleware/formOwnership.ts
-const memberOfCallerOrganization = (userId?: string) => ({
-  organization: { memberships: { some: { userId } } }
-})
+export async function callerCanReachForm(req: AuthRequest) {
+  const { organizationId } = await requireMembership(req)
+  return { organizationId }
+}
 ```
+
+It used to be `{ organization: { memberships: { some: { userId } } } }` — *any* membership — and that was wrong in a way nothing noticed until [`features/0023`](../../features/0023-active-organization.md): a person in two organizations read from **both**, merged, while their writes went to whichever membership was oldest. One organization at a time is the rule now, and `requireMembership` is what picks it.
 
 Three rules follow, and all three are easy to lose:
 
@@ -173,7 +176,9 @@ Three rules follow, and all three are easy to lose:
 - **Ownership failures return `404`, never `403`.** A `403` confirms the row exists and turns the endpoint into an existence oracle for form ids. `backend/tests/integration/tenancy.spec.ts` asserts this on every affected route.
 - **Never put `organizationId` in the JWT.** Access tokens live 15 minutes and cannot be revoked, so a membership baked into one outlives the membership itself. Resolve it per request; it costs a join, not a round trip.
 
-New resources get their organization from `requireOrganizationId(req)` in `middleware/membership.ts` — the single place that will have to learn how an active organization is chosen once a user can belong to more than one.
+**`requireMembership` is the one thing that decides which organization a request acts in**, and every other rule — the form scope above, `requireOrganizationId` for new resources, `requireRole`, every entitlement check — asks it. It reads `User.activeOrganizationId`, and **no other code in `backend/src` may**: `grep -rn activeOrganizationId backend/src` should name `middleware/membership.ts` and the switch endpoint in `routes/organizations.ts`, and nothing else.
+
+That column is a **cache of a choice, never a grant** ([`features/0023`](../../features/0023-active-organization.md)). It selects among memberships that already exist: if the caller no longer has a live `Membership` in the organization it names, it is ignored and the oldest membership is used. Both halves are load-bearing — the first makes removing somebody take effect on their very next request, with no session to expire and no cleanup job; the second is why a stale or hand-edited value cannot widen what anybody reaches. `backend/tests/integration/tenancy.spec.ts` asserts all three cases.
 
 **Roles are a second, different check.** `requireRole(req, ['owner'])` returns the caller's membership or throws, and it distinguishes two rejections that must not be collapsed: **`404`** when the caller is not in the organization at all, **`403`** when they are but their role does not allow the action. Collapsing them either leaks existence or tells a legitimate member their own organization does not exist. Anything that could remove an owner calls `assertNotLastOwner` first — an organization with no owner cannot be administered or deleted, and nothing here can repair one.
 

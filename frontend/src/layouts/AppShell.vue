@@ -7,6 +7,10 @@
     >
       <BrandMark class="px-[18px] pt-5 pb-4" />
 
+      <!-- The switcher the canvas draws above the navigation. It renders nothing
+           for an account with one organization, which is almost all of them. -->
+      <OrganizationSwitcher />
+
       <nav class="flex flex-col gap-0.5 px-3">
         <RouterLink
           v-for="item in navItems"
@@ -93,12 +97,15 @@ import Toast from 'primevue/toast'
 import { useToast } from 'primevue/usetoast'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlanStore } from '@/stores/plan.store'
+import { useOrganizationStore } from '@/stores/organization.store'
 import BrandMark from '@/components/ui/BrandMark.vue'
 import PlanCard from '@/components/plan/PlanCard.vue'
+import OrganizationSwitcher from '@/components/ui/OrganizationSwitcher.vue'
 import { useAppNav } from '@/composables/useAppNav'
 
 const authStore = useAuthStore()
 const planStore = usePlanStore()
+const organizationStore = useOrganizationStore()
 const router = useRouter()
 const toast = useToast()
 
@@ -108,6 +115,12 @@ const toast = useToast()
 // else is noise they cannot act on.
 onMounted(() => {
   if (!planStore.plan) planStore.load().catch(() => {})
+  // The switcher needs the list, and the shell is the one place every signed-in
+  // screen passes through. Silent on failure for the same reason the plan is: a
+  // sidebar that cannot draw a switcher is not something the user can act on.
+  if (!organizationStore.organizations.length) {
+    organizationStore.loadOrganizations().catch(() => {})
+  }
 })
 
 const { navItems, isActive } = useAppNav()

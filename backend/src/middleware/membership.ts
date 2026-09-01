@@ -27,14 +27,35 @@ export interface CallerMembership {
 }
 
 /**
- * The caller's membership, or `404`.
+ * The caller's membership in the organization they are **acting in**, or `404`.
  *
- * Every account belongs to exactly one organization today, so there is nothing
- * to choose between. When a user can belong to several, this is the single
- * place that has to learn how the active one is selected, and the oldest
- * membership stops being the right answer.
+ * This is the single place that decides which organization a request acts in,
+ * and it is the only thing in the codebase that may read
+ * `User.activeOrganizationId` (features/0023). Everything else — routes,
+ * services, the form scope in `formOwnership.ts` — asks here.
+ *
+ * It used to take the oldest membership, on the premise that every account
+ * belonged to exactly one organization. Invitations broke that premise: a person
+ * who already had an account keeps their personal organization and gains a
+ * second membership, and the two rules that then answered "which organization?"
+ * disagreed — reads spanned both, writes took the oldest.
+ *
+ * **`activeOrganizationId` is a cache of a choice, never a grant.** It is used
+ * only to *select* among memberships that already exist:
+ *
+ *   - if the caller still has a live `Membership` there, that is the active one;
+ *   - otherwise it is ignored and the oldest membership is used, exactly as
+ *     before.
+ *
+ * Both halves are load-bearing. The first makes removal effective on the very
+ * next request, with no session to expire and no cleanup job to run. The second
+ * is why a stale or hand-edited column cannot become access: it can never widen
+ * what the caller may reach, only choose among it.
  */
 export async function requireMembership(req: AuthRequest): Promise<CallerMembership> {
+  const active = await activeMembership(req.userId)
+  if (active) return active
+
   const membership = await prisma.membership.findFirst({
     where: { userId: req.userId },
     orderBy: { createdAt: 'asc' },
@@ -46,6 +67,32 @@ export async function requireMembership(req: AuthRequest): Promise<CallerMembers
   }
 
   return membership
+}
+
+/**
+ * The membership named by the caller's chosen organization, if it is still real.
+ *
+ * `null` covers all three of "never chose", "the organization is gone" and "they
+ * are no longer a member", and every one of them falls through to the oldest
+ * membership rather than failing — a choice that has stopped being valid is not
+ * an error, it is simply not a choice any more.
+ */
+async function activeMembership(userId: string | undefined): Promise<CallerMembership | null> {
+  if (!userId) return null
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { activeOrganizationId: true }
+  })
+
+  if (!user?.activeOrganizationId) return null
+
+  // Scoped by both ids: this asks whether the membership exists, and never
+  // trusts the column on its own.
+  return prisma.membership.findFirst({
+    where: { userId, organizationId: user.activeOrganizationId },
+    select: { organizationId: true, role: true }
+  })
 }
 
 /** The organization a newly created resource belongs to. */

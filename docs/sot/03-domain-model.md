@@ -12,6 +12,7 @@ Organization 1───1 Subscription     (the Stripe relationship; at most one)
 Organization 1───* ApiKey           (credentials that authenticate the tenant, not a person)
 Organization 1───* WebhookEndpoint 1───* WebhookDelivery   (where to call, and what happened)
 User 1───* RefreshToken
+User *───1 Organization       (activeOrganizationId — which one they are acting in; nullable)
 StripeEvent                        (standalone — no relation, deliberately)
 User 0───* Form            (createdByUserId — provenance, never ownership)
 ```
@@ -90,6 +91,7 @@ Nothing is currently missing that a known workload needs.
 | `WebhookEndpoint.organization` → `Organization` | `Cascade` | Deleting an organization removes where it wanted to be called. Nothing outlives the tenant. |
 | `WebhookEndpoint.createdBy` → `User` | `SetNull` | Same decision as `ApiKey.createdBy`: an integration must not break because an employee left. |
 | `WebhookDelivery.endpoint` → `WebhookEndpoint` | `Cascade` | Deleting an endpoint removes its history. It holds no payload and no customer-produced data — only a record that this endpoint was told — which is meaningless once the endpoint is gone. |
+| `User.activeOrganization` → `Organization` | `SetNull` | The organization a person was acting in disappearing leaves the account intact and falls back to whatever membership it has left ([`features/0023`](../../features/0023-active-organization.md)). Nothing is lost: the column is a **cache of a choice, never a grant**, so clearing it removes no access and no data. |
 | `RefreshToken.user` → `User` | `Cascade` | Deleting a user deletes their sessions. Correct and uncontroversial: this table holds no customer-produced data, only credentials that are worthless once the account is gone. |
 | `Subscription.organization` → `Organization` | `Cascade` | Deleting an organization deletes its billing record. **This does not cancel anything at Stripe** — Stripe is a separate system and no cascade here can reach it, so an organization deleted while subscribed keeps being billed until someone cancels it in the Stripe dashboard. Nothing in the product deletes an organization today; this fires only from the database. |
 | `StripeEvent` → *(nothing)* | — | **Has no relation at all, deliberately.** Tying it to an organization would mean deleting an organization deletes the record that its events were already processed, and a redelivery after that would be reprocessed as new. |
@@ -129,9 +131,11 @@ One consequence worth knowing: `GET /forms/:id` re-extracts fields from the PDF 
 
 Multi-tenancy itself is **built**: `Organization`, `Membership` and `Invitation` exist, `Form.organizationId` is required, and every authorization check resolves a membership ([`features/0009`](../../features/0009-organizations-own-resources.md), [`0010`](../../features/0010-member-invitations-and-role-enforcement.md)). This section used to say the opposite; it was left behind by those two changes.
 
+Since [`features/0023`](../../features/0023-active-organization.md) it also answers *which* organization, when somebody belongs to more than one: `User.activeOrganizationId`, read only by `requireMembership`. Belonging to two became reachable the moment invitations shipped, and until then the model had no answer — reads spanned every membership and writes took the oldest.
+
 What is still absent from the schema, and where it is due:
 
-- **`Subscription`** — step 8 of the [build order](./10-saas-roadmap.md#build-order). Until it exists, `Organization.planKey` is what says which plan an organization is on, and nothing can change that column from inside the product.
+- ~~**`Subscription`**~~ — **built** ([`features/0013`](../../features/0013-stripe-subscriptions.md)). `Organization.planKey` kept its place as the thing every limit check reads and gained exactly one writer, the Stripe webhook.
 - **`Plan` as a table** — deliberately not a table. It is a frozen constant in `backend/src/services/plans.ts`, and it earns a table only when a customer needs limits nobody else has.
 - **An uploads table**, which is what would let `Form.pdfUrl` be verified against a file the organization actually uploaded ([`docs/BACKLOG.md`](../BACKLOG.md)).
 

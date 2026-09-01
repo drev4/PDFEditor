@@ -3,7 +3,7 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { app } from '../../src/app.js'
 import { prisma } from '../../src/services/db.js'
-import { grantSeats } from './helpers.js'
+import { createUser, grantSeats } from './helpers.js'
 
 /**
  * The invitation lifecycle ([`features/0010`]).
@@ -212,6 +212,114 @@ describe('invitations', () => {
         .send({ token })
 
       expect(res.status).toBe(401)
+    })
+  })
+
+  /**
+   * Accepting as somebody who **already has their own organization**
+   * (features/0023).
+   *
+   * The `existingUser()` helper above builds an account with no organization of
+   * its own, which is the case that used to be tested — and it is the one where
+   * a second membership never appears. A person who registered normally has a
+   * personal organization already, so accepting puts them in **two**, and until
+   * features/0023 nothing decided which one their requests acted in.
+   */
+  describe('accepting as a registered user, who then belongs to two', () => {
+    async function invitedRegisteredUser() {
+      const inviter = await ownerWithOrganization()
+      await prisma.form.create({
+        data: {
+          organizationId: inviter.organization.id,
+          createdByUserId: inviter.user.id,
+          title: 'A form of the inviting company',
+          shareId: `share-${Math.random().toString(36).slice(2, 11)}`,
+          status: 'draft'
+        }
+      })
+
+      // `createUser`, not `existingUser`: this account has a personal
+      // organization, exactly as a real one that signed up would.
+      const invitee = await createUser(email('registered-invitee'))
+      // And work of their own in it. Without this the read test passes for the
+      // wrong reason: a list merged across both organizations still has one
+      // entry when the personal one is empty.
+      await prisma.form.create({
+        data: {
+          organizationId: invitee.organization.id,
+          createdByUserId: invitee.user.id,
+          title: 'A form of their own',
+          shareId: `share-${Math.random().toString(36).slice(2, 11)}`,
+          status: 'draft'
+        }
+      })
+      const { token } = await invite(inviter.authHeader, invitee.user.email)
+
+      const accepted = await request(app)
+        .post('/api/organizations/invitations/accept')
+        .set('Authorization', invitee.authHeader)
+        .send({ token })
+
+      expect(accepted.status).toBe(200)
+      return { inviter, invitee }
+    }
+
+    it('is switched into the organization it just joined', async () => {
+      const { inviter, invitee } = await invitedRegisteredUser()
+
+      // Two memberships is fine and expected. What must not be ambiguous is
+      // which one their requests act in.
+      expect(await prisma.membership.count({ where: { userId: invitee.user.id } })).toBe(2)
+
+      const forms = await request(app).get('/api/forms').set('Authorization', invitee.authHeader)
+
+      expect(forms.status).toBe(200)
+      // One organization at a time. A merged list across two tenants is what
+      // made this defect invisible.
+      expect(forms.body.forms).toHaveLength(1)
+      expect(forms.body.forms[0].title).toBe('A form of the inviting company')
+    })
+
+    it('creates forms into the organization it is acting in, not the personal one', async () => {
+      const { inviter, invitee } = await invitedRegisteredUser()
+
+      const made = await request(app)
+        .post('/api/forms')
+        .set('Authorization', invitee.authHeader)
+        .send({ title: 'Made by the invitee' })
+
+      expect(made.status).toBe(201)
+      const stored = await prisma.form.findUniqueOrThrow({
+        where: { id: made.body.form.id },
+        select: { organizationId: true }
+      })
+
+      // The defect: this landed in their personal organization, where the
+      // company that invited them could never see it.
+      expect(stored.organizationId).toBe(inviter.organization.id)
+
+      const ownerSees = await request(app)
+        .get('/api/forms')
+        .set('Authorization', inviter.authHeader)
+      expect(ownerSees.body.forms.map((f: { title: string }) => f.title)).toContain(
+        'Made by the invitee'
+      )
+    })
+
+    it('is metered against the organization plan, not their personal free one', async () => {
+      const { inviter, invitee } = await invitedRegisteredUser()
+      await prisma.organization.update({
+        where: { id: inviter.organization.id },
+        data: { planKey: 'team' }
+      })
+
+      const entitlements = await request(app)
+        .get('/api/organizations/entitlements')
+        .set('Authorization', invitee.authHeader)
+
+      // Hitting Free's limits inside the account that paid for your seat is the
+      // most expensive shape of this bug.
+      expect(entitlements.body.plan.key).toBe('team')
     })
   })
 

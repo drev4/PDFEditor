@@ -5,7 +5,8 @@ import {
   type Member,
   type PendingInvitation,
   type CreatedInvitation,
-  type MembershipRole
+  type MembershipRole,
+  type OrganizationSummary
 } from '../services/organization'
 import { useAuthStore } from './auth.store'
 import { useAsyncAction } from '../composables/useAsyncAction'
@@ -13,6 +14,17 @@ import { useAsyncAction } from '../composables/useAsyncAction'
 export const useOrganizationStore = defineStore('organization', () => {
   const members = ref<Member[]>([])
   const invitations = ref<PendingInvitation[]>([])
+
+  /**
+   * The organizations this account belongs to, and the one it is acting in
+   * (features/0023).
+   *
+   * Here rather than in a store of its own: this store already owns members and
+   * the caller's role, and a second store for the same resource would be a
+   * second answer to "which organization am I in".
+   */
+  const organizations = ref<OrganizationSummary[]>([])
+  const activeOrganizationId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -50,6 +62,40 @@ export const useOrganizationStore = defineStore('organization', () => {
         }
       },
       { fallbackMessage: 'Could not load the organization' }
+    )
+  }
+
+  /** Loads the organization list. Cheap, and every signed-in screen wants it. */
+  async function loadOrganizations() {
+    return useAsyncAction(
+      { loading, error },
+      async () => {
+        const result = await organizationService.list()
+        organizations.value = result.organizations
+        activeOrganizationId.value = result.activeOrganizationId
+      },
+      { fallbackMessage: 'Could not load your organizations', skipLoading: true }
+    )
+  }
+
+  /**
+   * Switches organization.
+   *
+   * Everything on screen afterwards belongs to a different tenant, so the caller
+   * is expected to reload what it shows rather than leave stale numbers under a
+   * new name. This store clears its own members list for exactly that reason.
+   */
+  async function setActiveOrganization(organizationId: string) {
+    return useAsyncAction(
+      { loading, error },
+      async () => {
+        await organizationService.setActive(organizationId)
+        activeOrganizationId.value = organizationId
+        members.value = []
+        invitations.value = []
+        await load()
+      },
+      { fallbackMessage: 'Could not switch organization' }
     )
   }
 
@@ -104,9 +150,20 @@ export const useOrganizationStore = defineStore('organization', () => {
     lastCreatedInvitation.value = null
   }
 
+  const activeOrganization = computed(
+    () => organizations.value.find(o => o.id === activeOrganizationId.value) ?? null
+  )
+
+  /** A switcher with one entry is furniture, so the shell asks before drawing. */
+  const hasMultipleOrganizations = computed(() => organizations.value.length > 1)
+
   return {
     members,
     invitations,
+    organizations,
+    activeOrganizationId,
+    activeOrganization,
+    hasMultipleOrganizations,
     loading,
     error,
     lastCreatedInvitation,
@@ -114,6 +171,8 @@ export const useOrganizationStore = defineStore('organization', () => {
     canInvite,
     canManageMembers,
     load,
+    loadOrganizations,
+    setActiveOrganization,
     invite,
     revokeInvitation,
     changeRole,

@@ -21,6 +21,20 @@ model User {
   createdApiKeys ApiKey[]
   createdWebhookEndpoints WebhookEndpoint[]
 
+  /// Which organization this account is currently acting in (features/0023).
+  ///
+  /// **A cache of a choice, never a grant.** `requireMembership` uses it only to
+  /// *select* among memberships that already exist: if the caller no longer has
+  /// a live `Membership` here it is ignored and the oldest membership is used,
+  /// so removing somebody takes effect on their next request and a stale or
+  /// hand-edited value cannot reach anything. Nothing else in the codebase may
+  /// read it.
+  ///
+  /// `null` means "never chose", which is every account that has only ever
+  /// belonged to one organization — the common case, and not a broken state.
+  activeOrganizationId String?       @map("active_organization_id")
+  activeOrganization   Organization? @relation("ActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
+
   @@map("users")
 }
 
@@ -53,6 +67,10 @@ model Organization {
   forms       Form[]
   memberships Membership[]
   invitations Invitation[]
+  /// Back-relation for `User.activeOrganizationId`. `SetNull` on delete: the
+  /// account survives its organization disappearing and falls back to whatever
+  /// membership it has left.
+  activeForUsers User[]    @relation("ActiveOrganization")
   usageCounters UsageCounter[]
   subscription  Subscription?
   apiKeys       ApiKey[]
