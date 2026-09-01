@@ -1,0 +1,63 @@
+import dotenv from 'dotenv'
+import { installProcessGuards } from './process-guards.js'
+import { createEmbedWorker, isEmbedQueueEnabled } from './services/embed-queue.js'
+import { prisma } from './services/db.js'
+
+dotenv.config()
+
+/**
+ * The queue worker: the same image as the API with a different entrypoint
+ * (features/0017, goal 8).
+ *
+ * It imports `services/embed-queue.ts`, which imports `services/pdf-embed.ts`,
+ * which imports the PDF processor, the storage driver and Prisma - the same
+ * modules the API uses, not copies of them. A separate service with its own
+ * idea of what a PDF is would drift from the API's within one release.
+ *
+ * Run it with `npm run worker` (or `npm run worker:dev` while developing). It
+ * is needed **only** when `REDIS_URL` is set; without one the API embeds inline
+ * and there is nothing for a worker to do, which is why this exits immediately
+ * and loudly rather than idling and looking healthy.
+ */
+installProcessGuards('worker')
+
+async function main() {
+  if (!isEmbedQueueEnabled()) {
+    console.error(
+      '[worker] REDIS_URL is not set. Without it the API embeds PDFs inline and ' +
+      'this worker would have nothing to do; refusing to start rather than idle ' +
+      'and look healthy.'
+    )
+    process.exit(1)
+  }
+
+  const { close } = await createEmbedWorker()
+
+  // Startup and shutdown are logged distinctly on purpose (goal 10). A worker
+  // dying is otherwise invisible - no request fails, nothing 500s - so the two
+  // lines an operator greps for are these, and `docs/sot/08-operations.md` says
+  // what to do when the second one is missing.
+  console.log('[worker] pdf-embed worker started, waiting for jobs')
+
+  let closing = false
+  const shutdown = async (signal: string) => {
+    if (closing) return
+    closing = true
+
+    // `close()` lets the jobs already running finish (goal 11): a deploy in the
+    // middle of an embed must not abandon a half-rewritten document.
+    console.log(`[worker] ${signal} received, finishing jobs in flight`)
+    await close()
+    await prisma.$disconnect()
+    console.log('[worker] pdf-embed worker stopped')
+    process.exit(0)
+  }
+
+  process.on('SIGTERM', () => { void shutdown('SIGTERM') })
+  process.on('SIGINT', () => { void shutdown('SIGINT') })
+}
+
+main().catch(error => {
+  console.error('[worker] failed to start:', error)
+  process.exit(1)
+})

@@ -63,6 +63,31 @@ services:
       mc anonymous set none local/vuepdf-pdfs
       "
 
+  # The job queue's Redis (features/0017).
+  #
+  # **Nothing requires it**, exactly like the MinIO above. `REDIS_URL` unset
+  # means there is no queue and the PDF embed runs inline inside the request,
+  # which is what the application does by default and what all three test suites
+  # run on - they must not need a network. Start this only when working on the
+  # queued path, and remember that the queued path also needs a worker process
+  # (`npm run worker --workspace=backend`); with `REDIS_URL` set and no worker
+  # running, jobs pile up and no PDF is ever rewritten.
+  #
+  # No volume on purpose: a queue of embed jobs is not durable state worth
+  # keeping across a `docker compose down`. Every job is reconstructible - the
+  # fields live in PostgreSQL, and re-saving the form queues another one.
+  redis:
+    image: redis:7-alpine
+    container_name: vuepdf-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   minio_data:

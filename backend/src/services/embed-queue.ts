@@ -39,8 +39,15 @@ const QUEUE_NAME = 'pdf-embed'
  * Every key this feature writes lives under one prefix, so a Redis shared with
  * something else stays legible - and so a developer pointing `REDIS_URL` at a
  * Redis another project is already using cannot collide with it.
+ *
+ * Read per call rather than memoised into a constant, for the same reason the
+ * rate limits and `DEV_PLAN_KEY` are: a constant is fixed at import, which is
+ * before any test can set it, and `tests/integration/pdf-embed-queue.spec.ts`
+ * uses this to keep its keys out of whatever else the developer's Redis holds.
  */
-const PREFIX = process.env.REDIS_KEY_PREFIX?.trim() || 'vuepdf'
+function keyPrefix(): string {
+  return process.env.REDIS_KEY_PREFIX?.trim() || 'vuepdf'
+}
 
 export interface EmbedJobData {
   /**
@@ -90,7 +97,7 @@ async function embedQueue() {
       const connection = await connect()
       const { Queue } = await import('bullmq')
       return {
-        queue: new Queue<EmbedJobData>(QUEUE_NAME, { connection, prefix: PREFIX }),
+        queue: new Queue<EmbedJobData>(QUEUE_NAME, { connection, prefix: keyPrefix() }),
         connection
       }
     })().catch(error => {
@@ -143,6 +150,33 @@ export async function requestEmbed(formId: string): Promise<void> {
   }
 
   await embedInline(formId)
+}
+
+/**
+ * How much work is outstanding, or `null` when there is no queue.
+ *
+ * The number an operator wants: a backlog that only grows is what a dead worker
+ * looks like from the API's side, since nothing else about it fails
+ * (docs/sot/08-operations.md). Also what the queued-path spec waits on, so it
+ * asserts against a drained queue rather than against a timer.
+ */
+export async function embedQueueStatus(): Promise<{
+  waiting: number
+  active: number
+  delayed: number
+  failed: number
+} | null> {
+  if (!isEmbedQueueEnabled()) return null
+
+  const { queue } = await embedQueue()
+  const counts = await queue.getJobCounts('waiting', 'active', 'delayed', 'failed')
+
+  return {
+    waiting: counts.waiting ?? 0,
+    active: counts.active ?? 0,
+    delayed: counts.delayed ?? 0,
+    failed: counts.failed ?? 0
+  }
 }
 
 /* -------------------------------- the worker ------------------------------- */
@@ -209,7 +243,7 @@ async function withFormLock<T>(
   formId: string,
   work: () => Promise<T>
 ): Promise<T> {
-  const key = `${PREFIX}:embed-lock:${formId}`
+  const key = `${keyPrefix()}:embed-lock:${formId}`
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const deadline = Date.now() + LOCK_WAIT_MS
 
@@ -268,7 +302,7 @@ export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
     },
     {
       connection,
-      prefix: PREFIX,
+      prefix: keyPrefix(),
       concurrency: envInt('EMBED_WORKER_CONCURRENCY', 5)
     }
   )
