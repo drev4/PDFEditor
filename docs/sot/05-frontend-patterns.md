@@ -161,7 +161,7 @@ Instrument Sans and JetBrains Mono come from `@fontsource/*` and are bundled as 
 | `/dashboard`, `/dashboard/forms` | `FormsManagementView` | `AppShell` sidebar |
 | `/dashboard/responses` | `ResponsesIndexView` | `AppShell` sidebar |
 | `/dashboard/team` | `MembersView` | `AppShell` sidebar |
-| `/dashboard/settings` | `SettingsView` — **General** and **API keys** tabs, the tab in `?tab=` | `AppShell` sidebar |
+| `/dashboard/settings` | `SettingsView` — **General**, **API keys** and **Webhooks** tabs, the tab in `?tab=` | `AppShell` sidebar |
 | `/dashboard/forms/:id/responses` | `ResponsesView` | `AppShell` sidebar |
 | `/dashboard/editor` | `EditorView` | none — its own top bar and left rail |
 
@@ -183,7 +183,6 @@ Nobody should read the canvas as a description of the product. What is drawn and
 - **Seats are bought, so the SPA has no seat control.** There is no quantity field anywhere in this client, and there must not be: the customer sets the number in Stripe's portal, `Subscription.quantity` is only ever read back off the webhook, and this application never sends Stripe a quantity ([04-backend-patterns §10](./04-backend-patterns.md)). What the SPA does instead: the *Members* meter on Settings shows seats used against the **effective** limit the server resolved (`plan.seats`, which on Team is what was bought, not the catalogue floor), the Settings copy says where seats are bought and that lowering the number removes nobody, and a `402` from inviting opens `LimitReachedDialog` in its `limit="seats"` mode — the same "a limit is not a failure" treatment a publish limit gets, with *Add seats* opening the portal rather than an *Upgrade* that would sell a second subscription. `MembersView.vue` branches on `ApiError.status === 402`, never on the message.
 - **Purchase controls are owner-only, matching the API.** `POST /api/billing/*` answers `403` to anyone but an owner, so the UI reads the caller's role — through `organizationStore.currentRole`, the same way `MembersView.vue` does, never a second source — and shows a member the plan and the usage with no way to spend money. A button guaranteed to fail tells someone the product is broken when it is enforcing a rule.
 - **Returning from Checkout asserts nothing.** `?checkout=complete` on the Settings screen says activation is in progress and re-reads entitlements a few times; it never writes and never claims success on its own, because the redirect is a URL anyone can visit and a customer who closes the tab never visits it at all. The plan on screen is always the one the server reported.
-- **The `webhooks` tab.** The endpoints exist (`POST`/`GET`/`DELETE /api/organizations/webhooks`) and no screen reaches them, so an endpoint is still configured through the API alone. Its delivery log needs an endpoint of its own: the only one that exists, `GET /api/v1/webhooks/deliveries`, is authenticated by an API key, and a customer cannot be asked to mint a key in order to see whether their webhook works. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **The role semantics** on the `Members` artboard, which say a member sees "only the forms they created". `backend/src/routes/forms.ts` scopes forms to the organization and checks membership, not role. `MembersView.vue` therefore prints what the route guards actually enforce. Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 - **Responses and Settings as screens.** Both are in the navigation, because the navigation is the shape of the product and a hole in it is harder to read than an admitted gap. Both render `NotBuiltYet.vue`, which names what is missing and where it is tracked. **Neither renders an empty table or an invented number** — an empty table says "you have no data", which is a different and false claim. Settings does show the signed-in account, because that part is real.
 
@@ -203,6 +202,27 @@ Four things about it are load-bearing:
 - **`plan.hasApiAccess` chooses what is drawn; the server chooses what is allowed.** The flag hides the create form on a plan that would refuse it, and the `402` handler stays anyway — the plan can change between the page loading and the button being pressed. The panel branches on `ApiError.status`, never on a message.
 - **`403` and `402` are different screens.** An owner or admin without the plan sees the upgrade state; a plain member sees *ask an owner or admin*. Collapsing them sends the customer to the wrong place, and the panel does not even request a list the server would refuse.
 - **A revoked key keeps its row.** The server revokes rather than deletes, and the row plus its timestamp are the only record of when access stopped. `lastUsedAt` is rendered as relative time or *never used* and nothing finer, because it is written at most once a minute and its failures are swallowed.
+
+### Webhooks
+
+**Built** ([`features/0022`](../../features/0022-webhooks-screen.md)) — the third Settings tab, over what [`features/0020`](../../features/0020-outbound-webhooks.md) shipped without a screen. `services/webhooks.ts`, `stores/webhooks.store.ts` and `components/settings/WebhooksPanel.vue`, in the shape the API keys tab established.
+
+**Three refusals, and the screen keeps them apart.** This is the whole design of the panel, because collapsing any two of them sends the customer somewhere useless:
+
+| What is true | The API | What the screen says |
+|---|---|---|
+| No `REDIS_URL` or `WEBHOOK_SIGNING_KEY` | `deliverable: false`, `POST` → `503` | The **installation** cannot deliver. Not a plan, not a permission, nothing the customer can fix |
+| Plan without `hasApiAccess` | `POST` → `402` | Webhooks are part of Team |
+| Not owner or admin | every route → `403` | Ask an owner or admin |
+
+Four things that are load-bearing:
+
+- **The list is never hidden from someone allowed to read it**, and the undeliverable banner shows **with an empty list too** — that is precisely when somebody is about to configure an endpoint that would never fire.
+- **The plan does not gate the list.** Unlike the API keys tab, a downgraded organization still sees its endpoints, because `DELETE` keeps working without the plan so they can be turned off. Hiding them would leave live endpoints nobody can see.
+- **A disabled endpoint offers Re-enable.** The queue disables one after ten consecutive failures and, before `PATCH /webhooks/:id` existed, nothing could switch it back on — so the only recovery was delete-and-recreate, which mints a new secret and breaks the receiver already deployed.
+- **Deleting says what it destroys first.** The delivery history cascades with the endpoint, and the secret is unrecoverable, so the row asks before it goes.
+
+`consecutiveFailures` is rendered as *failures since the last success*, never as a total: the queue zeroes it on any successful delivery, and a `0` read as "this has never failed" would contradict the log directly below it.
 
 ### Plan and usage
 

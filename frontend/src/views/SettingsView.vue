@@ -215,7 +215,9 @@
       </NotBuiltYet>
       </template>
 
-      <ApiKeysPanel v-else class="mt-5" />
+      <ApiKeysPanel v-else-if="activeTab === 'api-keys'" class="mt-5" />
+
+      <WebhooksPanel v-else class="mt-5" />
     </div>
   </AppShell>
 </template>
@@ -228,6 +230,7 @@ import AppShell from '@/layouts/AppShell.vue'
 import NotBuiltYet from '@/components/ui/NotBuiltYet.vue'
 import UsageMeter from '@/components/plan/UsageMeter.vue'
 import ApiKeysPanel from '@/components/settings/ApiKeysPanel.vue'
+import WebhooksPanel from '@/components/settings/WebhooksPanel.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlanStore } from '@/stores/plan.store'
 import { useOrganizationStore } from '@/stores/organization.store'
@@ -249,14 +252,18 @@ const router = useRouter()
  */
 const tabs = [
   { id: 'general', label: 'General' },
-  { id: 'api-keys', label: 'API keys' }
+  { id: 'api-keys', label: 'API keys' },
+  { id: 'webhooks', label: 'Webhooks' }
 ] as const
 
 type TabId = (typeof tabs)[number]['id']
 
-const activeTab = computed<TabId>(() =>
-  route.query.tab === 'api-keys' ? 'api-keys' : 'general'
-)
+const activeTab = computed<TabId>(() => {
+  const requested = route.query.tab
+  const match = tabs.find(tab => tab.id === requested)
+  // An unknown `?tab=` falls back to General rather than rendering nothing.
+  return match ? match.id : 'general'
+})
 
 function selectTab(tab: TabId) {
   if (tab === activeTab.value) return

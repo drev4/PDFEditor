@@ -146,6 +146,25 @@ test.describe('The shell', () => {
     await expect(page.locator('[data-testid="api-keys-table"]')).toContainText('E2E integration');
   });
 
+  // The webhooks tab (features/0022). This suite pins `REDIS_URL: ''`, so the
+  // state it actually has is the one where the deployment cannot deliver — and
+  // that is what gets asserted, rather than changing the pin to make a happier
+  // test pass. The delivering path needs a real Redis and a worker; the plan and
+  // permission refusals are in WebhooksPanel.spec.ts, which can choose both.
+  test('the webhooks tab says when the deployment cannot deliver', async ({ page }) => {
+    await page.goto('/dashboard/settings');
+
+    await page.locator('[data-testid="settings-tab-webhooks"]').click();
+
+    await expect(page).toHaveURL(/tab=webhooks/);
+    await expect(page.locator('[data-testid="webhooks-undeliverable"]')).toBeVisible();
+    // Nothing to configure with, because nothing would be sent — but this is a
+    // server setting, so it must not be dressed up as a plan or a permission.
+    await expect(page.locator('[data-testid="create-webhook-form"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="webhooks-upgrade"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="webhooks-forbidden"]')).toHaveCount(0);
+  });
+
   // The editor is its own route now, and its rail is part of the screen rather
   // than something that appears once a document is open.
   test('the editor is its own screen and always has its rail', async ({ page }) => {

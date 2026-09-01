@@ -175,6 +175,238 @@ describe('webhook endpoint management', () => {
     })
   })
 
+  /**
+   * Re-enabling a disabled endpoint (features/0022).
+   *
+   * The queue switches an endpoint off after ten consecutive failures and,
+   * before this, nothing could switch it back on: `disabledAt` was written in
+   * two places and cleared in none. What these assert is the narrowness — it
+   * clears three columns and touches nothing else.
+   */
+  describe('re-enabling a disabled endpoint', () => {
+    async function createDisabled() {
+      const created = await create({ url: 'https://example.com/hook' })
+      const id = created.body.webhook.id as string
+
+      await prisma.webhookEndpoint.update({
+        where: { id },
+        data: {
+          disabledAt: new Date(),
+          consecutiveFailures: 10,
+          lastError: 'connect ETIMEDOUT'
+        }
+      })
+
+      return id
+    }
+
+    function reenable(id: string, auth = owner.authHeader) {
+      return request(app).patch(`/api/organizations/webhooks/${id}`).set('Authorization', auth)
+    }
+
+    it('clears the three failure columns and nothing else', async () => {
+      const id = await createDisabled()
+      const before = await prisma.webhookEndpoint.findFirstOrThrow({ where: { id } })
+
+      const response = await reenable(id)
+
+      expect(response.status).toBe(200)
+      expect(response.body.webhook).toMatchObject({
+        id,
+        disabledAt: null,
+        lastError: null,
+        consecutiveFailures: 0
+      })
+
+      const after = await prisma.webhookEndpoint.findFirstOrThrow({ where: { id } })
+      expect(after.disabledAt).toBeNull()
+      expect(after.consecutiveFailures).toBe(0)
+      expect(after.lastError).toBeNull()
+      // The identity of the endpoint is untouched: same URL, same events, and
+      // above all the **same secret** — which is the whole reason this exists
+      // rather than delete-and-recreate.
+      expect(after.url).toBe(before.url)
+      expect(after.events).toEqual(before.events)
+      expect(after.secret).toBe(before.secret)
+    })
+
+    it('resets the counter even when the endpoint was not disabled', async () => {
+      const created = await create({ url: 'https://example.com/hook' })
+      const id = created.body.webhook.id as string
+      await prisma.webhookEndpoint.update({
+        where: { id },
+        data: { consecutiveFailures: 3, lastError: 'connect ETIMEDOUT' }
+      })
+
+      expect((await reenable(id)).status).toBe(200)
+
+      const after = await prisma.webhookEndpoint.findFirstOrThrow({ where: { id } })
+      expect(after.consecutiveFailures).toBe(0)
+    })
+
+    it('never returns the secret', async () => {
+      const id = await createDisabled()
+
+      const response = await reenable(id)
+
+      expect(response.body.webhook).not.toHaveProperty('secret')
+    })
+
+    it('accepts no url and no events', async () => {
+      const id = await createDisabled()
+
+      await request(app)
+        .patch(`/api/organizations/webhooks/${id}`)
+        .set('Authorization', owner.authHeader)
+        .send({ url: 'https://attacker.example.com/hook', events: ['response.created'] })
+
+      const after = await prisma.webhookEndpoint.findFirstOrThrow({ where: { id } })
+      // A body is ignored rather than applied. Re-pointing an endpoint under an
+      // existing secret is a different feature; this one only revives.
+      expect(after.url).toBe('https://example.com/hook')
+    })
+
+    it('refuses when the stored URL no longer resolves to somewhere public', async () => {
+      const id = await createDisabled()
+      // DNS moves. A hostname that was public when it was configured can point
+      // inside this network today, which is why the check is re-run here and
+      // not only at configuration.
+      await prisma.webhookEndpoint.update({
+        where: { id },
+        data: { url: 'https://localhost/hook' }
+      })
+
+      const response = await reenable(id)
+
+      expect(response.status).toBe(400)
+      const after = await prisma.webhookEndpoint.findFirstOrThrow({ where: { id } })
+      expect(after.disabledAt).not.toBeNull()
+    })
+
+    it('answers 503 when the deployment cannot deliver', async () => {
+      const id = await createDisabled()
+      // Unlike DELETE, this turns delivery **on**, so it needs the thing that
+      // does the delivering.
+      vi.stubEnv('REDIS_URL', '')
+
+      expect((await reenable(id)).status).toBe(503)
+    })
+
+    it('answers 402 when the plan no longer includes the API', async () => {
+      const id = await createDisabled()
+      await setPlan(owner.organization.id, 'free')
+
+      expect((await reenable(id)).status).toBe(402)
+    })
+
+    it('answers 403 to a member', async () => {
+      const id = await createDisabled()
+      const member = await createUser()
+      await prisma.membership.updateMany({
+        where: { userId: member.user.id },
+        data: { organizationId: owner.organization.id, role: 'member' }
+      })
+
+      expect((await reenable(id, member.authHeader)).status).toBe(403)
+    })
+
+    it('does not let one organization re-enable another\'s endpoint', async () => {
+      const id = await createDisabled()
+      const stranger = await createUser()
+      await setPlan(stranger.organization.id, 'team')
+
+      expect((await reenable(id, stranger.authHeader)).status).toBe(404)
+
+      const after = await prisma.webhookEndpoint.findFirstOrThrow({ where: { id } })
+      expect(after.disabledAt).not.toBeNull()
+    })
+  })
+
+  /**
+   * The delivery log on the session API (features/0022) — the same history as
+   * `GET /api/v1/webhooks/deliveries`, for somebody looking at a screen instead
+   * of an integration holding a key.
+   */
+  describe('the delivery log a person can read', () => {
+    async function createWithDelivery() {
+      const created = await create({ url: 'https://example.com/hook' })
+      const id = created.body.webhook.id as string
+
+      await prisma.webhookDelivery.create({
+        data: {
+          endpointId: id,
+          eventId: 'evt_1',
+          eventType: 'response.created',
+          attempt: 1,
+          status: 500,
+          durationMs: 42,
+          succeeded: false,
+          error: 'HTTP 500'
+        }
+      })
+
+      return id
+    }
+
+    function deliveries(id: string, auth = owner.authHeader) {
+      return request(app)
+        .get(`/api/organizations/webhooks/${id}/deliveries`)
+        .set('Authorization', auth)
+    }
+
+    it('returns the attempts, newest first, and no payload body', async () => {
+      const id = await createWithDelivery()
+
+      const response = await deliveries(id)
+
+      expect(response.status).toBe(200)
+      expect(response.body.deliveries).toHaveLength(1)
+      expect(response.body.deliveries[0]).toMatchObject({
+        eventType: 'response.created',
+        attempt: 1,
+        status: 500,
+        succeeded: false
+      })
+      // There is no body stored and none to return: it carries the answers a
+      // member of the public typed, and a log holding them would outlive the
+      // form they came from.
+      expect(response.body.deliveries[0]).not.toHaveProperty('payload')
+      expect(response.body.deliveries[0]).not.toHaveProperty('body')
+    })
+
+    it('is readable when the deployment can no longer deliver', async () => {
+      const id = await createWithDelivery()
+      // Seeing the history is how somebody diagnoses why nothing is arriving,
+      // so it must not need the thing that is missing.
+      vi.stubEnv('REDIS_URL', '')
+      vi.stubEnv('WEBHOOK_SIGNING_KEY', '')
+
+      expect((await deliveries(id)).status).toBe(200)
+    })
+
+    it('does not show one organization another\'s deliveries', async () => {
+      const id = await createWithDelivery()
+      const stranger = await createUser()
+      await setPlan(stranger.organization.id, 'team')
+
+      const response = await deliveries(id, stranger.authHeader)
+
+      expect(response.status).toBe(404)
+      expect(response.body).not.toHaveProperty('deliveries')
+    })
+
+    it('answers 403 to a member', async () => {
+      const id = await createWithDelivery()
+      const member = await createUser()
+      await prisma.membership.updateMany({
+        where: { userId: member.user.id },
+        data: { organizationId: owner.organization.id, role: 'member' }
+      })
+
+      expect((await deliveries(id, member.authHeader)).status).toBe(403)
+    })
+  })
+
   describe('the signature a customer verifies', () => {
     it('is an HMAC over `<timestamp>.<raw body>`, verifiable independently', () => {
       const secret = 'whsec_example'

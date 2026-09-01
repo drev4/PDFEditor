@@ -596,6 +596,77 @@ organizationsRouter.get('/webhooks', authenticate, async (req: AuthRequest, res,
   }
 })
 
+/**
+ * GET /api/organizations/webhooks/:id/deliveries - owner or admin.
+ *
+ * The same log as `GET /api/v1/webhooks/deliveries`, for the other audience
+ * (features/0022). That one answers an integration asking *did you send me
+ * everything?* and is authenticated by an API key; this one answers a person
+ * looking at a screen asking *is my endpoint working?*, and requiring them to
+ * mint an API key to find that out would be absurd.
+ *
+ * **This one is internal.** `/api/v1` is a contract; this lives under
+ * `/api/organizations` and may change shape whenever the screen needs it to.
+ *
+ * No plan check and no queue check: history is readable on a deployment that
+ * can no longer deliver, and that is exactly when somebody is reading it.
+ */
+const DELIVERIES_DEFAULT_LIMIT = 50
+const DELIVERIES_MAX_LIMIT = 200
+
+organizationsRouter.get(
+  '/webhooks/:id/deliveries',
+  authenticate,
+  async (req: AuthRequest, res, next) => {
+    try {
+      const { organizationId } = await requireRole(req, ['owner', 'admin'])
+      const id = req.params.id as string
+
+      const requested = Number.parseInt(String(req.query.limit ?? ''), 10)
+      const limit =
+        Number.isInteger(requested) && requested > 0
+          ? Math.min(requested, DELIVERIES_MAX_LIMIT)
+          : DELIVERIES_DEFAULT_LIMIT
+
+      // Scoped through the endpoint's organization, in the `where` and not
+      // afterwards - another tenant's endpoint id is a 404 and its deliveries
+      // are never read (docs/sot/04-backend-patterns.md §9).
+      const endpoint = await prisma.webhookEndpoint.findFirst({
+        where: { id, organizationId },
+        select: { id: true }
+      })
+
+      if (!endpoint) throw new AppError(404, 'Webhook endpoint not found')
+
+      const deliveries = await prisma.webhookDelivery.findMany({
+        where: { endpointId: endpoint.id },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        // Exactly the columns `routes/v1/webhooks.ts` selects. **No payload
+        // body**, because there is none stored: `response.created` carries the
+        // answers a member of the public typed, and a log holding them would be
+        // a second copy of respondent personal data outliving the form it came
+        // from (see schema.prisma).
+        select: {
+          id: true,
+          eventId: true,
+          eventType: true,
+          attempt: true,
+          status: true,
+          durationMs: true,
+          succeeded: true,
+          error: true,
+          createdAt: true
+        }
+      })
+
+      res.json({ deliveries })
+    } catch (error) {
+      next(error)
+    }
+  }
+)
+
 // POST /api/organizations/webhooks - owner or admin. Returns the secret ONCE.
 organizationsRouter.post('/webhooks', authenticate, async (req: AuthRequest, res, next) => {
   try {
@@ -633,6 +704,60 @@ organizationsRouter.post('/webhooks', authenticate, async (req: AuthRequest, res
     })
 
     res.status(201).json({ webhook: { ...endpoint, secret } })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/**
+ * PATCH /api/organizations/webhooks/:id - owner or admin. Re-enables it.
+ *
+ * `services/webhook-queue.ts` switches an endpoint off after ten consecutive
+ * failures, which is right - a dead endpoint should not be retried for ever -
+ * and until this existed nothing could switch it back on (features/0022).
+ * `disabledAt` was written in two places and cleared in none, so recovery meant
+ * delete-and-recreate, which mints a **new secret** and breaks the receiver the
+ * customer already deployed.
+ *
+ * **It takes no body.** Not a general update endpoint: changing the URL under an
+ * existing secret is a different feature with its own decision, and the narrow
+ * version cannot become an SSRF vector by accident.
+ *
+ * Note which guards apply and why they differ from `DELETE`. Re-enabling turns
+ * delivery **on**, so it needs the queue and the plan; deleting turns it off and
+ * must keep working on a downgraded or unconfigured deployment.
+ */
+organizationsRouter.patch('/webhooks/:id', authenticate, async (req: AuthRequest, res, next) => {
+  try {
+    const { organizationId } = await requireRole(req, ['owner', 'admin'])
+    const id = req.params.id as string
+
+    assertWebhooksConfigured()
+    await assertHasApiAccess(organizationId)
+
+    const endpoint = await prisma.webhookEndpoint.findFirst({
+      where: { id, organizationId },
+      select: { id: true, url: true }
+    })
+
+    if (!endpoint) throw new AppError(404, 'Webhook endpoint not found')
+
+    // The stored URL, re-checked. A hostname that was public when it was
+    // configured can resolve inside this network today, and the argument
+    // features/0020 makes is that this check belongs at every point where
+    // delivery becomes possible - not only at configuration.
+    await assertDeliverableUrl(endpoint.url)
+
+    const updated = await prisma.webhookEndpoint.update({
+      where: { id: endpoint.id },
+      // Three columns, and only these three. `consecutiveFailures` is reset
+      // because it counts failures *since the last success*, and leaving it at
+      // ten would disable the endpoint again on the very next failure.
+      data: { disabledAt: null, consecutiveFailures: 0, lastError: null },
+      select: webhookSelect
+    })
+
+    res.json({ webhook: updated })
   } catch (error) {
     next(error)
   }
