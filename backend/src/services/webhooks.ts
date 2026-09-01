@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { AppError } from '../middleware/errorHandler.js'
+import { logger } from './logger.js'
 
 /**
  * Webhook endpoints: their secrets, and the signature a customer verifies
@@ -65,7 +66,7 @@ export function signingKey(): Buffer | null {
     // Logged rather than thrown, and treated as absent: a typo in an
     // environment variable must not take the API down, and the caller turns
     // this into a 503 that names the variable.
-    console.error(
+    logger.error(
       `WEBHOOK_SIGNING_KEY must be ${KEY_BYTES} bytes of base64 (got ${key.length}); webhooks are disabled`
     )
     return null

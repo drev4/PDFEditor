@@ -1,5 +1,6 @@
 import { PDFDocument, PDFField, PDFForm, PDFPage, rgb } from 'pdf-lib'
 import type { FieldType } from '@prisma/client'
+import { logger } from './logger.js'
 
 /**
  * Represents a field extracted from or to be embedded in a PDF
@@ -41,7 +42,7 @@ export class PDFProcessor {
       await PDFDocument.load(pdfBuffer, { ignoreEncryption: true })
       return true
     } catch (error) {
-      console.error('PDF validation failed:', error)
+      logger.error({ err: error }, 'PDF validation failed')
       return false
     }
   }
@@ -60,7 +61,7 @@ export class PDFProcessor {
       const pages = pdfDoc.getPages()
       const scale = this.DEFAULT_SCALE
 
-      console.log(`PDF loaded, found ${fields.length} form fields`)
+      logger.info(`PDF loaded, found ${fields.length} form fields`)
 
       const extractedFields: ExtractedField[] = []
 
@@ -69,7 +70,7 @@ export class PDFProcessor {
         const fieldType = this.getFieldType(field)
 
         if (!fieldType) {
-          console.warn(`  -> Field "${fieldName}" has unrecognized type, skipping`)
+          logger.warn(`  -> Field "${fieldName}" has unrecognized type, skipping`)
           continue
         }
 
@@ -147,10 +148,10 @@ export class PDFProcessor {
         }
       }
 
-      console.log(`✓ Extracted ${extractedFields.length} fields from PDF`)
+      logger.info(`✓ Extracted ${extractedFields.length} fields from PDF`)
       return extractedFields
     } catch (error) {
-      console.error('Error extracting fields from PDF:', error)
+      logger.error({ err: error }, 'Error extracting fields from PDF')
       throw new Error('Failed to extract fields from PDF')
     }
   }
@@ -169,14 +170,14 @@ export class PDFProcessor {
       const pages = pdfDoc.getPages()
       const scale = this.DEFAULT_SCALE
 
-      console.log(`Embedding ${fields.length} fields into PDF`)
+      logger.info(`Embedding ${fields.length} fields into PDF`)
 
       for (const field of fields) {
         const pageIndex = field.position.page - 1
         const page = pages[pageIndex]
 
         if (!page) {
-          console.warn(`  -> Page ${field.position.page} not found for field "${field.name}", skipping`)
+          logger.warn(`  -> Page ${field.position.page} not found for field "${field.name}", skipping`)
           continue
         }
 
@@ -184,7 +185,7 @@ export class PDFProcessor {
         try {
           const existingField = form.getFieldMaybe(field.name)
           if (existingField) {
-            console.log(`  -> Removing existing field "${field.name}" before recreating`)
+            logger.info(`  -> Removing existing field "${field.name}" before recreating`)
             form.removeField(existingField)
           }
         } catch (e) {
@@ -203,11 +204,11 @@ export class PDFProcessor {
       }
 
       const pdfBytes = await pdfDoc.save()
-      console.log(`✓ Successfully embedded ${fields.length} fields into PDF`)
+      logger.info(`✓ Successfully embedded ${fields.length} fields into PDF`)
 
       return Buffer.from(pdfBytes)
     } catch (error) {
-      console.error('Error embedding fields in PDF:', error)
+      logger.error({ err: error }, 'Error embedding fields in PDF')
       throw new Error('Failed to embed fields in PDF')
     }
   }
@@ -344,10 +345,10 @@ export class PDFProcessor {
         }
 
         default:
-          console.warn(`  -> Unsupported field type: ${field.type}`)
+          logger.warn(`  -> Unsupported field type: ${field.type}`)
       }
     } catch (error) {
-      console.error(`  -> Error adding field "${field.name}" of type ${field.type}:`, error)
+      logger.error({ err: error }, `  -> Error adding field "${field.name}" of type ${field.type}`)
       // Continue with other fields even if one fails
     }
   }

@@ -14,6 +14,7 @@ import { organizationsRouter } from './routes/organizations.js'
 import { billingRouter, webhookRouter } from './routes/billing.js'
 import { v1Router } from './routes/v1/index.js'
 import { errorHandler } from './middleware/errorHandler.js'
+import { requestLog } from './middleware/requestLog.js'
 import { envBool, envInt } from './config/env.js'
 import { pdfFilenameFrom, verifyPdfToken } from './services/pdf-url.js'
 import { pdfStorage } from './services/pdf-storage.js'
@@ -95,6 +96,11 @@ app.use(express.json())
 // routes read it; everything else authenticates with a Bearer header.
 app.use(cookieParser())
 
+// A request id on every line from here on, and one completion line per request
+// (features/0025). After the parsers so a handler's own logging is a child of
+// this, and before the routes so every one of them has `req.log`.
+app.use(requestLog)
+
 // Uploaded PDFs. This used to be `express.static('/uploads')`, which made every
 // PDF any customer had ever uploaded fetchable forever by anyone holding the URL
 // — no token, no expiry, no way to withdraw access once a link leaked into a
@@ -121,7 +127,7 @@ app.get('/uploads/pdfs/:token/:filename', async (req, res) => {
     // Logged in full here, and described to nobody: which provider, bucket or
     // credential failed is useful to an attacker and useless to a respondent,
     // who can only try again.
-    console.error('Failed to serve an uploaded PDF:', error)
+    req.log.error({ err: error }, 'Failed to serve an uploaded PDF')
     return res.status(500).json({ error: 'Unable to read this file right now.' })
   }
 })

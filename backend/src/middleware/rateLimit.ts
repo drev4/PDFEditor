@@ -4,6 +4,7 @@ import { RedisStore } from 'rate-limit-redis'
 import { envInt } from '../config/env.js'
 import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from '../services/redis.js'
 import type { ApiKeyRequest } from './apiKeyAuth.js'
+import { logger } from '../services/logger.js'
 
 // Rate limiters for the unauthenticated write paths. These are the whole of the
 // external attack surface that costs an attacker nothing: credential stuffing
@@ -241,7 +242,7 @@ let announced = false
 function announceStore(description: string): void {
   if (announced) return
   announced = true
-  console.log(`Rate limiting is counting in ${description}`)
+  logger.info(`Rate limiting is counting in ${description}`)
 }
 
 function createLimiter(name: LimiterName): RequestHandler {

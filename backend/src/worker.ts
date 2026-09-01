@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'
+import { logger } from './services/logger.js'
 import { installProcessGuards } from './process-guards.js'
 import { createEmbedWorker, isEmbedQueueEnabled } from './services/embed-queue.js'
 import { createWebhookWorker, isWebhookQueueEnabled } from './services/webhook-queue.js'
@@ -24,7 +25,7 @@ installProcessGuards('worker')
 
 async function main() {
   if (!isEmbedQueueEnabled()) {
-    console.error(
+    logger.error(
       '[worker] REDIS_URL is not set. Without it the API embeds PDFs inline and ' +
       'this worker would have nothing to do; refusing to start rather than idle ' +
       'and look healthy.'
@@ -40,7 +41,7 @@ async function main() {
   // and saying so at startup is better than one failed job per event.
   const webhooks = isWebhookQueueEnabled() ? await createWebhookWorker() : null
   if (!webhooks) {
-    console.warn(
+    logger.warn(
       '[worker] webhook delivery is OFF: WEBHOOK_SIGNING_KEY is not set. ' +
       'PDF embedding still runs.'
     )
@@ -54,7 +55,7 @@ async function main() {
   // dying is otherwise invisible - no request fails, nothing 500s - so the two
   // lines an operator greps for are these, and `docs/sot/08-operations.md` says
   // what to do when the second one is missing.
-  console.log(
+  logger.info(
     webhooks
       ? '[worker] started, waiting for jobs (pdf-embed + webhook-delivery)'
       : '[worker] started, waiting for jobs (pdf-embed only)'
@@ -67,10 +68,10 @@ async function main() {
 
     // `close()` lets the jobs already running finish (goal 11): a deploy in the
     // middle of an embed must not abandon a half-rewritten document.
-    console.log(`[worker] ${signal} received, finishing jobs in flight`)
+    logger.info({ signal }, `[worker] ${signal} received, finishing jobs in flight`)
     await close()
     await prisma.$disconnect()
-    console.log('[worker] stopped')
+    logger.info('[worker] stopped')
 
     // **No `process.exit(0)` here**, and that is not tidiness. When stdout is a
     // file or a pipe - which is what it is under any process manager - Node
@@ -84,7 +85,7 @@ async function main() {
     // `unref`d, so it cannot itself keep the process alive - it only fires if
     // something else already did.
     setTimeout(() => {
-      console.error('[worker] still alive 10s after shutdown; forcing exit')
+      logger.error('[worker] still alive 10s after shutdown; forcing exit')
       process.exit(1)
     }, 10_000).unref()
   }
@@ -94,6 +95,6 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error('[worker] failed to start:', error)
+  logger.error({ err: error }, '[worker] failed to start')
   process.exit(1)
 })

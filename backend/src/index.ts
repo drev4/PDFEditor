@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { app } from './app.js'
 import { installProcessGuards } from './process-guards.js'
+import { logger } from './services/logger.js'
 import { closeEmbedQueue, isEmbedQueueEnabled } from './services/embed-queue.js'
 
 dotenv.config()
@@ -10,12 +11,12 @@ installProcessGuards('api')
 const PORT = process.env.PORT || 3000
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`)
-  console.log(`📋 Health check: http://localhost:${PORT}/health`)
-  console.log(
+  logger.info({ port: PORT }, `Server running on http://localhost:${PORT}`)
+  logger.info(
+    { queued: isEmbedQueueEnabled() },
     isEmbedQueueEnabled()
-      ? '📦 PDF embedding is QUEUED (REDIS_URL is set) - a worker must be running'
-      : '📦 PDF embedding runs INLINE (REDIS_URL is unset)'
+      ? 'PDF embedding is QUEUED (REDIS_URL is set) - a worker must be running'
+      : 'PDF embedding runs INLINE (REDIS_URL is unset)'
   )
 })
 
@@ -25,7 +26,7 @@ const server = app.listen(PORT, () => {
  * kills it harder. Close both.
  */
 async function shutdown(signal: string) {
-  console.log(`[api] ${signal} received, shutting down`)
+  logger.info({ signal }, `[api] ${signal} received, shutting down`)
   server.close()
   await closeEmbedQueue()
 }

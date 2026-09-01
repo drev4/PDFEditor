@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { ZodError } from 'zod'
+import { logger } from '../services/logger.js'
 
 export class AppError extends Error {
   constructor(
@@ -22,21 +23,37 @@ export class AppError extends Error {
  * something had gone wrong. Anything that logs a fault when nothing is wrong
  * trains you to ignore the log, which is where the real fault will appear.
  *
- * So: 5xx is logged with its stack; 4xx is not logged at all. It is not lost
- * information — it is in the response the client received. When structured
- * logging arrives (S9 in docs/BACKLOG.md) 4xx belongs at `info` with a request
- * id, which is a thing this console cannot express.
+ * So: 5xx is logged at `error` with its stack; 4xx is logged at `info`, with no
+ * stack, because it is not a fault — it is the API answering correctly, and the
+ * client already has the answer.
+ *
+ * **That split is what features/0025 was waiting for.** Until there was a logger
+ * with levels and a request id, the only way to stop 4xx drowning the output was
+ * to drop it entirely, and this comment said so. It is no longer dropped: it is
+ * one `info` line carrying the same request id as everything else that request
+ * did, which is what makes "what happened to our submission at 14:32" a question
+ * with an answer.
  */
 export function errorHandler(
   err: Error,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ) {
   const isExpectedClientError = err instanceof AppError && err.statusCode < 500
+  // `req.log` when the request reached `requestLog` — which is every route, but
+  // not an error thrown before the middleware runs.
+  const log = req.log ?? logger
 
-  if (!isExpectedClientError) {
-    console.error('Error:', err)
+  if (isExpectedClientError) {
+    log.info(
+      { status: (err as AppError).statusCode, error: err.message },
+      'request refused'
+    )
+  } else {
+    // The stack, and only here. A 4xx printing one is what taught everybody to
+    // ignore this output.
+    log.error({ err }, 'request failed')
   }
 
   if (err instanceof AppError) {

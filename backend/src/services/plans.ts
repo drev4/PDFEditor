@@ -1,3 +1,4 @@
+import { logger } from './logger.js'
 /**
  * The plan catalogue.
  *
@@ -171,7 +172,7 @@ export function resolvePlan(planKey: string): Readonly<Plan> {
   const plan = (PLANS as Record<string, Readonly<Plan>>)[planKey]
 
   if (!plan) {
-    console.warn(
+    logger.warn(
       `Unknown planKey="${planKey}"; falling back to "${DEFAULT_PLAN_KEY}"`
     )
     return PLANS[DEFAULT_PLAN_KEY]

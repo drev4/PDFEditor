@@ -6,6 +6,7 @@ import { compilePattern } from '../services/pattern-validator.js'
 import { responseRateLimit } from '../middleware/rateLimit.js'
 import { assertResponseWithinLimit } from '../services/entitlements.js'
 import { queueResponseCreated } from '../services/webhook-queue.js'
+import { logger } from '../services/logger.js'
 
 export const responsesRouter = Router()
 
@@ -112,7 +113,7 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
               // engine must not backtrack, and an unusable pattern must not throw.
               const regex = compilePattern(validation.pattern)
               if (!regex) {
-                console.warn(
+                logger.warn(
                   `Ignoring unusable pattern on field ${field.id} of form ${formId}: ` +
                   `${JSON.stringify(validation.pattern)}`
                 )
@@ -141,7 +142,7 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
     const formFieldIds = new Set(form.fields.map(f => f.id))
     const validAnswerEntries = Object.entries(answers).filter(([fieldId]) => {
       const isValid = formFieldIds.has(fieldId)
-      if (!isValid) console.warn(`Skipping invalid fieldId in response: ${fieldId}`)
+      if (!isValid) logger.warn(`Skipping invalid fieldId in response: ${fieldId}`)
       return isValid
     })
 
@@ -215,7 +216,7 @@ responsesRouter.post('/', responseRateLimit, async (req: Request, res, next) => 
       // a fault every time a free form fills up — the exact noise
       // `middleware/errorHandler.ts` exists to keep out of the log.
       if (!(prismaError instanceof AppError)) {
-        console.error('Prisma Error creating response:', prismaError)
+        logger.error({ err: prismaError }, 'Prisma Error creating response')
       }
       throw prismaError // Will be caught by errorHandler
     }

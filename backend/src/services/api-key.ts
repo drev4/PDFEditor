@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { prisma } from './db.js'
+import { logger } from './logger.js'
 
 /**
  * API keys: the one credential in this product that authenticates an
@@ -187,6 +188,6 @@ export async function touchApiKey(id: string, lastUsedAt: Date | null): Promise<
   try {
     await prisma.apiKey.update({ where: { id }, data: { lastUsedAt: new Date() } })
   } catch (error) {
-    console.error('Could not record API key usage:', error)
+    logger.error({ err: error }, 'Could not record API key usage')
   }
 }

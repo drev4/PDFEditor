@@ -43,6 +43,7 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `RATE_LIMIT_REFRESH_MAX` | no | `60` | Session refreshes per window per IP |
 | `RATE_LIMIT_REFRESH_WINDOW_MS` | no | `900000` (15 min) | |
 | `PORT` | no | `3000` | |
+| `LOG_LEVEL` | no | `info` (`silent` under `NODE_ENV=test`) | `pino`'s level ([`features/0025`](../../features/0025-structured-logging.md)). `NODE_ENV=development` also switches the output to human-readable; anything else is one JSON object per line — see [Observability](#observability) |
 | `NODE_ENV` | no | — | Sets Prisma's query logging (`services/db.ts`), and **gates `DEV_PLAN_KEY` below**. That gate is an allowlist, so an unset or unexpected value is the safe case |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
@@ -306,15 +307,24 @@ What CI still does not do:
 
 ## Observability
 
-Currently: `console.log`, `console.warn` and `console.error` to stdout, plus a `/health` endpoint returning `{status, timestamp}`.
+**Structured logging is built** ([`features/0025`](../../features/0025-structured-logging.md)). `pino`, one JSON object per line on **stdout** — every level, including errors: splitting severities across two streams is a console habit that forces a collector to re-merge one stream of events by timestamp. `services/logger.ts` is the only module that constructs a logger; inside a request, handlers use `req.log`, which carries that request's id. Plus a `/health` endpoint returning `{status, timestamp}`.
 
-**What the error handler logs, and why it is a subset.** `middleware/errorHandler.ts` logs a stack trace for 5xx and for any error that is not an `AppError`; it logs **nothing** for a 4xx. A 4xx is the API answering correctly — the client asked for something it may not have — and it is already reported in the response. This is not fastidiousness: opening the login page with no session calls `POST /api/auth/refresh`, which correctly answers `401 Not authenticated`, and that printed a stack trace on every anonymous page load. A log that cries fault when nothing is wrong is a log people stop reading, which is where the real fault will be. Once `pino` lands, 4xx belongs at `info` with a request id — a distinction the bare console cannot express.
+| | |
+|---|---|
+| `LOG_LEVEL` | The level. `info` by default; `silent` when `NODE_ENV=test`, so a suite's output is its own |
+| `NODE_ENV=development` | Human-readable output through `pino-pretty`. Anything else is JSON, because a machine is reading it |
+| `requestId` | A UUID on every line of a request, generated here — **never** taken from an inbound `x-request-id`, which is a value the caller controls. When one is present it is recorded, truncated to 128 characters, as `upstreamRequestId` on the completion line |
+| `request completed` | One line per request: `method`, `route` (the matched pattern, not the URL), `status`, `durationMs`. `/health` is skipped, since a load balancer calls it for ever |
 
-There is no request id, no structured output, no log aggregation, no metrics, no error tracking and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone.
+**What is never logged, and why redaction is not the answer.** No request body, ever — the most sensitive thing this API handles is answer values typed by members of the public, and they arrive keyed by field id, so their *paths are data* and no redaction list can cover them. `redact` is configured for `authorization`, `cookie`, `password`, `token` and `secret` as a **backstop against a future line that forgets**, not as the mechanism: a design that logs everything and then removes the known-bad paths fails open, and this one logs only what it names. `backend/tests/request-log.spec.ts` asserts the absence on the arguments handed to pino rather than on the bytes it writes, which is the stricter place — redaction would hide a secret that had still been collected.
+
+**What the error handler logs.** `middleware/errorHandler.ts` logs 5xx and any non-`AppError` at `error` with the stack, and a 4xx at `info` with its status and message — no stack, because it is not a fault. A 4xx is the API answering correctly — the client asked for something it may not have — and it is already reported in the response. This is not fastidiousness: opening the login page with no session calls `POST /api/auth/refresh`, which correctly answers `401 Not authenticated`, and that printed a stack trace on every anonymous page load. A log that cries fault when nothing is wrong is a log people stop reading, which is where the real fault will be. That is what [`features/0025`](../../features/0025-structured-logging.md) settled: a 4xx is no longer dropped, it is one `info` line carrying the same request id as everything else that request did.
+
+There is no log aggregation, no metrics, no error tracking and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone.
 
 Minimum viable observability, in order:
 
-1. **`pino` with a request id** on every log line, and redaction configured for `authorization`, `password` and answer values.
+1. ~~**`pino` with a request id** on every log line, and redaction configured for `authorization`, `password` and answer values.~~ **Done** ([`features/0025`](../../features/0025-structured-logging.md)).
 2. **Error tracking** (Sentry or equivalent) on both the API and the SPA, so browser-side editor failures are visible at all.
 3. **Real health checks** — the current `/health` returns `ok` even when the database is unreachable. Split liveness from readiness, and have readiness check the database.
 4. **Business metrics** — forms published, responses received, PDF embed failures. These are also the numbers that plan metering will need.

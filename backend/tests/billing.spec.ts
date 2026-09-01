@@ -24,6 +24,7 @@ import {
   TEST_CUSTOMER,
   TEST_SUBSCRIPTION
 } from './fixtures/stripe-events'
+import { logger } from '../src/services/logger'
 
 vi.mock('../src/services/db', async () => {
   const { mockDeep } = await import('vitest-mock-extended')
@@ -145,7 +146,7 @@ describe('stripe billing', () => {
     })
 
     it('refuses to guess a plan from a price this deployment does not know', () => {
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       // Reachable only through a wrong `STRIPE_PRICE_PRO` — checkout offers no
       // other price. Guessing "they paid for something, give them Pro" would
@@ -563,7 +564,7 @@ describe('stripe billing', () => {
       stripeCalls.retrieveSubscription.mockResolvedValue(
         subscription({ organizationId: 'org-gone' })
       )
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       const response = await deliver(checkoutCompletedEvent('org-gone'))
 
@@ -605,14 +606,14 @@ describe('stripe billing', () => {
     })
 
     it('says nothing when the version matches', () => {
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       expect(assertKnownApiVersion('2025-08-27.basil')).toBe(true)
       expect(logged).not.toHaveBeenCalled()
     })
 
     it('complains, names both versions, and still lets the event through', () => {
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       expect(assertKnownApiVersion('2026-08-26.dahlia')).toBe(false)
 
@@ -622,7 +623,7 @@ describe('stripe billing', () => {
     })
 
     it('complains once per version, not once per event', () => {
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       // A permanent misconfiguration printing on every webhook is a log nobody
       // reads — the same reason `services/plans.ts` announces once.
@@ -634,7 +635,7 @@ describe('stripe billing', () => {
     })
 
     it('treats a missing version as nothing to say', () => {
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       expect(assertKnownApiVersion(null)).toBe(true)
       expect(assertKnownApiVersion(undefined)).toBe(true)

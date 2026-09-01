@@ -13,6 +13,7 @@ import {
   TEST_PRICE_PRO,
   TEST_CUSTOMER
 } from '../fixtures/stripe-events.js'
+import { logger } from '../../src/services/logger.js'
 
 /**
  * Stripe subscriptions, against a real PostgreSQL
@@ -336,7 +337,7 @@ describe('stripe subscriptions', () => {
 
   describe('an event serialised by a different API version', () => {
     it('is still reconciled, still answers 200, and says so in the log', async () => {
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const logged = vi.spyOn(logger, 'error').mockImplementation(() => {})
 
       const event = subscriptionEvent(
         'customer.subscription.created',

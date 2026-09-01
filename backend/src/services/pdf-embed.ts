@@ -3,6 +3,7 @@ import { pdfProcessor, type ExtractedField } from './pdf-processor.js'
 import { pdfFilenameFrom } from './pdf-url.js'
 import { pdfStorage } from './pdf-storage.js'
 import { withOrganizationLock } from './organization-lock.js'
+import { logger } from './logger.js'
 
 /**
  * Rewriting a form's stored PDF so its AcroForm matches the form's fields
@@ -57,7 +58,7 @@ export async function embedFormFields(formId: string): Promise<void> {
   })
 
   if (!(await pdfStorage().exists(filename))) {
-    console.warn(`PDF not found in storage: ${filename}`)
+    logger.warn(`PDF not found in storage: ${filename}`)
     return
   }
 
@@ -83,7 +84,7 @@ export async function embedFormFields(formId: string): Promise<void> {
   const modifiedPdfBuffer = await pdfProcessor.embedFieldsInPDF(pdfBuffer, fieldsToEmbed)
   await pdfStorage().put(filename, modifiedPdfBuffer)
 
-  console.log(`✓ Successfully embedded ${fieldsToEmbed.length} fields in PDF: ${filename}`)
+  logger.info(`✓ Successfully embedded ${fieldsToEmbed.length} fields in PDF: ${filename}`)
 }
 
 /**
@@ -110,6 +111,6 @@ export async function embedInline(formId: string): Promise<void> {
   try {
     await withOrganizationLock(`form-embed:${formId}`, () => embedFormFields(formId))
   } catch (error) {
-    console.error('Error embedding fields in PDF:', error)
+    logger.error({ err: error }, 'Error embedding fields in PDF')
   }
 }

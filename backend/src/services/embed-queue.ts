@@ -2,6 +2,7 @@ import type { Job, Queue, Worker } from 'bullmq'
 import { envInt } from '../config/env.js'
 import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from './redis.js'
 import { embedFormFields, embedInline } from './pdf-embed.js'
+import { logger } from './logger.js'
 
 /**
  * The one module that knows there is a job queue (features/0017).
@@ -120,9 +121,9 @@ export async function requestEmbed(formId: string): Promise<void> {
       })
       return
     } catch (error) {
-      console.error(
-        `Could not enqueue PDF embed for form ${formId}; running it inline instead:`,
-        error
+      logger.error(
+        { err: error, formId },
+        `Could not enqueue PDF embed for form ${formId}; running it inline instead`
       )
       // The client this failed on may be wedged rather than merely unlucky, so
       // it is thrown away: the next save reconnects instead of inheriting it.
@@ -295,7 +296,7 @@ async function withFormLock<T>(
 
   const renewal = setInterval(() => {
     connection.eval(RENEW, 1, key, token, String(LOCK_TTL_MS)).catch(error => {
-      console.error(`Could not renew embed lock for form ${formId}:`, error)
+      logger.error({ err: error }, `Could not renew embed lock for form ${formId}`)
     })
   }, Math.floor(LOCK_TTL_MS / 3))
   // Never let the renewal alone keep the process alive.
@@ -308,7 +309,7 @@ async function withFormLock<T>(
     await connection.eval(RELEASE, 1, key, token).catch(error => {
       // The lock expires by itself, so a failed release costs a delay, not
       // correctness.
-      console.error(`Could not release embed lock for form ${formId}:`, error)
+      logger.error({ err: error }, `Could not release embed lock for form ${formId}`)
     })
   }
 }
@@ -345,7 +346,7 @@ export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
   )
 
   worker.on('completed', job => {
-    console.log(`embed job ${job.id} done (form ${job.data.formId})`)
+    logger.info(`embed job ${job.id} done (form ${job.data.formId})`)
   })
 
   // The distinction goal 12 asks for. A job that will be retried is noise; a job
@@ -354,22 +355,22 @@ export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
   // (docs/sot/08-operations.md).
   worker.on('failed', (job, error) => {
     if (!job) {
-      console.error('embed job failed before it could be read:', error)
+      logger.error({ err: error }, 'embed job failed before it could be read')
       return
     }
 
     const attempts = job.opts.attempts ?? 1
     if (job.attemptsMade >= attempts) {
-      console.error(
+      logger.error(
+        { err: error, formId: job.data?.formId, jobId: job.id, attempts: job.attemptsMade },
         `EMBED GAVE UP after ${job.attemptsMade} attempts: form ${job.data?.formId} ` +
-        `(job ${job.id}). Its stored PDF no longer matches its fields.`,
-        error
+        `(job ${job.id}). Its stored PDF no longer matches its fields.`
       )
     } else {
-      console.warn(
+      logger.warn(
+        { err: error, formId: job.data?.formId, jobId: job.id, attempt: job.attemptsMade },
         `embed job ${job.id} failed (attempt ${job.attemptsMade}/${attempts}), ` +
-        `will retry: form ${job.data?.formId}`,
-        error
+        `will retry: form ${job.data?.formId}`
       )
     }
   })
@@ -377,7 +378,7 @@ export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
   // Connection-level trouble. Without a listener an EventEmitter `error` throws,
   // which is the shape of failure that takes a process down.
   worker.on('error', error => {
-    console.error('embed worker error:', error)
+    logger.error({ err: error }, 'embed worker error')
   })
 
   return {
