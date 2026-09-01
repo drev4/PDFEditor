@@ -38,12 +38,21 @@ export function errorHandler(
   err: Error,
   req: Request,
   res: Response,
-  _next: NextFunction
+  next: NextFunction
 ) {
   const isExpectedClientError = err instanceof AppError && err.statusCode < 500
   // `req.log` when the request reached `requestLog` — which is every route, but
   // not an error thrown before the middleware runs.
   const log = req.log ?? logger
+
+  // The response is already on the wire — a stream that failed mid-write, which
+  // the PDF route can do. Answering again throws `ERR_HTTP_HEADERS_SENT` and
+  // replaces a partial body with a crash; Express's default handler closes the
+  // connection instead, which is the honest outcome (features/0026).
+  if (res.headersSent) {
+    log.error({ err }, 'request failed after the response had started')
+    return next(err)
+  }
 
   if (isExpectedClientError) {
     log.info(
