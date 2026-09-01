@@ -262,6 +262,14 @@ They are not interchangeable, and a session token on `/api/v1` or an API key on 
 
 So `routes/v1/` scopes on `organizationId` directly, reuses the *services* rather than the session middleware, and leaves every existing route untouched. Note the one place it also departs from §2: the guards are mounted on the router rather than per handler, because every route there has the same answer and the risk being managed is a *future* endpoint added without them — the opposite of the internal routers, where an anonymous endpoint sits beside authenticated ones and the guard has to be readable per handler.
 
+## 11b. One module owns egress, and it is newer than it looks
+
+Until [`features/0020`](../../features/0020-outbound-webhooks.md) this backend made **no** outbound HTTP request of its own — no `fetch(`, no axios, no `http.request` — and the only egress was the Stripe SDK, to an address this repository picked. Webhooks changed that, and the rule that came with it is the same one PDF bytes and author-supplied regex already follow (§8): **`services/webhook-egress.ts` is the only module that may request a customer-supplied URL.**
+
+What it enforces and why is in [07-security](./07-security-and-privacy.md); what matters here is the shape. The URL is validated **twice** — when the customer configures it, so they get a `400` while looking at a screen, and again inside every delivery, because DNS under a hostname is not ours to trust. A second module doing this "just for one call" would be one that skips the second check.
+
+The queue gained its second job type at the same time (`services/webhook-queue.ts`, beside `services/embed-queue.ts`). They share `services/redis.ts` and nothing else, and they differ in one important way: **the embed falls back to running inline without Redis, and the webhook does not.** Its event source is an anonymous respondent's submission, so an inline delivery would put a third party's server on the critical path of somebody pressing "submit", and retries — the entire point — cannot happen in a request handler. So webhooks refuse to be configured without a queue, loudly.
+
 ## 12. Adding a new endpoint
 
 The checklist is the `backend-endpoint-pattern` skill. In short: route file per resource under `routes/`, Zod schema beside the handler, `authenticate` then `verifyFormOwnership` (or its equivalent for the resource), all errors via `next(error)`, an integration test in `backend/tests/<resource>.spec.ts` with `supertest` against the real router, a database-backed test in `backend/tests/integration/` if the handler depends on what the database does (cascades, constraints, rollback), and `docs/sot/06-api-reference.md` updated in the same commit after reading the route back.

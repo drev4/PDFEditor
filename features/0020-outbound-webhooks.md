@@ -1,6 +1,6 @@
 # 0020 — Outbound webhooks, and the first request this server makes to an address a customer chose
 
-**Status:** in progress
+**Status:** done
 **Priority:** P2 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Webhooks with signed payloads, retries and a delivery log*)
 **Branch:** `feature/0020-outbound-webhooks`
 **Related:** [10-saas-roadmap §build order](../docs/sot/10-saas-roadmap.md#build-order) · [07-security-and-privacy](../docs/sot/07-security-and-privacy.md) · [04-backend-patterns §5](../docs/sot/04-backend-patterns.md) · [06-api-reference](../docs/sot/06-api-reference.md) · [08-operations](../docs/sot/08-operations.md) · [`features/0017`](0017-job-queue-for-pdf-embedding.md) · [`features/0019`](0019-api-keys-and-read-only-public-api.md) · [`features/0013`](0013-stripe-subscriptions.md)
@@ -176,4 +176,74 @@ So the auto-disable must be *discoverable*: `disabledAt` and `lastError` on the 
 
 ## Outcome
 
-*(filled in when the work is finished)*
+**Shipped, and the build order is finished.** Step 10 is closed; every step in [10-saas-roadmap](../docs/sot/10-saas-roadmap.md#build-order) is now struck through.
+
+### What shipped
+
+- `backend/src/services/webhook-egress.ts` — the only module that may request a customer-supplied URL. https only, resolve-and-check every address, connect to the checked address (pinned through `https.request`'s own `lookup`), no redirects, 10s timeout, 4 kB response cap.
+- `WebhookEndpoint` and `WebhookDelivery` (migration `20260901114512_webhooks`), with the cascades in [03-domain-model](../docs/sot/03-domain-model.md).
+- `backend/src/services/webhooks.ts` — secret minting, AES-256-GCM at rest, and the `t=…,v1=…` signature.
+- `backend/src/services/webhook-queue.ts` — the second job type, the worker, retries with backoff, auto-disable after ten consecutive failures, and the delivery log.
+- Management endpoints on the session API; `GET /api/v1/webhooks/deliveries` on the published one.
+- `queueResponseCreated` after the submission transaction in `routes/responses.ts`, swallowing every error — a respondent must never see a failure because a customer's integration is misconfigured.
+- 39 new tests: 23 unit (the egress guard), 12 integration (configuration, refusals, signature), 4 end-to-end delivery against a real TLS receiver.
+
+### The failing test, first
+
+`tests/webhook-egress.spec.ts` was written before the module and failed with `Cannot find module '../src/services/webhook-egress.js'`. It covers every blocked family — loopback and its whole `/8`, `::1`, `0.0.0.0`, `169.254.169.254`, link-local v4 and v6, all three RFC1918 ranges, CGNAT, unique-local, multicast, and an IPv4-mapped loopback — plus the URLs a customer may not configure and the public addresses that must still work.
+
+### What the manual checks showed
+
+Through the real API, every refusal by hand:
+
+```
+http://example.com/hook                   400  A webhook URL must use https
+https://169.254.169.254/latest/meta-data/ 400  … resolves to an internal address (169.254.169.254)
+https://localhost/hook                    400  … resolves to an internal address (::1)
+https://10.0.0.5/hook                     400  … resolves to an internal address (10.0.0.5)
+https://user:pass@example.com/h           400  A webhook URL must not contain credentials
+(no REDIS_URL)                            503  Webhooks require the job queue…
+```
+
+A real endpoint created through the API returned `whsec_aM83…` once, and the row holds `WHQc7kUz7st1EGd8.vRJHgbl…` — `iv.tag.ciphertext`, not the secret.
+
+**The delivery-time re-check was verified live, and it is the interesting one.** An endpoint whose stored URL was changed to loopback after creation was not delivered to: the worker refused it, disabled the endpoint, and wrote the reason into the log —
+
+```
+disabledAt: SET
+lastError : The endpoint URL is no longer deliverable
+log       : { attempt: 1, succeeded: false, status: null,
+              error: "127.0.0.1 resolves to an internal address (127.0.0.1)…" }
+```
+
+That is the DNS-rebinding defence firing on a real delivery, which is the half a configuration-time check cannot cover.
+
+### Verification
+
+```
+npm run test:backend                                      17 specs, 229 tests passed
+npm run test:integration                                  20 specs, 181 passed, 3 specs skipped
+TEST_REDIS_URL=… npm run test:integration                 23 specs, 191 tests passed
+npm run test:frontend                                     38 specs, 321 tests passed
+npm run test:e2e                                          50 passed (22.0s)
+npm run build --workspace=frontend                        built in 10.23s
+cd backend && npx tsc --noEmit && npm run typecheck:tests  clean
+```
+
+### Decisions taken, as the spec required
+
+**The signing secret is encrypted, not plaintext** (trap 4). AES-256-GCM under `WEBHOOK_SIGNING_KEY`, and the honest scope is in [07-security](../docs/sot/07-security-and-privacy.md): nothing against a compromised process, everything against a leaked backup or a read-only injection — which is the common incident. The consequence accepted with it: **a deployment without that key cannot configure webhooks at all**, rather than quietly storing plaintext, and losing the key loses every endpoint's secret.
+
+**The delivery log holds no payload** (trap 3), so a delivery cannot be replayed from the log alone — only re-rendered from a `Response` that still exists. Filed as its own row rather than smuggled in.
+
+**Delivery is at-least-once**, the event id is stable across retries and shared by every endpoint receiving that event, and the documentation says so in the words a receiver's author needs.
+
+### Two things a customer actually experiences today
+
+**A disabled endpoint is silent.** Ten consecutive failures switch it off, `disabledAt` and `lastError` say why, and **nobody is told** — this product still has no email service. An integration can be dead for days before anyone looks. Filed, and it shares its dependency with invitation email.
+
+**There is no screen.** Endpoints and API keys are both configured through the API with a session, so step 10 is complete and not yet reachable by a customer. That row is now the single thing standing between the finished build order and somebody using it.
+
+### One test-only stub, declared
+
+`webhook-delivery.spec.ts` replaces `assertDeliverableUrl` — and only that function, only in that file — because its receiver is a real TLS server on `127.0.0.1`, which the guard exists to refuse. The delivery client, the signature, the queue, the worker and the log are all real. The guard keeps its own 23-case unit spec and `webhooks.spec.ts` asserts the API refuses that same URL, so what the stub removes is covered twice elsewhere.

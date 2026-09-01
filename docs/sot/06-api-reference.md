@@ -26,6 +26,7 @@ Nothing gets added to this file without opening the route file first — see the
 /uploads/pdfs/:token/:filename  -> signed PDF download (no auth; the signature IS the capability)
 /uploads/*                      -> 404 (the old unauthenticated static mount is gone)
 /api/v1         -> v1Router             (published; API key auth — see below)
+   /api/v1/webhooks/deliveries          the webhook delivery log
 /health         -> { status, timestamp }
 ```
 
@@ -301,6 +302,47 @@ Managed from the **internal** API, with a session, because a credential that cou
 | `DELETE /api/organizations/api-keys/:id` | Revokes. `404` for a key belonging to another organization. Works even when the plan has since lost API access — turning a credential off is never gated |
 
 `402` and `403` are never collapsed: `403` is a permission failure, `402` is a plan limit ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)). `Plan.hasApiAccess` is true only on **Team**, so a Free or Pro organization gets the `402`.
+
+## Webhooks — `routes/organizations.ts` and `services/webhook-queue.ts`
+
+**Configured with a session** (owner or admin), for the same reason API keys are: a credential that could add a new place for customer data to be sent would turn one leaked key into an exfiltration channel.
+
+| Endpoint | Answers |
+|---|---|
+| `GET /api/organizations/webhooks` | `{ webhooks: [{ id, url, events, disabledAt, lastError, consecutiveFailures, createdAt }], deliverable }` — `deliverable` says whether this deployment can actually deliver |
+| `POST /api/organizations/webhooks` | `201 { webhook: { …, secret } }`. **`secret` appears here and nowhere else.** `400` for a URL that is not `https`, carries credentials, or resolves inside; `402` when the plan has no API access; `403` for a member; **`503`** when the deployment has no `REDIS_URL` or no `WEBHOOK_SIGNING_KEY` |
+| `DELETE /api/organizations/webhooks/:id` | Deletes it and its delivery history. Works when the deployment can no longer deliver and after a downgrade — turning delivery off is never gated |
+| `GET /api/v1/webhooks/deliveries` | The delivery log, read with an API key: `{ data: [{ id, endpointId, eventId, eventType, attempt, status, durationMs, succeeded, error, createdAt }], pagination }` |
+
+**The event.** One type exists, `response.created`, sent when a public submission is accepted:
+
+```json
+{
+  "id": "<event id>",
+  "type": "response.created",
+  "createdAt": "2026-09-01T12:00:00.000Z",
+  "data": {
+    "form": { "id": "…", "title": "…", "shareId": "…" },
+    "response": { "id": "…", "submittedAt": "…", "answers": { "<field name>": "value" } }
+  }
+}
+```
+
+Answers are keyed by **field name**, as they are in `GET /api/v1/forms/:id/responses`.
+
+**Verifying the signature.** Each request carries:
+
+```
+X-VuePDF-Signature: t=<unix seconds>,v1=<hex hmac-sha256>
+X-VuePDF-Event-Id:  <stable across every retry>
+X-VuePDF-Event-Type: response.created
+```
+
+`v1` is `HMAC-SHA256(secret, "<t>.<raw request body>")`. **Verify against the raw body**, before any JSON parsing — a re-serialised object is not the bytes that were signed, and that is the single most common way a receiver ends up rejecting valid deliveries. Reject a `t` older than a few minutes: the timestamp is inside the signed material, so a captured payload cannot be replayed with a fresh one.
+
+**Delivery is at-least-once and unordered.** Retries mean the same event id arrives more than once; deduplicate on `X-VuePDF-Event-Id`. A 2xx is success and everything else — including a 3xx, because redirects are not followed — is a failure that will be retried with exponential backoff. After ten consecutive failures the endpoint is **disabled**, and `disabledAt` and `lastError` on the endpoint are the only way its owner learns that: this product has no email.
+
+**What is deliberately absent.** No payload bodies in the delivery log (they would be a second copy of respondent answers, outliving the form). No replay endpoint. No event types other than `response.created`. No customer-facing screen — endpoints are configured through this API only ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
 ## Error format — `middleware/errorHandler.ts`
 

@@ -12,8 +12,8 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
 | Frontend unit / component | 38 specs, 321 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 16 specs, 206 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 21 specs, 174 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| Backend route (mocked Prisma) | 17 specs, 229 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| **Backend database-backed** | 23 specs, 191 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 50 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **The suites run offline, and the storage driver is what keeps that true.** `PDF_STORAGE_DRIVER` defaults to `local`, so every suite reads and writes real files under `backend/uploads/pdfs` exactly as before — `tests/security-headers.spec.ts` writes a fixture and fetches it through the signed route, and the E2E suite uploads real PDFs. The `s3` driver is never exercised by `npm test` and that is deliberate: mocking the AWS SDK would assert that the code calls the mock the way the code calls the mock. It is verified against a real S3-compatible endpoint instead — MinIO from `docker-compose.yml` — and what that run covered is recorded in [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md)'s Outcome.
@@ -28,6 +28,8 @@ TEST_REDIS_URL=redis://localhost:6379 npm run test:integration --workspace=backe
 Note the variable is deliberately **not** `REDIS_URL`: that name is the one pinned empty, so a developer's `.env` cannot move the other fifteen specs onto a worker that is not running.
 
 **`REDIS_URL` now switches two subsystems, so both have a spec.** Beside the queue's, `tests/integration/rate-limit-store.spec.ts` proves the property that makes features/0018 worth having — two independently built limiters, standing in for two replicas, counting a client once — and it skips itself without `TEST_REDIS_URL` for the same reason. Note the trap it walked into first: the `login` limiter refunds successful requests (`skipSuccessfulRequests`), so a probe returning 200 never accumulates a hit and the limiter never bites; the spec uses `responses` and `register`, which have no refund.
+
+**Webhook delivery is tested against a real receiver, not a mock.** `tests/integration/webhook-delivery.spec.ts` starts a genuine TLS server, submits a real form, lets the real worker deliver, and verifies the signature the way a customer would — from the raw body. One thing is stubbed and it is narrow: the receiver is on `127.0.0.1`, which the egress guard exists to refuse, so `assertDeliverableUrl` is replaced *in that file only*. The guard keeps its own unit spec (`tests/webhook-egress.spec.ts`, 23 cases covering every blocked address family) and `webhooks.spec.ts` asserts the API refuses that same URL, so the protection is not what goes untested — everything after it is what this file exercises.
 
 **The third state — `REDIS_URL` set and no Redis there — has its own spec, and it needs no Redis, so CI runs it.** `tests/integration/pdf-embed-fallback.spec.ts` points `REDIS_URL` at a refused port and then at an unroutable address (TEST-NET-1) and asserts the save still answers *and* the PDF is still embedded. The second case is the one worth having: before it existed, a Redis that neither answered nor refused made the enqueue wait for ever and the bulk save never responded, while the "falls back to inline" claim sat in a comment above the code that could not deliver it.
 
@@ -158,7 +160,7 @@ The last row is the remaining coverage gap of this kind: nothing verifies the ca
 | **No PDF round-trip test** | Nothing verifies that embedded AcroForm positions match what the editor showed |
 | **Coverage collected but not enforced** | Coverage can fall silently; Codecov failures are ignored |
 | **Database-backed coverage is narrow** | Only the bulk save and archived-field visibility are covered. Form deletion, response submission and the `syncFieldsFromPDF` side effect still have no real-database test |
-| **The Redis-backed paths are not in CI** | `tests/integration/pdf-embed-queue.spec.ts` and `rate-limit-store.spec.ts` both skip unless `TEST_REDIS_URL` is set, and no workflow sets it. Both are verified by hand and locally; one Redis service in the integration job would close this for both |
+| **The Redis-backed paths are not in CI** | `pdf-embed-queue.spec.ts`, `rate-limit-store.spec.ts` and `webhook-delivery.spec.ts` all skip unless `TEST_REDIS_URL` is set, and no workflow sets it. All three are verified by hand and locally; one Redis service in the integration job would close this for all of them — and it matters more now that webhook delivery, which cannot run inline at all, is one of them |
 
 When lint is added, use flat config (`eslint.config.js`) — the rest of the toolchain is on versions that assume it.
 
