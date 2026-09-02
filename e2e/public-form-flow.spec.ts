@@ -21,6 +21,16 @@ test.describe('Public Form Submission', () => {
         const fields = page.locator('.public-field-item');
         await expect(fields.first()).toBeVisible({ timeout: 30000 });
 
+        // The respondent notice (features/0032). The form is created by the
+        // fixture without asking for metadata, so the default holds and the
+        // notice must **not** claim an address is recorded. A notice that
+        // over-claims is as wrong as one that under-claims, and this is the
+        // assertion that catches the flag being ignored end to end.
+        const notice = page.locator('[data-testid="respondent-notice"]');
+        await expect(notice).toBeVisible();
+        await expect(notice).toContainText('sent to the organization');
+        await expect(notice).not.toContainText('IP address');
+
         const textInput = page.locator('.text-input').first();
         await expect(textInput).toBeVisible();
         await textInput.fill('E2E Test Submission');

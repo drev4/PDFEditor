@@ -165,6 +165,18 @@ Ownership is `verifyFormOwnership` (`middleware/formOwnership.ts`): **404, not 4
 
 **Publishing is metered, creating is not.** The plan limits how many forms are published *at once*, so unpublishing frees a slot immediately, and the form being published is excluded from its own count — re-saving an already-published form is never refused. Both write paths that can set `status` carry the check; see [04-backend-patterns §10](./04-backend-patterns.md).
 
+### The public form payload, and what a respondent is told
+
+`GET /forms/public/:shareId` returns `{ form, showBranding, collectsMetadata }`. Both booleans are derived on the server and both are deliberately single values rather than objects.
+
+`collectsMetadata` ([`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md)) says whether **this respondent's** IP address and user agent will be stored with their submission, and the public form renders its privacy notice from it — mentioning an address only when it is true. It sits beside `showBranding` rather than being read off the form object, which does carry the column through `toApiForm`'s spread: the notice is a contract of its own, so the column can be renamed without silently changing what a stranger is told.
+
+It is safe under the rule `showBranding` established and worth checking against it rather than assuming: it says nothing about the owner's plan, limits, usage or identity. It says what happens to the person reading it. `backend/tests/integration/respondent-metadata.spec.ts` asserts both halves.
+
+The client treats the two flags' absence in **opposite** directions, and that is deliberate: a missing `showBranding` keeps the mark (under-claiming a paid entitlement gives it away), while a missing `collectsMetadata` claims nothing is stored (a privacy notice that over-claims is the worse failure).
+
+The form endpoints accept and return `collectsRespondentMetadata` as an explicit field — never a key inside `settings`, which is `z.record(z.unknown())` and validated in no way.
+
 ## Fields — `routes/form-fields.ts`
 
 Mounted under `/api/forms`, so every path here is nested under a form. **There is no list endpoint** — fields come embedded in `GET /forms/:id`.

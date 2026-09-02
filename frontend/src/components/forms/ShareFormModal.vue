@@ -30,6 +30,36 @@
         />
       </div>
 
+      <!--
+        What is stored about the people who respond (features/0032, finding S7).
+        It lives here, beside publishing, because it is a property of what
+        happens when somebody uses the link rather than of the document.
+      -->
+      <div class="flex items-start justify-between gap-4 p-4 rounded-lg bg-surface-subtle">
+        <div>
+          <p class="font-semibold text-ink">Record who responded</p>
+          <p class="text-body text-muted">
+            Stores each respondent's IP address and browser with their
+            submission. Off by default, and the public form tells them when it
+            is on.
+          </p>
+          <p
+            v-if="metadataError"
+            class="mt-1 text-body text-danger"
+            role="alert"
+            data-testid="metadata-error"
+          >
+            {{ metadataError }}
+          </p>
+        </div>
+        <InputSwitch
+          v-model="collectsMetadata"
+          :disabled="isTogglingMetadata"
+          data-testid="collects-metadata-switch"
+          @change="handleToggleMetadata"
+        />
+      </div>
+
       <!-- Analytics -->
       <div v-if="form.status === 'published'" class="grid grid-cols-2 gap-4">
         <div class="p-4 rounded-lg bg-accent-soft border border-accent">
@@ -105,7 +135,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputSwitch from 'primevue/inputswitch'
 import Toast from 'primevue/toast'
-import type { Form } from '@/services/forms'
+import { formsService, type Form } from '@/services/forms'
 
 interface Props {
   visible: boolean
@@ -132,10 +162,60 @@ const isPublished = ref(false)
 const isTogglingStatus = ref(false)
 const isCopying = ref(false)
 
+/**
+ * Whether this form records its respondents (features/0032).
+ *
+ * Unlike publishing, this calls the service directly instead of emitting to the
+ * parent. Publishing is emitted because three different screens each keep their
+ * own copy of the form and all of them render its status; this flag is rendered
+ * nowhere but here, so threading an event through `FormSavePanel`, `FormsList`
+ * and `FormsManagementView` would add three call sites to keep a value in sync
+ * that none of them displays.
+ *
+ * The honest cost: the parent's copy of `form` keeps the old value until the
+ * next list refresh. Harmless today, and the thing to revisit if this flag ever
+ * appears on a screen.
+ */
+const collectsMetadata = ref(false)
+const isTogglingMetadata = ref(false)
+const metadataError = ref<string | null>(null)
+
 // Update isPublished when form changes
 watch(() => props.form?.status, (status) => {
   isPublished.value = status === 'published'
 }, { immediate: true })
+
+watch(() => props.form?.collectsRespondentMetadata, (value) => {
+  collectsMetadata.value = value === true
+  metadataError.value = null
+}, { immediate: true })
+
+async function handleToggleMetadata() {
+  if (!props.form) return
+
+  const wanted = collectsMetadata.value
+  isTogglingMetadata.value = true
+  metadataError.value = null
+
+  try {
+    await formsService.update(props.form.id, { collectsRespondentMetadata: wanted })
+    toast.add({
+      severity: 'success',
+      summary: wanted ? 'Recording respondents' : 'No longer recording respondents',
+      detail: wanted
+        ? "New submissions will store the respondent's IP address and browser."
+        : 'New submissions will store neither. Anything already collected is unchanged.',
+      life: 3000
+    })
+  } catch (error) {
+    // Put the switch back where it was, so it never shows a state the server
+    // does not hold.
+    collectsMetadata.value = !wanted
+    metadataError.value = error instanceof Error ? error.message : 'Could not change this setting'
+  } finally {
+    isTogglingMetadata.value = false
+  }
+}
 
 const shareUrl = computed(() => {
   if (!props.form?.shareId) return ''

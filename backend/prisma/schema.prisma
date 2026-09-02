@@ -373,6 +373,23 @@ model Form {
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
   viewCount   Int        @default(0) @map("view_count")
+  /// Whether a submission to this form stores the respondent's IP address and
+  /// user agent (features/0032).
+  ///
+  /// **The default is `false`, and that is a decision rather than caution.**
+  /// Both columns were written on every submission with no notice to the person
+  /// filling the form in, for an anti-abuse purpose nothing in this codebase
+  /// implements — `ipAddress` is read only by the responses screen, the CSV
+  /// exporter and the organization export, all of which are ways *out* of the
+  /// building. docs/sot/07-security-and-privacy.md calls that the weakest row in
+  /// its data inventory, and the answer taken here is the second of the two it
+  /// offers: stop collecting it unless somebody asks for it.
+  ///
+  /// It governs **what a submission stores**, never who may read anything, and
+  /// it has nothing to do with rate limiting: `middleware/rateLimit.ts` counts
+  /// `req.ip` on the request in flight and never reads this column or the ones
+  /// it controls. Turning this off does not weaken abuse protection.
+  collectsRespondentMetadata Boolean @default(false) @map("collects_respondent_metadata")
   fields      Field[]
   createdBy   User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

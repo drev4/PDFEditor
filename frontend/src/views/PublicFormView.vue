@@ -111,6 +111,31 @@
            Note that DEV_PLAN_KEY=dev grants the entitlement, so the mark
            disappears in local development. That is the override working, not a
            bug. -->
+      <!--
+        What happens to what this person is about to send (features/0032,
+        finding S7). It is generated from what is actually true for this form,
+        never written by the author: the product knows what the product stores
+        and an author does not, so a free-text field here would produce a privacy
+        notice that is wrong in the confident direction.
+
+        Note the second sentence and the condition on the third. Answers go to
+        the organization that published the form and it is that organization,
+        not us, who is asked about them — we are the processor. And the address
+        is mentioned **only** when it is actually recorded; a notice that
+        over-claims is as wrong as one that under-claims, and this one is
+        rendered from the same boolean the server enforces.
+      -->
+      <p
+        class="px-6 py-3 flex-shrink-0 text-meta text-muted border-t border-line"
+        data-testid="respondent-notice"
+      >
+        Your answers are sent to the organization that published this form, and
+        they are who to contact about them.
+        <template v-if="collectsMetadata">
+          Your IP address and browser are recorded with your submission.
+        </template>
+      </p>
+
       <footer
         class="flex items-center h-[52px] flex-shrink-0 px-6 bg-surface border-t border-line"
       >
@@ -159,7 +184,7 @@ const route = useRoute()
 const router = useRouter()
 const documentStore = useDocumentStore()
 
-const { form, showBranding, fields, pdfUrl, title, description, isLoading, error, loadForm } =
+const { form, showBranding, collectsMetadata, fields, pdfUrl, title, description, isLoading, error, loadForm } =
   usePublicForm()
 const { isSubmitting, error: submitError, validationErrors: submitValidationErrors, submit } = useResponseSubmit()
 const { errors: clientErrors, validateField, validate } = useFormValidation()
