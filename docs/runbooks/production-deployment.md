@@ -1,14 +1,14 @@
 # Production deployment runbook
 
-This runbook deploys the portable container package. It does **not** provision a provider, DNS, TLS, PostgreSQL, Redis or object storage; those are prerequisites.
+This runbook deploys the portable container package to the selected target. The two target definitions, exact service names and complete environment templates are in [`deploy/railway/README.md`](../../deploy/railway/README.md). It does **not** provision the Railway or Cloudflare accounts, DNS records, TLS validation, PostgreSQL, Redis or R2 buckets; those remain credentialed operator steps.
 
 ## Prerequisites
 
 - A PostgreSQL database with TLS and credentials able to run migrations.
 - Redis reachable by both API and worker.
 - An S3-compatible private bucket reachable by both API and worker.
-- Two same-site public hosts, for example `app.example.com` and `api.example.com`. The refresh cookie does not work reliably across unrelated sites.
-- An ingress that terminates TLS and routes those hosts to web port 8080 and API port 3000.
+- Two same-site public hosts. The defined pairs are `app.dev.docaiflow.com` / `api.dev.docaiflow.com` and `app.docaiflow.com` / `api.docaiflow.com`; the refresh cookie does not work reliably across unrelated sites.
+- Railway public services with custom domains validated through Cloudflare DNS.
 
 Copy `.env.deploy.example` to `.env.deploy`, replace every placeholder and generate secrets rather than inventing them:
 
@@ -30,12 +30,17 @@ docker compose --env-file .env.deploy -f compose.production.yml up --force-recre
 docker compose --env-file .env.deploy -f compose.production.yml up -d worker api web
 ```
 
-On a managed platform, map the same lifecycle explicitly:
+## Railway release
 
-1. Build `Dockerfile.backend` target `runtime` once and run it twice: default command for API, `node dist/worker.js` for worker.
-2. Run `Dockerfile.backend` target `migrations` once as the release command.
-3. Build `Dockerfile.frontend` with `VITE_API_URL` and run it as the web service.
-4. Do not route API traffic until `/health/ready` returns 200.
+For either Railway project, follow the service definition in
+[`deploy/railway/README.md`](../../deploy/railway/README.md):
+
+1. Build the short-lived `Dockerfile.migrations` service and run it once with that environment's `DATABASE_URL`. A non-zero migration exits the release; do not deploy around it.
+2. Deploy or restart the worker from `Dockerfile.backend` with `node dist/worker.js` and confirm its log says it registered.
+3. Deploy the API from `Dockerfile.backend`. Do not attach the public custom domain until `/health/ready` returns `200` and reports an `ok` database and registered queue worker.
+4. Build the web service from `Dockerfile.frontend` in the same Railway project, with that project's `VITE_API_URL`. Attach its matching custom domain after `/healthz` returns `200`.
+
+Do not use Railway's API pre-deploy command for Prisma while the API image remains pruned: the command would not contain the Prisma CLI. The separate migration image is intentional.
 
 Never replace the migration job with `prisma db push`. A database predating the migration baseline needs the one-time `migrate resolve` procedure in [`08-operations.md`](../sot/08-operations.md#database-migrations).
 

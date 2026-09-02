@@ -8,8 +8,8 @@ How the system is configured, built, tested and run — and, honestly, what is m
 |---|---|
 | Local development | Works. `docker-compose up -d` starts PostgreSQL 16, `npm run dev` starts both workspaces |
 | CI | Works. GitHub Actions on push and PR to `main` and `develop` |
-| Staging | **Does not exist** |
-| Production | **Does not exist yet.** Portable packaging exists; provider, hosts and managed dependencies are not provisioned |
+| Hosted development | **Defined, not provisioned.** Railway project `docaiflow-development`, isolated PostgreSQL/Redis/R2 and `app.dev.docaiflow.com` / `api.dev.docaiflow.com` |
+| Production | **Defined, not provisioned.** Railway project `docaiflow-production`, isolated PostgreSQL/Redis/R2 and `app.docaiflow.com` / `api.docaiflow.com` |
 
 `docker-compose.yml` provisions the database only. It is a development dependency, not a deployment artifact — do not mistake it for one.
 
@@ -19,7 +19,7 @@ How the system is configured, built, tested and run — and, honestly, what is m
 
 The Prisma client is generated before `npm prune --omit=dev`, while the CLI still exists. Migrations are not run by API replicas; they are a release job that must succeed first. The complete release, smoke and rollback procedure is [`docs/runbooks/production-deployment.md`](../runbooks/production-deployment.md).
 
-This makes the repository deployable, not deployed. A provider, `app.*`/`api.*` same-site hosts, TLS, secrets and managed dependencies still have to be chosen and provisioned before this table can claim a staging or production environment.
+This makes the repository deployable, not deployed. The provider, same-site hostnames, service topology and complete environment templates are now defined in [`deploy/railway/README.md`](../../deploy/railway/README.md); credentials, DNS records and managed dependencies still have to be provisioned before either hosted environment exists.
 
 ## The supported Node version
 
