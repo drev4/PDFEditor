@@ -117,15 +117,19 @@ Steps 0 through 3 are correctness and safety, not features. They come first beca
 
 **The build order is finished.** [`features/0019`](../../features/0019-api-keys-and-read-only-public-api.md) and [`features/0020`](../../features/0020-outbound-webhooks.md) closed step 10 between them, and both spent what step 9 built: the shared rate-limit store became load-bearing the moment a limit was *published*, and the queue is what makes webhook retries possible at all.
 
-**What replaces the chain is not another chain.** Everything left is either a product decision nobody has taken — the prices, the landing page, the legal facts behind it — or work that has no dependencies on anything else and can be picked in any order. [`docs/BACKLOG.md`](../BACKLOG.md) is now the whole picture, and the priority column is finally the right thing to read. **[What comes next](#what-comes-next), at the end of this document, is the shortlist** — the same items, ordered by a judgement about what is worth doing first, with the few real dependencies among them named so they are not mistaken for a chain.
+**What replaces the chain is not another chain.** Everything left is either a product decision nobody has taken — the prices and the legal facts — or work that has no dependencies on anything else and can be picked in any order. [`docs/BACKLOG.md`](../BACKLOG.md) is now the whole picture, and the priority column is finally the right thing to read. **[What comes next](#what-comes-next), at the end of this document, is the shortlist** — the same items, ordered by a judgement about what is worth doing first, with the few real dependencies among them named so they are not mistaken for a chain.
+
+**Updated 2026-09-02: that ordering is no longer free.** The landing shipped, the waitlist is collecting, and the business SSOT committed to a private beta before 2026-09-30 (`PDFSaaS/docs/planning/ROADMAP.md`). A date is not a dependency, so it does not restart the chain — but it does override a judgement, and the shortlist below now leads with the work that date requires.
 
 Step 8 took three features to close and the two follow-ups are both now done. `Plan.hasBranding` is enforced ([`features/0014`](../../features/0014-close-the-subscription-surface.md)) and `assertCanInvite` is wired ([`features/0015`](../../features/0015-team-plan-and-purchased-seats.md)) — it had been waiting not for "billing" but for a plan that can hold more than one person, which is Team. What remains open around billing is configuration and business decisions rather than code: live-mode Stripe setup, tax, and the amounts themselves — including how many seats Team's base price includes ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
 ### Parallel track — the landing page
 
-**The landing is not in the chain, and putting it there would be a lie.** The chain means *each step unblocks the next*; the landing blocks nothing and nothing blocks it. It is designed (desktop and phone artboards in the same canvas), it needs a technology decision nobody has taken, and it can be built at any point. Step 6 makes it cheaper rather than possible: the tokens it would use now exist in `frontend/tailwind.config.cjs`, whichever technology the page ends up being built with.
+**Shipped, on 2026-09-02, and not from this repository.** It is live and indexable at `docaiflow.com`, built with Astro on Cloudflare Pages with the waitlist on Pages Functions, D1 and Turnstile, and its own repository is `PDFSaaS/landing` (`landing/docs/ROADMAP.md`, `landing/docs/operations/next-session.md`).
 
-What it does depend on is not code: a support address, a legal entity, a registered address and at least one real customer reference. The canvas leaves all of those bracketed on purpose, and the prices on it match the Plan & usage screen without anybody having decided them. Both are in [`docs/BACKLOG.md`](../BACKLOG.md).
+The reasoning for keeping it out of the chain held, and is worth keeping because it is the general rule: **the chain means *each step unblocks the next*, and the landing blocked nothing and nothing blocked it.** It was built in parallel and it finished first. What it turned out to depend on was not code either — a brand and a domain, both now decided as DocAIFlow — and it shipped *without* the support address, legal entity and registered address it was supposed to need, which are still open in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+**The consequence for this repository is the point.** A live page collecting waitlist addresses is what turned "no deployment target" from a filed item into the top of the list — see the D track in [what comes next](#what-comes-next).
 
 ### A known inversion between this chain and the backlog
 
@@ -139,23 +143,52 @@ What it does depend on is not code: a support address, a legal entity, a registe
 
 **Read this as a shortlist, not as a chain.** The build order above earns its ordering from dependencies: each step could not be attempted before the one above it. Nothing below has that property except where the row says so, so the order here is a *judgement about what is worth doing first* — revisable, unlike the chain, and that is why this section is kept separate rather than continuing the table with a step 11.
 
-The ordering principle: **first close the gap between what is built and what a customer can reach, then make a failure diagnosable, then take the decisions that are not code.** Step 10 shipped an API and webhooks that no screen exposes — the largest distance in the product today between work already paid for and value delivered.
+The ordering principle **changed on 2026-09-02, and it changed because of something outside this repository.** It used to be *close the gap between what is built and what a customer can reach, then make a failure diagnosable, then take the decisions that are not code* — the A/B/C shape below, which is kept because A and most of B are closed and the reasoning is worth reading.
 
-Verified against the code on **2026-09-01**; every claim below names the file it came from.
+What replaced it is a date. **The landing is live** at `docaiflow.com` and its waitlist is collecting real addresses (`landing/docs/operations/next-session.md`, verified 2026-09-02), and the business SSOT commits to a private beta before **2026-09-30** (`PDFSaaS/docs/planning/ROADMAP.md`). So the product now has customers arriving and **nowhere to send them**: [08-operations](./08-operations.md) says there is no production environment, no `Dockerfile` for either app and no infrastructure definition, and a repository-wide search finds no `Dockerfile` of any kind. That is the largest gap in the product today, and it displaced the old first place.
+
+The new principle: **make the thing reachable and recoverable, then make what it holds erasable, then take the decisions that are not code.** Everything in the D track below is dated; nothing else is.
+
+Verified against the code on **2026-09-02**; every claim below names the file it came from.
 
 | # | Next | Kind | Depends on |
 |---|---|---|---|
+| D1 | **A deployment target, and the packaging to reach it** | Operability | The app/API domain decision — nothing in this repository |
+| D2 | **Boot-time configuration validation** (was B4) | Operability | Nothing, but it is worth having *before* the first deploy |
+| D3 | **Backups with a tested restore** (was B5) | Operability | D1 |
+| D4 | **Error tracking on API and SPA** | Operability | Nothing — [`features/0025`](../../features/0025-structured-logging.md) met its dependency |
+| D5 | **Erasure that is real**: account deletion, per-account export, and the PDF a form delete leaves behind | Privacy | Nothing |
+| D6 | **A respondent privacy notice**, and a retention limit on IP and user agent | Privacy | A published notice, not code alone |
+| D7 | **Close public registration** while the beta is invitation-only | Product | Nothing |
 | A1 | ~~**API keys and webhooks screens in the SPA**~~ — done ([`features/0021`](../../features/0021-api-keys-screen.md), [`features/0022`](../../features/0022-webhooks-screen.md)) | Product | — |
 | A2 | ~~**The active organization**, then the switcher~~ — done ([`features/0023`](../../features/0023-active-organization.md)) | Correctness + Product | — |
 | A3 | ~~**Organization-wide responses listing**, then `/dashboard/responses`~~ — done ([`features/0024`](../../features/0024-organization-responses.md)) | Product | — |
-| B1 | **Structured logging (`pino`)** with request ids and redaction | Operability | Nothing — and it unblocks three other rows |
-| B2 | **`asyncHandler`** on every async route | Correctness | Nothing |
-| B3 | **Atomic plan limits** for publish and invite | Correctness | Nothing |
-| B4 | **Boot-time configuration validation** | Operability | Nothing |
-| B5 | **Backups with a tested restore** | Operability | A deployment target |
+| B1 | ~~**Structured logging (`pino`)**~~ — done ([`features/0025`](../../features/0025-structured-logging.md)) | Operability | — |
+| B2 | ~~**`asyncHandler`** on every async route~~ — done ([`features/0026`](../../features/0026-async-handler.md)) | Correctness | — |
+| B3 | ~~**Atomic plan limits** for publish and invite~~ — done ([`features/0027`](../../features/0027-atomic-plan-limits.md)) | Correctness | — |
 | C1 | **Decide the prices, the legal entity, the support address** | Business | Nobody but the owner |
-| C2 | **Decide the landing technology**, then build the landing | Product | C1 for its content |
+| C2 | ~~**Decide the landing technology**, then build the landing~~ — done, **in another repository** | Product | — |
 | C3 | **Email delivery** | Product | A provider account |
+
+**What the D track is not.** It is not a chain — D1 through D7 have almost no dependencies on each other, and only D3 genuinely waits on D1. They are grouped because one date owns all of them. And it is not the whole beta: the rest of that scope is business work (a cohort, an onboarding, a support channel) recorded in `PDFSaaS/docs/planning/ROADMAP.md`, not here.
+
+**What the date deliberately does not include**, and the reason is worth keeping: the prices, the legal entity and VAT, Stripe in live mode, and the contradiction between `Plan.seats: 3` plus a per-seat quantity (`backend/src/services/plans.ts:134`) and a business decision to sell Team with unlimited users. **A free private beta charges nobody**, so every one of those blocks *revenue* rather than the date, and putting them in September would trade a deployment for a pricing page.
+
+### D — the beta on 2026-09-30
+
+**D1. A deployment target, and the packaging to reach it.** [08-operations §1](./08-operations.md) records the whole of it: production *does not exist*. `docker-compose.yml` provisions the database and is a development dependency, not a deployment artifact — the document says so in the line under the table, and it is the mistake this row exists to prevent. Three processes need somewhere to run, not one: the API, the **worker** (`node dist/worker.js`, the same build with a different entrypoint) and the built SPA. Two things are already written down and must be carried into whatever gets chosen. **`prisma` is a devDependency**, so the client has to be generated *before* `npm ci --omit=dev` prunes it or the image boots without one ([08-operations](./08-operations.md)). And **`REDIS_URL` set with no worker running fails silently** — no request errors, the queue just fills and every form's PDF quietly stops matching its fields; if the deployment sets that variable, something has to check the worker is alive.
+
+**D2. Configuration validated at boot.** Was B4, unchanged in substance and now dated: `backend/src/config/env.ts` is a pair of readers (`envBool`, `envInt`) that warn and fall back, which is right for a tunable; what is missing is the schema for values that must be present and well-formed. Only `JWT_SECRET` refuses to boot (`backend/src/app.ts:24`), so a wrong `BASE_URL` still produces broken PDF links quietly. It moved up for one reason: **the first deploy is exactly when a variable is wrong for the first time**, and the failures this repository has already reasoned about — `STRIPE_WEBHOOK_SECRET`, `TRUST_PROXY_HOPS`, `PDF_STORAGE_DRIVER` — are all of the kind that produce no error on the path anyone is watching.
+
+**D3. Backups with a tested restore.** Was B5. None exist and recovery time is unknown. The word that matters is **tested**: a backup nobody has restored is a belief, and the first customer document is the wrong moment to find that out. This is the one row in D that genuinely waits on D1.
+
+**D4. Error tracking.** Its dependency is met — [`features/0025`](../../features/0025-structured-logging.md) put a request id on every backend line — and what is still invisible is the other half: an editor failure in a respondent's or an author's browser produces nothing anywhere. A beta whose whole purpose is learning what breaks cannot see half of what breaks.
+
+**D5. Erasure that is real.** Three gaps that are one subject, all filed in [`docs/BACKLOG.md`](../BACKLOG.md). **Account deletion and per-account export do not exist**, and the business SSOT has already promised both — retention while the account is active, thirty days of grace after it closes. **Deleting a form deletes no PDF**: nothing in this codebase removes a stored file except the invalid-upload path in `routes/upload.ts`, so every delete leaves bytes behind — under `s3` those bytes now cost money, and under any driver they outlive the deletion the customer asked for. Note the ordering trap: erasure has to work *before* real documents arrive, not after, because the backlog of undeleted files is created by the beta itself.
+
+**D6. A respondent privacy notice.** `Response` stores IP and user agent with no notice to the person filling the form, no retention limit and no actual anti-abuse use ([07-security](./07-security-and-privacy.md), S7). It is filed as P1 and it is a beta blocker rather than a launch blocker for a simple reason: the beta is the first time this data is collected from people who are not the customer.
+
+**D7. Close public registration.** D-040 in the business SSOT makes the beta invitation-only for its first week. `POST /api/auth/register` is open, so today anybody with the URL has an account. The mechanism can be small — the invitation flow already exists ([`features/0010`](../../features/0010-member-invitations-and-role-enforcement.md)) — but the decision must be explicit, and so must the way back: opening registration a week later has to be a switch somebody can throw, not a deploy that reverts a commit.
 
 ### A — close the distance to the customer
 
@@ -179,15 +212,11 @@ Two things the screens had to get right, and both were properties of the endpoin
 
 Two things it settled that are worth carrying forward. **A transaction was not the fix** — under `READ COMMITTED` two of them still both count before either commits; the lock, taken *before* the count, is the whole mechanism. And **the shape is now uniform**: a function in `entitlements.ts` that refuses something takes a `tx` and one that only reports does not, so the odd one out is gone rather than being the only safe one. Details in [04-backend-patterns §10](./04-backend-patterns.md).
 
-**This closes the B track apart from B4 and B5**, both of which need a deployment target to be worth doing well.
-
-**B4. Configuration validated at boot.** `backend/src/config/env.ts` is a pair of readers (`envBool`, `envInt`) that warn and fall back, which is right for a tunable; what is missing is the schema for values that must be present and well-formed. Only `JWT_SECRET` refuses to boot (`backend/src/app.ts:24`), so a wrong `BASE_URL` still produces broken PDF links quietly.
-
-**B5. Backups with a tested restore.** Unchanged from the backlog: none exist, and recovery time is unknown. Last in this group only because it needs a deployment target to be real — not less important than the rest.
+**This closes the B track.** B4 and B5 were its last two rows and both moved into D as D2 and D3 — not because they changed, but because the thing they were waiting for acquired a date. The note they carried is the one that survived: they *need a deployment target to be worth doing well*, which is exactly why D1 is above them.
 
 ### C — the decisions that are not code
 
-These block on the owner, not on engineering, and they are ordered by what the others need. **C1** — the prices, the legal entity, the registered address, the support email — is what the landing cannot ship without, and the amounts also decide how many seats Team's base price includes ([`docs/BACKLOG.md`](../BACKLOG.md)). Note that no price is rendered from a constant anywhere in the code, deliberately, so deciding them is a Stripe change rather than a deploy. **C2** is the landing, which stays a [parallel track](#parallel-track--the-landing-page): its technology is an open decision ([02-architecture](./02-architecture.md)), and if it stays open it gets taken by whoever opens an editor first. **C3**, email delivery, is the row that keeps growing — it started as invitations the inviter copies and sends themselves, and step 10 added a second customer for it: an endpoint auto-disabled after ten consecutive failures, with nothing that tells its owner ([`features/0020`](../../features/0020-outbound-webhooks.md)).
+These block on the owner, not on engineering. **C1** — the prices, the legal entity, the registered address, the support email — is still open, and the amounts also decide how many seats Team's base price includes ([`docs/BACKLOG.md`](../BACKLOG.md)). Note that no price is rendered from a constant anywhere in the code, deliberately, so deciding them is a Stripe change rather than a deploy. What did change is that **C1 no longer blocks the landing**, because the landing shipped without it; it now blocks charging, and the beta is free. **C2 is done, and it was done somewhere else** — the technology decision went to Astro on Cloudflare Pages and the page is live at `docaiflow.com` (`landing/docs/ROADMAP.md`, verified 2026-09-02). Two consequences for this repository: the brand and domain that [02-architecture](./02-architecture.md) records as undecided are decided, and the app and API still need their own hostnames, which is D1's one external dependency. **C3**, email delivery, is the row that keeps growing — it started as invitations the inviter copies and sends themselves, and step 10 added a second customer for it: an endpoint auto-disabled after ten consecutive failures, with nothing that tells its owner ([`features/0020`](../../features/0020-outbound-webhooks.md)).
 
 ### What is deliberately not on this list
 
