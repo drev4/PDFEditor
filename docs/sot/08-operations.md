@@ -446,9 +446,28 @@ Two failure modes worth knowing, because both are silent by nature and both were
 
 ## Backups and recovery
 
-There are no backups, and nothing has been restored, so recovery time is unknown. Before the first paying customer: automated daily PostgreSQL backups with a tested restore, and versioned object storage for PDFs. An untested backup is an assumption, not a backup.
+**The tooling and the drill are built** ([`features/0037`](../../features/0037-backups-with-a-tested-restore.md)). The procedure, the secret inventory and the drill log are in [`docs/runbooks/backup-and-restore.md`](../runbooks/backup-and-restore.md); this section records what the design settled.
 
-Note also that `DELETE /api/forms/:id` cascades to every response with no soft delete and no undo. A misclick is unrecoverable today even with backups in place, because nobody would know to restore.
+| | |
+|---|---|
+| `npm run backup:db --workspace=backend` | `pg_dump --format=custom` plus a `<dump>.manifest.json` beside it. **Both are the backup** — the manifest carries the checksum, the applied migration, a row count per table and the document keys the dumped rows point at, and without it nothing can be verified |
+| `npm run backup:objects --workspace=backend` | The PDF documents, with the work list read **from the manifest** rather than from the live database, so the two artifacts refer to the same moment |
+| `npm run restore:verify --workspace=backend` | The drill. Restores into a scratch database and then checks the result |
+| `backend/src/services/backup.ts` | Every decision the three make, with no shelling out, so `tests/backup.spec.ts` can exercise them without a PostgreSQL binary, a bucket or a network |
+
+**Four things about it are easy to get wrong.**
+
+**There are two stores and they must be restored together.** `Form.pdfUrl` points out of PostgreSQL and into object storage, and since [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) deleting a form deletes its document too — so a database at one moment against a bucket at another gives forms that open and fail at the document, with nothing logged. **The restore order is bytes first, rows second**, which is the *mirror* of the deletion order rather than a copy of it: deletion removes rows first because the reversible failure is bytes left behind, and on restore that flips.
+
+**`pg_restore` exiting `0` is not a verified restore**, which is why the drill is the deliverable and the backup script is not. It checks the migration against `prisma/migrations/`, the row counts against the manifest, foreign keys (via `--exit-on-error`, which validates constraints as it creates them — the flag is not optional), and **whether each restored `pdfUrl` resolves to bytes that are actually there**. That last check exists nowhere else in the codebase and is the one that catches a database backup taken without its objects.
+
+**A dump is not enough to restore the product.** `WEBHOOK_SIGNING_KEY` encrypts `webhook_endpoints.secret` (`services/webhooks.ts`), so a restore under a fresh key leaves every customer's webhook secret unopenable with no rotation path. The runbook carries the full secret inventory.
+
+**Redis is deliberately not backed up, and that does lose something.** The queues are reconstructible, so there is nothing to keep — but a restore drops the embed jobs in flight, and the failure is silent in the way [the queue section](#observability) describes: no errors, just forms whose PDF stops matching their fields. The runbook's post-restore step exists for that and must not be skipped.
+
+**What is still open.** There is **no schedule** — nothing here runs on a clock, so the backup is a platform cron job and the RPO is whatever that is set to — and **nothing alerts** when a backup fails; both scripts exit non-zero into a void. Recovery time was measured on 2026-09-02 against a development dataset and the procedure passed, but **the production figure is unknown until there is a production database to measure**, and the runbook says to re-run the drill within a week of the first deploy.
+
+Note also that `DELETE /api/forms/:id` cascades to every response with no soft delete and no undo. A misclick is unrecoverable even with backups in place, because nobody would know to restore.
 
 ## Deployment, when it is built
 
