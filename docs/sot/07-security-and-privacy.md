@@ -29,7 +29,9 @@ The startup guard in `app.ts` refuses to boot without `JWT_SECRET`, which is cor
 ```
 Anonymous internet
   ├── POST /api/auth/login             rate limited per IP, on failures only
-  ├── POST /api/auth/register          rate limited per IP
+  ├── POST /api/auth/register          rate limited per IP; 403 when REGISTRATION_MODE=invite_only
+                                       and the shared code is missing or wrong
+  ├── GET  /api/auth/registration      returns the registration mode, no auth, no throttle (argued below)
   ├── POST /api/responses              writes to the database, no auth, rate limited per IP
   ├── GET  /api/forms/public/:shareId  reads a form, no auth, mutates viewCount, no throttle
   ├── GET  /uploads/pdfs/<sig>/<file>  reads one uploaded PDF, no auth, signature-gated, expiring, no throttle
@@ -181,6 +183,22 @@ The `402` is only ever seen by an authenticated member of the organization who w
 
 Note also what the limit does **not** do: refusing a seat removes nobody. A plan that shrinks below the number of people already in the organization keeps every membership and every pending invitation, so a billing event can never revoke somebody's access to data they had ([04-backend-patterns §10](./04-backend-patterns.md)).
 
+## Closed registration, and the three ways it could have leaked
+
+`REGISTRATION_MODE=invite_only` shuts `POST /api/auth/register` behind a shared code held in `REGISTRATION_CODE` ([`features/0033`](../../features/0033-close-public-registration.md)). It is a beta gate, not a security control — the code is shared and forwardable by design — but building it touched three things that *are*.
+
+**The refusal comes before the email lookup.** The natural place to put a gate is after validation, next to the other business rules; there, the handler has already answered `400 Email already registered` for a known address and would answer `403` for an unknown one. That difference is an account-enumeration oracle, readable by anybody, and it would have been introduced by a feature whose entire purpose is to keep strangers out. The gate is the first statement after the schema parse, and `tests/auth.spec.ts` asserts `prisma.user.findUnique` is never reached.
+
+**A missing code and a wrong code are one answer.** `codeMatches` returns false for both and the handler raises one `AppError` with one message.
+
+**The comparison is constant time.** `config/registration.ts` hashes both sides with SHA-256 and compares with `crypto.timingSafeEqual`, the same shape as `services/api-key.ts`. Hashing first is what makes it writable at all: `timingSafeEqual` throws on a length mismatch, so comparing raw strings would leak the code's length through an exception. `registerRateLimit` bounds guessing.
+
+**`GET /api/auth/registration` carries no rate limiter**, which is the second exemption in this repository after the Stripe webhook, so it needs the same standard of argument. It takes no input, reads no database and returns one enum from `process.env`; there is nothing to exhaust that a static file would not also expose, and nothing to guess. It returns the mode **alone** — never the code, its length, or whether one is configured — and that a deployment is invitation-only is the message the signup screen has to display anyway.
+
+**What it deliberately does not close:** `POST /api/organizations/invitations/accept`, which also creates accounts. A gate over every path that creates a `User` was the obvious implementation and is the wrong one — the person redeeming a single-use, expiring, address-bound token was already admitted by a paying customer, and catching them would lock out the colleagues of exactly the customers the beta exists for. An integration test asserts invitation acceptance still works with registration closed.
+
+This is also **not** a login control. Account-level lockout on repeated failed logins is unchanged and still open (S10 in [Findings](#findings)).
+
 ## Uploaded PDFs leave this origin's disk, and the headers do not go with them
 
 [`features/0016`](../../features/0016-object-storage-for-uploaded-pdfs.md) moved PDF bytes behind `services/pdf-storage.ts`, so on the `s3` driver a customer's documents sit in a bucket. Three properties are load-bearing and none of them changed:
@@ -259,7 +277,7 @@ For form responses the customer is the data controller and this product is the p
 ## Rules for new code
 
 1. **Every new route declares its authentication and authorization explicitly.** A route with neither is a deliberate, reviewed decision, not an omission.
-2. **Every new public endpoint ships with rate limiting, or an argument in this document for why not.** Add a named limiter in `middleware/rateLimit.ts` and apply it at the route, the way `authenticate` is applied. Its limit and window come from the environment, so the test suites and CI can set their own without weakening the production default. There is exactly one endpoint without one — the Stripe webhook — and its argument is above; copy that standard of proof, including a test that the absence is intentional, or add the limiter.
+2. **Every new public endpoint ships with rate limiting, or an argument in this document for why not.** Add a named limiter in `middleware/rateLimit.ts` and apply it at the route, the way `authenticate` is applied. Its limit and window come from the environment, so the test suites and CI can set their own without weakening the production default. There are exactly two endpoints without one — the Stripe webhook and `GET /api/auth/registration` — and both arguments are in this document; copy that standard of proof, including a test that the absence is intentional, or add the limiter.
 
    `/api/v1` carries one, and it is the only limiter here that does not count per IP: an integration calls from one address, so counting by address would give one customer another's budget. It counts per API key and **falls back to the address when there is no valid key**, because the alternative is an unlimited budget for anyone who simply does not authenticate. That fallback is not theoretical — the first draft of the router rejected unauthenticated requests *before* the limiter ran, and `tests/integration/api-rate-limit.spec.ts` is what caught it.
 3. **New personal data added to a model updates the inventory above in the same PR.** A field that appears in the schema but not in this table cannot be answered for in an audit.

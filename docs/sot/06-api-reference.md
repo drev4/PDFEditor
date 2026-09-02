@@ -35,7 +35,8 @@ Nothing gets added to this file without opening the route file first — see the
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/auth/register` | — | `{email, password (min 6), name?}` | `201 {user, token}` + `Set-Cookie: refresh_token` · `400` if the email exists or validation fails · `429` when rate limited |
+| GET | `/auth/registration` | — | — | `200 {mode: "open" \| "invite_only"}` |
+| POST | `/auth/register` | — | `{email, password (min 6), name?, code?}` | `201 {user, token}` + `Set-Cookie: refresh_token` · `400` if the email exists or validation fails · `403` when registration is invitation-only and `code` is missing or wrong · `429` when rate limited |
 | POST | `/auth/login` | — | `{email, password}` | `200 {user, token}` + `Set-Cookie: refresh_token` · `401 Invalid credentials` · `429` when rate limited |
 | POST | `/auth/refresh` | refresh cookie | — | `200 {token}` + a rotated `Set-Cookie` · `401` · `403` cross-site · `429` when rate limited |
 | POST | `/auth/logout` | refresh cookie | — | `204` · `403` cross-site |
@@ -48,6 +49,15 @@ Nothing gets added to this file without opening the route file first — see the
 **`POST /auth/logout` is not behind `authenticate`.** Logging out has to work when the access token has already expired, which is exactly when a user reaches for it. The cookie is the credential.
 
 Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "Cross-site request rejected"}` to a cross-site `Origin` or `Sec-Fetch-Site: cross-site`. No other route needs it — see [04-backend-patterns §11](./04-backend-patterns.md).
+
+**Registration can be closed** ([`features/0033`](../../features/0033-close-public-registration.md)). `REGISTRATION_MODE=invite_only` makes `POST /auth/register` require `code` to equal `REGISTRATION_CODE`, and it answers `403` otherwise. Four things a consumer needs to know:
+
+- **The refusal comes before the email lookup**, so a closed deployment answers `403` for a registered address and an unregistered one alike. Documented here because it is the opposite of the usual ordering, and deliberate: refusing afterwards would let an unadmitted caller tell the two apart by comparing this `403` against the `400`.
+- **A missing `code` and a wrong one are the same response.** Nothing distinguishes them.
+- **`403`, not `402`.** `402` means a plan limit everywhere else in this API ([10-saas-roadmap](./10-saas-roadmap.md#entitlements-where-plan-limits-get-checked)); this is the platform refusing, which is not one.
+- **`POST /organizations/invitations/accept` is unaffected in every mode.** It also creates accounts, and it must: the person redeeming a single-use, expiring, address-bound token was already admitted by a customer. An integration test asserts this.
+
+`GET /auth/registration` is what the SPA's signup screen reads before it draws, so it can show the code field rather than let a visitor discover the beta from a `403`. It is unauthenticated, carries **no rate limiter** — it reads no database, takes no input and returns one enum — and returns the mode alone: never the code, its length, or whether one is configured.
 
 `/auth/register`, `/auth/login` and `/auth/refresh` are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; the others count every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
 

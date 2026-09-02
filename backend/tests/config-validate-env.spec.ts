@@ -18,7 +18,11 @@ function validStrictApi(): NodeJS.ProcessEnv {
     JWT_SECRET: 'x'.repeat(32),
     DATABASE_URL: 'postgresql://user:pw@db:5432/vuepdf',
     BASE_URL: 'https://api.example.com',
-    FRONTEND_URL: 'https://app.example.com'
+    FRONTEND_URL: 'https://app.example.com',
+    // Required explicitly in a strict environment (features/0033). It is here
+    // rather than defaulted because the default is `open`, and a deployment
+    // that never said so is exactly the case the rule exists to catch.
+    REGISTRATION_MODE: 'open'
   }
 }
 
@@ -210,6 +214,98 @@ describe('validateEnv', () => {
     it('does not ask the worker about Stripe', () => {
       const env = { ...lenient, STRIPE_SECRET_KEY: 'sk_live_x' }
       expect(validateEnv(env, 'worker')).toEqual([])
+    })
+  })
+
+  /**
+   * Closed registration (features/0033).
+   *
+   * `config/registration.ts` defaults an unset mode to `open`. These cases are
+   * the half that makes that default safe — without them a production deploy
+   * that forgot the variable would run an open private beta and nothing would
+   * say so.
+   */
+  describe('REGISTRATION_MODE', () => {
+    it('is required when strict', () => {
+      const env = validStrictApi()
+      delete env.REGISTRATION_MODE
+
+      const problems = validateEnv(env, 'api')
+      expect(problems).toHaveLength(1)
+      expect(problems[0]).toContain('REGISTRATION_MODE is missing')
+    })
+
+    /**
+     * The same argument JWT_SECRET makes: the two processes are one image
+     * reading one environment, so a rule that held for the API alone would
+     * boot the worker and fail the API one deploy later.
+     */
+    it('is required for the worker too', () => {
+      const env = validStrictApi()
+      delete env.REGISTRATION_MODE
+      delete env.BASE_URL
+      delete env.FRONTEND_URL
+
+      expect(validateEnv(env, 'worker').join(' ')).toContain('REGISTRATION_MODE')
+    })
+
+    it('is not required when lenient', () => {
+      expect(validateEnv({ NODE_ENV: 'development' }, 'api')).toEqual([])
+    })
+
+    /**
+     * A shape error, so it is reported in development too — `inviteonly` is
+     * not a missing value, it is a value that cannot work.
+     */
+    it('rejects an unrecognised mode in every environment', () => {
+      const lenient = validateEnv(
+        { NODE_ENV: 'development', REGISTRATION_MODE: 'inviteonly' },
+        'api'
+      )
+      expect(lenient.join(' ')).toContain('REGISTRATION_MODE="inviteonly" is not a mode')
+
+      const env = validStrictApi()
+      env.REGISTRATION_MODE = 'closed'
+      expect(validateEnv(env, 'api').join(' ')).toContain('is not a mode')
+    })
+
+    it('accepts both modes', () => {
+      const env = validStrictApi()
+      env.REGISTRATION_MODE = 'invite_only'
+      env.REGISTRATION_CODE = 'a-code-long-enough-to-pass'
+
+      expect(validateEnv(env, 'api')).toEqual([])
+    })
+
+    /**
+     * The configuration that must not start: closed, with no code that can
+     * ever match, so there is no way back in short of another deploy — which
+     * is the one thing this switch exists to avoid.
+     */
+    it('requires a code when the mode is invite_only', () => {
+      const env = validStrictApi()
+      env.REGISTRATION_MODE = 'invite_only'
+
+      const problems = validateEnv(env, 'api')
+      expect(problems).toHaveLength(1)
+      expect(problems[0]).toContain('requires REGISTRATION_CODE')
+    })
+
+    it('rejects a code that is too short to be a credential', () => {
+      const env = validStrictApi()
+      env.REGISTRATION_MODE = 'invite_only'
+      env.REGISTRATION_CODE = 'beta2026'
+
+      const problems = validateEnv(env, 'api')
+      expect(problems).toHaveLength(1)
+      expect(problems[0]).toContain('REGISTRATION_CODE is 8 characters')
+    })
+
+    it('does not ask for a code when registration is open', () => {
+      const env = validStrictApi()
+      env.REGISTRATION_MODE = 'open'
+
+      expect(validateEnv(env, 'api')).toEqual([])
     })
   })
 
