@@ -28,8 +28,12 @@ Nothing gets added to this file without opening the route file first — see the
 /uploads/*                      -> 404 (the old unauthenticated static mount is gone)
 /api/v1         -> v1Router             (published; API key auth — see below)
    /api/v1/webhooks/deliveries          the webhook delivery log
-/health         -> { status, timestamp }
+/health         -> liveness compatibility alias: `200 {status: "ok", timestamp}`
+/health/live    -> liveness: process is serving HTTP; dependencies are not checked
+/health/ready   -> readiness: PostgreSQL and, when configured, Redis plus a registered PDF worker
 ```
+
+The health routes are public, bounded machine probes. Readiness returns `200 {status: "ready", checks, timestamp}` or `503 {status: "not_ready", checks, timestamp}`. `checks.database.status` is `ok` or `unavailable`; `checks.queue.status` is `disabled`, `ok`, `no_workers` or `unavailable`. An enabled queue also reports worker and job counts, never connection strings or exception text. Liveness deliberately stays green during a dependency outage so the process manager does not turn a recoverable database incident into a restart loop.
 
 ## Auth — `routes/auth.ts`
 

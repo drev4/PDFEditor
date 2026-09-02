@@ -14,6 +14,7 @@ import { organizationsRouter } from './routes/organizations.js'
 import { accountRouter } from './routes/account.js'
 import { billingRouter, webhookRouter } from './routes/billing.js'
 import { v1Router } from './routes/v1/index.js'
+import { healthRouter } from './routes/health.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requestLog } from './middleware/requestLog.js'
 import { envBool, envInt } from './config/env.js'
@@ -219,9 +220,7 @@ app.use('/uploads', (_req, res) => {
   res.status(404).json({ error: 'Not found' })
 })
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
-})
+app.use('/health', healthRouter)
 
 app.use('/api/auth', authRouter)
 app.use('/api/forms', formsRouter)

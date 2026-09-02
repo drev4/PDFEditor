@@ -9,9 +9,17 @@ How the system is configured, built, tested and run — and, honestly, what is m
 | Local development | Works. `docker-compose up -d` starts PostgreSQL 16, `npm run dev` starts both workspaces |
 | CI | Works. GitHub Actions on push and PR to `main` and `develop` |
 | Staging | **Does not exist** |
-| Production | **Does not exist.** There is no deployment target, no Dockerfile for either app, no infrastructure definition |
+| Production | **Does not exist yet.** Portable packaging exists; provider, hosts and managed dependencies are not provisioned |
 
 `docker-compose.yml` provisions the database only. It is a development dependency, not a deployment artifact — do not mistake it for one.
+
+## Production packaging
+
+[`features/0031`](../../features/0031-production-deployment.md) adds the provider-neutral package: `Dockerfile.backend` builds one immutable backend artifact used by the API and worker, its `migrations` target retains Prisma only for the one-shot release job, and `Dockerfile.frontend` builds the SPA then serves it from Nginx with history fallback and the response-only CSP directives a meta tag cannot express. `compose.production.yml` assembles those four process roles. It deliberately provisions **no stateful service**: PostgreSQL, Redis and S3-compatible storage are external production dependencies.
+
+The Prisma client is generated before `npm prune --omit=dev`, while the CLI still exists. Migrations are not run by API replicas; they are a release job that must succeed first. The complete release, smoke and rollback procedure is [`docs/runbooks/production-deployment.md`](../runbooks/production-deployment.md).
+
+This makes the repository deployable, not deployed. A provider, `app.*`/`api.*` same-site hosts, TLS, secrets and managed dependencies still have to be chosen and provisioned before this table can claim a staging or production environment.
 
 ## The supported Node version
 
@@ -116,7 +124,7 @@ docker compose up -d redis                # a local Redis; nothing else requires
 
 1. Its log says `[worker] pdf-embed worker started, waiting for jobs` at startup and `[worker] pdf-embed worker stopped` on a clean shutdown. A process whose last line is the first one and which is no longer running died the hard way.
 2. Each finished job logs `embed job <id> done (form <formId>)`. Silence while forms are being saved means nothing is consuming.
-3. The queue depth itself: `embedQueueStatus()` in `services/embed-queue.ts` returns `waiting`, `active`, `delayed` and `failed`. A `waiting` count that only grows is a dead worker seen from the API's side. It is not exposed over HTTP yet — that belongs with the readiness endpoint in *Observability* below.
+3. The queue state itself: `GET /health/ready` returns `waiting`, `active`, `delayed`, `failed` and the registered `workers` count when Redis is enabled. A missing worker or unreachable Redis makes the API unready; a growing backlog is still an alerting concern even while a worker remains registered.
 
 **`EMBED GAVE UP`.** A job that exhausts `EMBED_JOB_ATTEMPTS` logs that line and names the form. It means that form's stored PDF no longer matches its fields — the database is correct and is the record that matters, but anyone downloading the PDF itself gets a stale AcroForm. It is logged differently from an ordinary failure (`will retry`) precisely so it can be grepped for. What to do about one:
 
@@ -362,7 +370,7 @@ What CI still does not do:
 | No lint | There is no ESLint configuration at all — see [09-quality-and-testing.md](./09-quality-and-testing.md) |
 | Coverage is measured but not enforced | No threshold, and Codecov failures are ignored |
 | Migrations are applied but never *tested* against existing data | The database jobs run `migrate deploy` against a fresh database, so a broken migration fails CI. Nothing exercises a migration against a database that already holds rows |
-| No dependency or secret scanning | No Dependabot, no `npm audit` gate, no secret scan |
+| No dependency or secret scanning | No Dependabot, no `npm audit` gate, no secret scan. The pruned backend image built for [`features/0031`](../../features/0031-production-deployment.md) reports 15 production advisories (1 critical, 13 high, 1 moderate); they are filed for triage rather than hidden by a green build |
 
 ## Observability
 
@@ -385,7 +393,7 @@ Minimum viable observability, in order:
 
 1. ~~**`pino` with a request id** on every log line, and redaction configured for `authorization`, `password` and answer values.~~ **Done** ([`features/0025`](../../features/0025-structured-logging.md)).
 2. **Error tracking** (Sentry or equivalent) on both the API and the SPA, so browser-side editor failures are visible at all.
-3. **Real health checks** — the current `/health` returns `ok` even when the database is unreachable. Split liveness from readiness, and have readiness check the database.
+3. ~~**Real health checks**~~ — done in [`features/0031`](../../features/0031-production-deployment.md). `/health` and `/health/live` are dependency-free liveness; `/health/ready` checks PostgreSQL and, when Redis is configured, requires a registered PDF worker and returns queue counts. Dependency errors are logged but never returned to the caller.
 4. **Business metrics** — forms published, responses received, PDF embed failures. These are also the numbers that plan metering will need.
 
 Two of these are now sharper than they were, because a second process exists. Readiness should answer for the queue as well as the database, and the "dead worker" case above has no signal at all today beyond reading logs — a queue depth that only grows is the metric to export first.

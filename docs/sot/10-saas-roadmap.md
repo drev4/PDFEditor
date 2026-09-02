@@ -153,7 +153,7 @@ Verified against the code on **2026-09-02**; every claim below names the file it
 
 | # | Next | Kind | Depends on |
 |---|---|---|---|
-| D1 | **A deployment target, and the packaging to reach it** | Operability | The app/API domain decision — nothing in this repository |
+| D1 | **Choose and provision a deployment target** — packaging done in [`features/0031`](../../features/0031-production-deployment.md) | Operability | The app/API domain decision — nothing in this repository |
 | D2 | ~~**Boot-time configuration validation** (was B4)~~ — done ([`features/0028`](../../features/0028-boot-time-configuration-validation.md)) | Operability | — |
 | D3 | **Backups with a tested restore** (was B5) | Operability | D1 |
 | D4 | **Error tracking on API and SPA** | Operability | Nothing — [`features/0025`](../../features/0025-structured-logging.md) met its dependency |
@@ -177,6 +177,8 @@ Verified against the code on **2026-09-02**; every claim below names the file it
 ### D — the beta on 2026-09-30
 
 **D1. A deployment target, and the packaging to reach it.** [08-operations §1](./08-operations.md) records the whole of it: production *does not exist*. `docker-compose.yml` provisions the database and is a development dependency, not a deployment artifact — the document says so in the line under the table, and it is the mistake this row exists to prevent. Three processes need somewhere to run, not one: the API, the **worker** (`node dist/worker.js`, the same build with a different entrypoint) and the built SPA. Two things are already written down and must be carried into whatever gets chosen. **`prisma` is a devDependency**, so the client has to be generated *before* `npm ci --omit=dev` prunes it or the image boots without one ([08-operations](./08-operations.md)). And **`REDIS_URL` set with no worker running fails silently** — no request errors, the queue just fills and every form's PDF quietly stops matching its fields; if the deployment sets that variable, something has to check the worker is alive.
+
+**Packaging is done in [`features/0031`](../../features/0031-production-deployment.md).** The backend image has runtime and one-shot migration targets, the same runtime runs API and worker, the SPA has its own Nginx image, and `/health/ready` refuses traffic when PostgreSQL is unavailable or Redis has no registered worker. The row stays open because portable containers are not a deployment target: no provider, hostnames, TLS or managed services have been provisioned.
 
 **D2. Configuration validated at boot.** **Done** ([`features/0028`](../../features/0028-boot-time-configuration-validation.md)): `backend/src/config/validate-env.ts` checks the environment in `index.ts` and `worker.ts`, reports **every** problem rather than the first, and exits `1`. What it settled is in [08-operations](./08-operations.md); three things are worth carrying forward. **`config/env.ts` did not change** — a tunable still warns and falls back, and the new module only covers values with no safe default. **Strictness is an allowlist on `NODE_ENV`**, sharing `plans.ts`'s constant, so an unset or misspelled value is validated rather than waved through. And **the list of variables is kept honest by a scan**, `tests/config-coverage.spec.ts`, because a hand-written inventory of configuration is a second source of truth and would have drifted by the third new variable.
 

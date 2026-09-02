@@ -217,6 +217,45 @@ export async function embedQueueStatus(): Promise<{
   }
 }
 
+export type EmbedQueueReadiness =
+  | { status: 'disabled' }
+  | { status: 'unavailable' }
+  | {
+      status: 'ok' | 'no_workers'
+      workers: number
+      waiting: number
+      active: number
+      delayed: number
+      failed: number
+    }
+
+/**
+ * A deployment-facing view of the queue. Counts alone cannot distinguish an
+ * idle queue from one with no consumer, so readiness also asks BullMQ how many
+ * workers are registered. The existing enqueue deadline bounds this request;
+ * a broken Redis must not leave the platform's probe hanging forever.
+ */
+export async function embedQueueReadiness(): Promise<EmbedQueueReadiness> {
+  if (!isEmbedQueueEnabled()) return { status: 'disabled' }
+
+  return withDeadline(async () => {
+    const { queue } = await embedQueue()
+    const [counts, workers] = await Promise.all([
+      queue.getJobCounts('waiting', 'active', 'delayed', 'failed'),
+      queue.getWorkersCount()
+    ])
+
+    return {
+      status: workers > 0 ? 'ok' : 'no_workers',
+      workers,
+      waiting: counts.waiting ?? 0,
+      active: counts.active ?? 0,
+      delayed: counts.delayed ?? 0,
+      failed: counts.failed ?? 0
+    }
+  })
+}
+
 /* -------------------------------- the worker ------------------------------- */
 
 const LOCK_TTL_MS = 60_000
