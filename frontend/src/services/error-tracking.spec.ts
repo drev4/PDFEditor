@@ -117,6 +117,40 @@ describe('SPA error tracking', () => {
       expect(cleaned.breadcrumbs).toBeUndefined()
       expect(JSON.stringify(cleaned)).not.toContain('Dr Ana Ruiz')
     })
+
+    /**
+     * The gap the first version of this backstop had.
+     *
+     * When `captureException` is handed something that is not an `Error`,
+     * Sentry's **core** — not an integration, so `defaultIntegrations: false`
+     * does not touch it — serialises that value's own properties into
+     * `event.extra.__serialized__`. The way in is `main.ts`'s
+     * `unhandledrejection` listener, which passes `event.reason` straight
+     * through, and a rejection reason is often a plain object.
+     */
+    it('strips the serialised copy of a non-Error rejection reason', async () => {
+      await start('/dashboard/editor')
+
+      const options = vi.mocked(Sentry.init).mock.calls[0]![0] as Record<string, unknown>
+      const beforeSend = options.beforeSend as (e: Record<string, unknown>) => unknown
+
+      const cleaned = beforeSend({
+        exception: { values: [{ type: 'Object' }] },
+        extra: {
+          __serialized__: {
+            'field-9f2a': 'Dr Ana Ruiz',
+            token: 'leaked-credential'
+          }
+        },
+        contexts: { state: { answers: { 'field-77c1': 'ana@example.com' } } }
+      }) as Record<string, unknown>
+
+      expect(cleaned.extra).toBeUndefined()
+      expect(cleaned.contexts).toBeUndefined()
+      expect(JSON.stringify(cleaned)).not.toContain('Dr Ana Ruiz')
+      expect(JSON.stringify(cleaned)).not.toContain('leaked-credential')
+      expect(JSON.stringify(cleaned)).not.toContain('ana@example.com')
+    })
   })
 
   /**

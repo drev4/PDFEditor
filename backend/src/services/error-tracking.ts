@@ -106,10 +106,25 @@ export function initErrorTracking(role: 'api' | 'worker'): void {
       sendDefaultPii: false,
       environment: process.env.NODE_ENV?.trim() || 'unknown',
       // The backstop, not the mechanism.
+      //
+      // `extra` and `contexts` are here because of a gap the first version of
+      // this had. When `captureException` is given a value that is **not an
+      // `Error`**, Sentry's *core* serialises that value's own properties into
+      // `event.extra.__serialized__` — core, not an integration, so
+      // `defaultIntegrations: false` above does nothing about it. The way in is
+      // the `unhandledRejection` guard in `process-guards.ts`, which passes the
+      // raw rejection reason straight through, and a rejection reason is often
+      // a plain object. On the worker that guard is the only signal there is.
+      //
+      // Deleting rather than filtering, for the same reason the whole module is
+      // an allowlist: there is no set of key names that covers answer values,
+      // because they are keyed by field id.
       beforeSend(event) {
         delete event.request
         delete event.user
         delete event.breadcrumbs
+        delete event.extra
+        delete event.contexts
         return event
       }
     })
