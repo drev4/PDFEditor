@@ -142,6 +142,66 @@ describe('request logging', () => {
 
     expect(lines).toHaveLength(0)
   })
+
+  /**
+   * The id has to leave the process to be worth anything (features/0034).
+   *
+   * Until this feature the id existed only in the log: `req.log` carried it and
+   * nothing ever sent it back. So a browser-side error report and the server
+   * line that explains it could not be joined — which is the whole stated value
+   * of putting error tracking on both sides.
+   */
+  describe('the response header', () => {
+    it('returns the request id to the caller', async () => {
+      captureLines()
+      const app = appWith((_req, res) => { res.json({ ok: true }) })
+
+      const res = await request(app).post('/api/things/abc').send({})
+
+      expect(res.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/)
+    })
+
+    it('returns the id it generated, never the one the caller sent', async () => {
+      captureLines()
+      const app = appWith((_req, res) => { res.json({ ok: true }) })
+
+      const res = await request(app)
+        .post('/api/things/abc')
+        .set('X-Request-Id', 'chosen-by-the-caller')
+        .send({})
+
+      // Echoing the caller's value back would make the header useless as a
+      // correlation key and would reflect an attacker-chosen string.
+      expect(res.headers['x-request-id']).not.toBe('chosen-by-the-caller')
+      expect(res.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/)
+    })
+
+    it('sets the header even on a path that is not logged', async () => {
+      captureLines()
+      const app = appWith((_req, res) => { res.json({ ok: true }) })
+
+      // `/health` returns early from the logging branch. The header is set
+      // before that return, so a health check is still traceable.
+      const res = await request(app).get('/health')
+
+      expect(res.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/)
+    })
+
+    it('matches the id the log line was written under', async () => {
+      const bindings: Record<string, unknown>[] = []
+      vi.spyOn(logger, 'child').mockImplementation((b: Record<string, unknown>) => {
+        bindings.push(b)
+        return { info: () => {}, error: () => {}, warn: () => {} } as never
+      })
+      const app = appWith((_req, res) => { res.json({ ok: true }) })
+
+      const res = await request(app).post('/api/things/abc').send({})
+
+      // The point of the whole exercise: the value a browser can read is the
+      // value the server logged under.
+      expect(res.headers['x-request-id']).toBe(bindings[0]!.requestId)
+    })
+  })
 })
 
 /**

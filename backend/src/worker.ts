@@ -2,6 +2,7 @@ import dotenv from 'dotenv'
 import { assertEnv } from './config/validate-env.js'
 import { logger } from './services/logger.js'
 import { installProcessGuards } from './process-guards.js'
+import { initErrorTracking } from './services/error-tracking.js'
 import { createEmbedWorker, isEmbedQueueEnabled } from './services/embed-queue.js'
 import { createWebhookWorker, isWebhookQueueEnabled } from './services/webhook-queue.js'
 import { prisma } from './services/db.js'
@@ -37,6 +38,11 @@ assertEnv('worker')
  * and there is nothing for a worker to do, which is why this exits immediately
  * and loudly rather than idling and looking healthy.
  */
+// Before the guards, so the handlers they install have somewhere to report
+// (features/0034). A no-op unless SENTRY_DSN is set and NODE_ENV is neither
+// development nor test.
+initErrorTracking('worker')
+
 installProcessGuards('worker')
 
 async function main() {

@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { sentryIngestOrigin } from './src/services/sentry-dsn'
 
 /**
  * The Content-Security-Policy for the SPA (finding S5).
@@ -60,6 +61,12 @@ function buildCsp(mode: string, env: Record<string, string>): string {
     'worker-src': ["'self'", 'blob:'],
     'connect-src': ["'self'", apiOrigin, 'blob:'],
   }
+
+  // Derived from the DSN rather than configured separately, so a deployment
+  // cannot set one and forget the other — which would be invisible until
+  // somebody went looking for errors that were never arriving.
+  const ingest = sentryIngestOrigin(env)
+  if (ingest) directives['connect-src'].push(ingest)
 
   if (isDev) {
     // Vite's HMR client. `ws:` and `wss:` rather than a fixed port because the

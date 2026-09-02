@@ -34,7 +34,20 @@ class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public details?: unknown
+    public details?: unknown,
+    /**
+     * The API's own id for the request that failed, read from the
+     * `X-Request-Id` response header (features/0034).
+     *
+     * It is what lets a browser error report be joined to the server log line
+     * that explains it. `undefined` when the response carried no header — a
+     * network failure, or a response from something that is not this API.
+     *
+     * The header is only readable cross-origin because `app.ts` names it in
+     * the CORS `exposedHeaders`; without that it is on the wire and invisible
+     * to script.
+     */
+    public requestId?: string
   ) {
     super(message)
     this.name = 'ApiError'
@@ -119,7 +132,15 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
 
   if (!response.ok) {
     if (response.status === 401) setAccessToken(null)
-    throw new ApiError(response.status, (data as any).error || 'Request failed', (data as any).details)
+    throw new ApiError(
+      response.status,
+      (data as any).error || 'Request failed',
+      (data as any).details,
+      // Optional chaining because this runs while *constructing an error*.
+      // A throw here would replace the real failure with a TypeError and lose
+      // the reason entirely — the same rule the tracking modules follow.
+      response.headers?.get('X-Request-Id') ?? undefined
+    )
   }
 
   return data as T
@@ -156,7 +177,13 @@ export const api = {
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({ error: 'Download failed' }))
-      throw new ApiError(response.status, (data as any).error || 'Download failed')
+      throw new ApiError(
+        response.status,
+        (data as any).error || 'Download failed',
+        undefined,
+        // See the note on the same call in `request()` above.
+        response.headers?.get('X-Request-Id') ?? undefined
+      )
     }
 
     return await response.blob()
