@@ -1,6 +1,6 @@
 # 0028 — Boot-time configuration validation
 
-**Status:** in progress
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Validate all configuration at boot with Zod*)
 **Branch:** `feature/0028-boot-time-configuration-validation`
 **Related:** [08-operations](../docs/sot/08-operations.md) · [10-saas-roadmap → D2](../docs/sot/10-saas-roadmap.md#what-comes-next) · [04-backend-patterns](../docs/sot/04-backend-patterns.md)
@@ -145,3 +145,32 @@ Use Zod if it comes out cleaner once written. It is not forbidden — it is simp
 > - Set this file to `**Status:** done` and record, under an `## Outcome` heading, anything found while doing it — especially any variable the scan turned up that nobody knew was being read.
 >
 > If any part cannot be completed, say which part and why. Do not describe partial work as finished.
+
+## Outcome
+
+Done on `feature/0028-boot-time-configuration-validation`. All five suites green: backend 23 files / 286 tests, integration 22 files / 215 tests (10 skipped, the Redis ones), frontend 47 / 393, E2E 53, both type checks clean.
+
+**The design held, with one correction.** `role` was specified as a parameter without a strong reason for existing, and reading the worker's path gave it one: `services/pdf-embed.ts` reads `form.pdfUrl` and calls `pdfFilenameFrom`, which *parses* a URL rather than building one, and no worker path renders an invitation link, a Stripe return URL or a CORS origin. So `BASE_URL`, `FRONTEND_URL`, `TRUST_PROXY_HOPS` and the Stripe group are asked of the API only — requiring them of the worker would fail a correct deployment. `JWT_SECRET` and `DATABASE_URL` are asked of both even though the worker signs nothing today, because the two are one image reading one environment and a rule that holds for one produces the worst available outcome: a deploy that boots the worker and fails the API afterwards.
+
+**Two things found while doing it.**
+
+`src/index.ts` had to switch to `const { app } = await import('./app.js')`. A static import would have run `app.ts`'s module body first — which builds every router, reads `TRUST_PROXY_HOPS` and throws on a missing `JWT_SECRET` — so the process would have died on the *first* problem and reported one where there were four. The deferred import is what makes goal 3 true in practice, and it is why `assertEnv` is the first statement in the file. Top-level `await` is available: `tsconfig.json` targets ES2022 with `module: ESNext`.
+
+The coverage scan needed a third pattern nobody would guess from the spec. `middleware/rateLimit.ts` never writes `process.env.RATE_LIMIT_LOGIN_MAX`; it stores the *name* on a config object (`limitEnv: 'RATE_LIMIT_LOGIN_MAX'`) and hands it to `envInt` at call time. A scan looking only for `process.env.X` and `envInt('X'` would have declared twelve variables unread and missed them entirely — precisely the silent-pass failure the negative control exists to catch.
+
+**Message quality was the requirement and it needed a second pass.** The first working version emitted *"FRONTEND_URL has scheme "ftp", expected http or https. Expected an absolute URL such as https://app.example.com."* — two "Expected" clauses, because a caller was appending a suggestion to a fragment. `urlProblem` now returns the whole sentence, so a value that is not a URL gets an example and one with the wrong scheme gets the accepted schemes, and neither gets both.
+
+**Verified by hand**, since no test can assert a process exit:
+
+```
+[api] refusing to start: 4 configuration problem(s)
+  - JWT_SECRET is 5 characters; expected at least 32. A short secret is guessable offline, ...
+  - BASE_URL is not a URL. Expected an absolute URL such as https://api.example.com.
+  - FRONTEND_URL has scheme "ftp"; expected http or https.
+  - PDF_STORAGE_DRIVER="gcs" is not a driver. Expected "local" or "s3".
+EXIT=1
+```
+
+The worker, given a 16-byte `WEBHOOK_SIGNING_KEY`, reported that one problem and said nothing about `BASE_URL`. `NODE_ENV=development` with the developer's ordinary `.env` started exactly as before, with no new output.
+
+**Unrelated, and fixed in passing:** the E2E suite could not run on this machine at all — Playwright's `chromium_headless_shell-1208` binary was not installed, so all 53 tests failed at `browserType.launch`. `npx playwright install chromium` fixed it and the suite then passed. Nothing in the repository was wrong; recording it because the same empty-browser-cache failure looks alarming and is not.

@@ -1,10 +1,23 @@
 import dotenv from 'dotenv'
-import { app } from './app.js'
+import { assertEnv } from './config/validate-env.js'
 import { installProcessGuards } from './process-guards.js'
 import { logger } from './services/logger.js'
 import { closeEmbedQueue, isEmbedQueueEnabled } from './services/embed-queue.js'
 
 dotenv.config()
+
+/**
+ * Before anything else, and before `app.js` is imported (features/0028).
+ *
+ * The import of `./app.js` is deferred below rather than sitting at the top of
+ * this file, and that ordering is the point: `app.ts` builds routers, reads
+ * `TRUST_PROXY_HOPS` and throws on a missing `JWT_SECRET` at module scope, so a
+ * static import would run all of it before this line and report one problem
+ * where there may be five.
+ */
+assertEnv('api')
+
+const { app } = await import('./app.js')
 
 installProcessGuards('api')
 

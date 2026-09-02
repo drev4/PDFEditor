@@ -239,7 +239,7 @@ export const DEV_PLAN: Readonly<Plan> = Object.freeze({
  * unexpected `NODE_ENV` is that limits are *enforced*, which is the direction a
  * mistake should fail in (`config/env.ts` states the same rule).
  */
-const OVERRIDE_ENVIRONMENTS = ['development', 'test']
+export const OVERRIDE_ENVIRONMENTS = ['development', 'test']
 
 /** So a permanent condition does not print on every request. */
 const announced = new Set<string>()
