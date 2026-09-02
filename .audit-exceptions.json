@@ -1,0 +1,20 @@
+[
+  {
+    "id": "GHSA-ggr8-5vv4-36mx",
+    "package": "deepmerge-ts",
+    "reason": "Stack exhaustion when merging recursive object graphs. Present in the image but never loaded by it: requiring @prisma/client loads neither @prisma/config nor deepmerge-ts (verified 2026-09-03). The only loader is the Prisma CLI reading a prisma.config.* file, and this repository has none, so nothing attacker-influenced is ever merged. No in-range fix exists: @prisma/config pins deepmerge-ts to exactly 7.1.5, so clearing this needs Prisma to release the bump. Re-check when Prisma is upgraded.",
+    "expires": "2026-12-01"
+  },
+  {
+    "id": "GHSA-ggr8-5vv4-36mx",
+    "package": "@prisma/config",
+    "reason": "Indirect: flagged only for depending on deepmerge-ts 7.1.5. Same reachability argument and same expiry as the deepmerge-ts entry.",
+    "expires": "2026-12-01"
+  },
+  {
+    "id": "GHSA-ggr8-5vv4-36mx",
+    "package": "prisma",
+    "reason": "Indirect: the Prisma CLI is a production dependency of @prisma/client, and is flagged only for depending on @prisma/config. Same reachability argument and same expiry as the deepmerge-ts entry.",
+    "expires": "2026-12-01"
+  }
+]

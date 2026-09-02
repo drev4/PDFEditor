@@ -1,0 +1,70 @@
+# Automated dependency updates (features/0038).
+#
+# The point of this file is that the production image does not silently age.
+# Between the audit recorded in `features/0031` and the triage in `features/0038`
+# — a few days — three new advisories appeared against packages already
+# installed, with nothing in this repository having changed. Nobody was going to
+# notice that by hand.
+#
+# Two decisions worth keeping:
+#
+# **Grouped, because ungrouped is how this gets switched off.** One pull request
+# per package against a tree of ~800 would bury the security bumps under the
+# test-runner bumps, and the repository would stop reading any of them. The
+# groups below are the split that matters here: what ships in the API image
+# versus what only ever runs in CI and on a developer's machine.
+#
+# **No auto-merge, deliberately.** `npm update` is not a safe no-op in this
+# repository, and features/0038 has the evidence: a blanket update moved
+# `pdfjs-dist` from 5.4.530 *into* the vulnerable 5.6.83–6.2.107 band, and the
+# `bcrypt` 5→6 bump changed npm's hoisting enough to break the Docker build
+# outright. The `dependency-audit` job in `test.yml` catches the first class;
+# only a human reading the diff catches the second.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    # The root lockfile covers both workspaces, so one entry is the whole tree.
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      production-dependencies:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+      development-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+    # Majors arrive as their own pull request rather than inside a group: the
+    # two that mattered here (`bcrypt`, and the `pdfjs-dist` one still filed)
+    # each needed their own reasoning and their own test.
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: /
+    # Dockerfile.backend, Dockerfile.frontend and Dockerfile.migrations pin
+    # `node:22-bookworm`, `node:22-bookworm-slim` and an Nginx base. A base
+    # image with an unpatched OS package is the half of the supply chain that
+    # `npm audit` cannot see at all.
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
