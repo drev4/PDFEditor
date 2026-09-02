@@ -227,6 +227,23 @@ Updates, creates, deletes and archives all run inside one `prisma.$transaction`,
 
 The frontend must send back the ids the server gave it. `saveAllFields` in `frontend/src/stores/formFields.store.ts` includes `id` for server ids and omits it for locally-created fields, which it distinguishes by the `field-` prefix it mints them with. Dropping the ids is what made an ordinary save destroy every collected answer.
 
+### `POST /forms/fields/check-pattern`
+
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| POST | `/forms/fields/check-pattern` | Bearer | `{pattern}` | `200 {ok: true}` · `200 {ok: false, reason}` · `400` if the body is malformed |
+
+Whether a pattern may be **stored**, asked before anything is saved ([`features/0036`](../../features/0036-pattern-authoring-with-a-slowness-warning.md)). It calls `checkPattern` and touches no database, no form and no field, so it carries `authenticate` and no ownership middleware.
+
+Four things about it:
+
+- **`200` for a rejected pattern.** "This may not be stored" is the answer to the question, not a failure to answer it; a `400` there would be indistinguishable from a malformed request. `400` is reserved for a body without a `pattern`.
+- **`reason` is RE2's own message**, which names the construct (`invalid perl operator: (?=`) — that is what an author needs, and it is why the message is passed through rather than replaced.
+- **It exists because the alternative is worse than it sounds.** `pattern` is validated inside `createFieldSchema`, so an invalid one fails the **whole** bulk save and takes every other unsaved edit on the form with it — and a pattern is invalid for most of the time somebody is typing one.
+- **It cannot tell you a pattern is fast enough.** RE2 is linear, so `^(a+)+$` is perfectly acceptable to it and catastrophic in a browser. That half is the SPA's, via `services/pattern-check.ts` ([07-security](./07-security-and-privacy.md)).
+
+It is declared **above** the `/:formId` routes in `routes/form-fields.ts`, because both that router and `formsRouter` mount on `/api/forms` and a static path under a family of parameterised ones is where shadowing happens. `backend/tests/fields.spec.ts` asserts it is still reached.
+
 ### `validation.pattern`
 
 Accepted by `POST /fields`, `PUT /fields/:fieldId` and the bulk save, and rejected with `400` when it is unusable. The message names the problem rather than saying "invalid":

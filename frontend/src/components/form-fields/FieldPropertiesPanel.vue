@@ -53,6 +53,42 @@
         </div>
       </div>
 
+      <!-- Pattern (features/0036). Only for the two types `useFormValidation`
+           actually applies a pattern to; on a checkbox it would be inert. -->
+      <div v-if="supportsPattern" class="form-group pt-2">
+        <label for="field-pattern" class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-2 block">
+          Pattern <span class="text-faint normal-case tracking-normal font-normal">(regular expression, optional)</span>
+        </label>
+        <input
+          id="field-pattern"
+          type="text"
+          v-model="fieldPattern"
+          placeholder="^[0-9]{5}$"
+          spellcheck="false"
+          autocapitalize="off"
+          autocorrect="off"
+          data-testid="field-pattern-input"
+          class="w-full bg-surface-subtle border rounded-xl px-4 py-2.5 text-body font-mono focus:shadow-focus outline-none transition-all"
+          :class="patternState === 'invalid'
+            ? 'border-danger focus:border-danger'
+            : 'border-line-strong focus:border-accent'"
+          @input="onPatternInput"
+        />
+
+        <p v-if="patternState === 'checking'" class="text-meta text-faint mt-2" data-testid="field-pattern-checking">
+          Checking…
+        </p>
+
+        <p v-else-if="patternState === 'invalid'" class="text-meta text-danger mt-2" data-testid="field-pattern-invalid">
+          {{ patternReason }}
+        </p>
+
+        <p v-else-if="patternState === 'slow'" class="text-meta text-limit mt-2" data-testid="field-pattern-slow">
+          This pattern is valid, but too slow to check in a respondent's browser — they
+          will not see live feedback for it. The server still enforces it on submit.
+        </p>
+      </div>
+
       <!-- Validation & Appearance -->
       <div class="grid grid-cols-1 gap-4 pt-4 border-t border-line">
         <label class="flex items-center gap-3 p-4 bg-surface-subtle rounded-card border border-line hover:border-accent transition-colors cursor-pointer group">
@@ -173,6 +209,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { usePatternAuthoring } from '@/composables/usePatternAuthoring'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
 import { useToast } from 'primevue/usetoast'
 
@@ -203,6 +240,65 @@ const saveStatusText = computed(() => {
 // Debounce timer for auto-save
 let saveTimeout: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * The pattern (features/0036).
+ *
+ * It is the one property in this panel that cannot simply call `updateField`
+ * on every keystroke. A pattern is invalid for most of the time somebody is
+ * typing one — `^(a`, `[0-9` — and `pattern` is validated inside
+ * `createFieldSchema`, so an invalid one fails the **whole** bulk save and
+ * takes every other unsaved edit on the form with it. So it is checked first
+ * and only reaches the store once it is storable.
+ */
+const fieldPattern = ref('')
+const { state: patternState, reason: patternReason, check: checkPattern, reset: resetPattern } =
+  usePatternAuthoring()
+
+/** The two types `useFormValidation` applies a pattern to. */
+const supportsPattern = computed(() => {
+  const type = formFieldsStore.selectedField?.type
+  return type === 'text' || type === 'textarea'
+})
+
+let patternTimeout: ReturnType<typeof setTimeout> | null = null
+/** Which field the panel is currently showing, so the watcher can tell a real
+ * selection change from the object being replaced by an edit. */
+let lastFieldId: string | null = null
+
+function onPatternInput() {
+  if (patternTimeout) clearTimeout(patternTimeout)
+
+  // Debounced separately from the save below, because this one asks the server
+  // a question and probes a worker; it must not run per keystroke.
+  patternTimeout = setTimeout(async () => {
+    patternTimeout = null
+    const storable = await checkPattern(fieldPattern.value)
+    // `storable` is true for `slow` as well as `ok`: slow is a warning the
+    // author may accept, not a refusal.
+    if (storable) applyPattern()
+  }, 400)
+}
+
+/** Writes the pattern to the field, dropping `validation` when it holds nothing. */
+function applyPattern() {
+  const field = formFieldsStore.selectedField
+  if (!field) return
+
+  const pattern = fieldPattern.value.trim()
+  const rest = { ...field.validation }
+  delete rest.pattern
+
+  const validation = pattern ? { ...rest, pattern } : rest
+
+  formFieldsStore.updateField(field.id, {
+    // An empty object would still be truthy; the store drops it on save, but
+    // keeping `undefined` here means the field never carries an empty rule.
+    validation: Object.keys(validation).length > 0 ? validation : undefined
+  })
+
+  scheduleSave()
+}
+
 // Watch for selected field changes
 watch(() => formFieldsStore.selectedField, (field) => {
   // Cancel pending save when switching fields
@@ -211,12 +307,30 @@ watch(() => formFieldsStore.selectedField, (field) => {
     saveTimeout = null
   }
 
+  // **Only when a different field is selected**, not on every change to the
+  // current one. `store.updateField` replaces the field object, so the
+  // `selectedField` computed hands back a new reference and this watcher fires
+  // again — writing a pattern would therefore clear the warning it had just
+  // produced. Keying the reset on the id is what stops that.
+  const changedField = field?.id !== lastFieldId
+  lastFieldId = field?.id ?? null
+
+  if (changedField) {
+    if (patternTimeout) {
+      clearTimeout(patternTimeout)
+      patternTimeout = null
+    }
+    // Drop any in-flight verdict, or the previous field's error lands on this one.
+    resetPattern()
+  }
+
   if (field) {
     fieldName.value = field.name
     fieldLabel.value = field.label
     fieldRequired.value = field.required
     fieldBorder.value = field.border
     fieldOptions.value = field.options ? [...field.options] : []
+    if (changedField) fieldPattern.value = field.validation?.pattern ?? ''
   }
 }, { immediate: true })
 
@@ -282,6 +396,19 @@ const updateField = () => {
     border: fieldBorder.value,
     options: hasOptions.value ? fieldOptions.value.filter(o => o.trim()) : undefined
   })
+
+  scheduleSave()
+}
+
+/**
+ * The debounced save, shared by `updateField` and by the pattern input
+ * (features/0036) — extracted rather than duplicated so both go through one
+ * path and one status indicator.
+ */
+function scheduleSave() {
+  const field = formFieldsStore.selectedField
+  if (!field) return
+  const fieldId = field.id
 
   // Clear previous status timeout
   if (statusTimeout) {

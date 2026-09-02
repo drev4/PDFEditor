@@ -228,4 +228,86 @@ describe('Fields Routes', () => {
       )
     })
   })
+
+  /**
+   * Checking a pattern before it is saved (features/0036).
+   *
+   * The editor needs an answer to "may this be stored" while somebody is
+   * typing, and only the server can give it: RE2's rules are not JavaScript's,
+   * and reimplementing them in the browser would be a second source of truth
+   * about which patterns are legal.
+   *
+   * It exists as its own route because the alternative — letting the author
+   * find out on save — is worse than it sounds. `pattern` is validated inside
+   * `createFieldSchema`, so an invalid one fails the **whole** bulk save and
+   * takes every other unsaved edit on the form with it.
+   */
+  describe('POST /api/forms/fields/check-pattern', () => {
+    it('accepts a pattern RE2 can compile', async () => {
+      const res = await request(app)
+        .post('/api/forms/fields/check-pattern')
+        .send({ pattern: '^[0-9]+$' })
+
+      expect(res.status).toBe(200)
+      expect(res.body).toEqual({ ok: true })
+    })
+
+    it('refuses one it cannot, and says why', async () => {
+      const res = await request(app)
+        .post('/api/forms/fields/check-pattern')
+        .send({ pattern: '(?=.*\d).{8,}' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.ok).toBe(false)
+      // RE2's own message names the construct, which is what an author needs.
+      expect(res.body.reason).toContain('(?=')
+    })
+
+    /**
+     * The one the server cannot help with, stated here so the asymmetry is
+     * recorded in a test rather than only in prose: `^(a+)+$` is **valid** —
+     * RE2 runs it in 0.05 ms. It is catastrophic only in a backtracking
+     * engine, which is the browser's job to notice (features/0035).
+     */
+    it('accepts a pattern that is fine here and catastrophic in a browser', async () => {
+      const res = await request(app)
+        .post('/api/forms/fields/check-pattern')
+        .send({ pattern: '^(a+)+$' })
+
+      expect(res.body).toEqual({ ok: true })
+    })
+
+    it('rejects a pattern longer than the stored limit', async () => {
+      const res = await request(app)
+        .post('/api/forms/fields/check-pattern')
+        .send({ pattern: 'a'.repeat(201) })
+
+      expect(res.body.ok).toBe(false)
+      expect(res.body.reason).toMatch(/200 characters/)
+    })
+
+    it('validates its own body', async () => {
+      const res = await request(app)
+        .post('/api/forms/fields/check-pattern')
+        .send({})
+
+      expect(res.status).toBe(400)
+    })
+
+    /**
+     * `formsRouter` and `formFieldsRouter` both mount on `/api/forms`, and the
+     * latter is full of `/:formId` routes. A static path added underneath can
+     * be swallowed by one of them and answer something entirely unrelated, so
+     * the absence of shadowing is asserted rather than assumed.
+     */
+    it('is not shadowed by a :formId route', async () => {
+      const res = await request(app)
+        .post('/api/forms/fields/check-pattern')
+        .send({ pattern: '^[0-9]+$' })
+
+      // A form handler would have gone to the database; this must not.
+      expect(prismaMock.form.findFirst).not.toHaveBeenCalled()
+      expect(res.body).toHaveProperty('ok')
+    })
+  })
 })

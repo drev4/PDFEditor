@@ -37,6 +37,33 @@ import type { PatternReply, PatternRequest } from './pattern-worker'
 export type PatternVerdict = 'matched' | 'no-match' | 'no-verdict'
 
 /**
+ * Why there was no verdict — for callers that need to tell the reasons apart.
+ *
+ * `runPattern` deliberately does not expose this: `useFormValidation` only
+ * needs to know whether to show the respondent an error, and all three reasons
+ * answer that identically.
+ *
+ * The **author** of a pattern needs the distinction (features/0036). "This ran
+ * too long to check in a respondent's browser" is worth warning about;
+ * "this engine cannot compile it" is not a speed problem at all, and reporting
+ * `(?P<n>a)` — valid RE2, invalid JavaScript — as slow would be wrong and would
+ * teach people to ignore the warning.
+ */
+export type NoVerdictReason =
+  /** Ran past the deadline and the worker was killed. The one that means slow. */
+  | 'timeout'
+  /** `new RegExp` threw here. Valid on the server, unreadable in this engine. */
+  | 'uncompilable'
+  /** No worker could be started, or it never announced itself. */
+  | 'unavailable'
+
+export interface PatternDescription {
+  verdict: PatternVerdict
+  /** Present only when `verdict` is `no-verdict`. */
+  reason?: NoVerdictReason
+}
+
+/**
  * How long a pattern may run, once the thread is up.
  *
  * Generous for any real pattern and hopeless for a catastrophic one, which is
@@ -116,7 +143,20 @@ export function resetPatternWorker(): void {
   pooled = null
 }
 
+/**
+ * The verdict alone. The shape `useFormValidation` uses, unchanged.
+ */
 export function runPattern(pattern: string, value: string): Promise<PatternVerdict> {
+  return describePattern(pattern, value).then(result => result.verdict)
+}
+
+/**
+ * The verdict, plus why there was not one.
+ *
+ * Same work, same queue, same deadline — this is `runPattern` without the
+ * detail thrown away. See `NoVerdictReason` for who needs it and why.
+ */
+export function describePattern(pattern: string, value: string): Promise<PatternDescription> {
   const result = queue.then(() => check(pattern, value))
   // The queue must not break on a rejection, and `check` never rejects — but a
   // chain that could is a chain that stops serialising after one bad link.
@@ -124,21 +164,21 @@ export function runPattern(pattern: string, value: string): Promise<PatternVerdi
   return result
 }
 
-async function check(pattern: string, value: string): Promise<PatternVerdict> {
+async function check(pattern: string, value: string): Promise<PatternDescription> {
   const entry = (pooled ??= spawn())
-  if (!entry) return 'no-verdict'
+  if (!entry) return { verdict: 'no-verdict', reason: 'unavailable' }
 
   if (!(await entry.ready)) {
     // It never announced itself. Kill it rather than leave a thread that may
     // still wake up and answer a question nobody is listening for.
     discard(entry)
-    return 'no-verdict'
+    return { verdict: 'no-verdict', reason: 'unavailable' }
   }
 
-  return new Promise<PatternVerdict>(resolve => {
+  return new Promise<PatternDescription>(resolve => {
     let settled = false
 
-    const finish = (verdict: PatternVerdict, kill: boolean) => {
+    const finish = (result: PatternDescription, kill: boolean) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
@@ -147,18 +187,20 @@ async function check(pattern: string, value: string): Promise<PatternVerdict> {
       // Killing is the point. A worker stuck inside `test()` cannot be asked to
       // stop — it is the thread that would have to read the request.
       if (kill) discard(entry)
-      resolve(verdict)
+      resolve(result)
     }
 
     const onMessage = (event: MessageEvent<PatternReply>) => {
       const reply = event.data as { ok?: boolean; matched?: boolean; ready?: boolean }
       if (reply.ready === true) return
-      finish(reply.ok ? (reply.matched ? 'matched' : 'no-match') : 'no-verdict', false)
+      if (!reply.ok) return finish({ verdict: 'no-verdict', reason: 'uncompilable' }, false)
+      finish({ verdict: reply.matched ? 'matched' : 'no-match' }, false)
     }
 
-    const onError = () => finish('no-verdict', true)
+    const onError = () => finish({ verdict: 'no-verdict', reason: 'unavailable' }, true)
 
-    const timer = setTimeout(() => finish('no-verdict', true), DEADLINE_MS)
+    // The one reason that means *slow*, and the reason this module exists.
+    const timer = setTimeout(() => finish({ verdict: 'no-verdict', reason: 'timeout' }, true), DEADLINE_MS)
 
     entry.worker.addEventListener('message', onMessage)
     entry.worker.addEventListener('error', onError)
