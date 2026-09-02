@@ -65,3 +65,5 @@ Check startup logs for configuration refusal, repeated enqueue fallbacks, webhoo
 
 If Redis is the incident, emptying `REDIS_URL` is an emergency single-replica fallback documented in operations: embedding becomes inline and rate limiting becomes per-process. Do not use that rollback with multiple API replicas. If object storage is the incident, switching to local storage loses access to objects uploaded while S3 was active and is not a clean rollback.
 
+**If the data is the incident, this is the wrong runbook.** A rollback replaces the code and leaves the database where it is. Restoring what the database or the bucket held is [`backup-and-restore.md`](./backup-and-restore.md), and two of its points decide whether the recovery works at all: the two stores must be restored **together**, bytes before rows, because `Form.pdfUrl` points from one into the other and nothing keeps them consistent; and a dump restored under a fresh `WEBHOOK_SIGNING_KEY` leaves every customer's webhook secret unopenable, because that key encrypts them and there is no rotation path.
+

@@ -91,7 +91,7 @@ A pass prints the restore duration. Write it down here with the date; a drill no
 
 1. Restore the **objects first**, then the database.
 2. Confirm the secrets above are the ones the dump was taken under, especially `WEBHOOK_SIGNING_KEY`.
-3. Run the smoke checks in `production-deployment.md` — readiness alone is not enough; sign in, open a form, and download its PDF. (That runbook arrives with [`features/0031`](../../features/0031-production-deployment.md), which is not merged yet; this file deliberately does not link it until it exists, and the link belongs in both directions once it does.)
+3. Run the smoke checks in [`production-deployment.md`](./production-deployment.md) — readiness alone is not enough. `/health/ready` reports the database and the queue worker, and none of it proves a document can be read: sign in, open a form, and download its PDF, which is the one check that crosses storage as well.
 4. **Re-save any form edited near the moment of the failure.** The embed jobs in flight are gone with Redis, and nothing reports it: those forms' PDFs will not match their fields until a save enqueues the work again. If the window is unknown, the safe move is to treat every form modified in the hour before the incident as suspect — `SELECT id, title, updated_at FROM forms ORDER BY updated_at DESC LIMIT 50` is where to start.
 5. Tell whoever owns the affected accounts. Nothing in this product sends email.
 
