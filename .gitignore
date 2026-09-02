@@ -53,6 +53,7 @@ nul
 
 # Environment
 .env
+.env.deploy
 .env.local
 .env.*.local
 

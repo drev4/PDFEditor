@@ -41,7 +41,7 @@ declare global {
 const MAX_UPSTREAM_ID = 128
 
 /** Paths that would otherwise fill the log with nothing. */
-const IGNORED = new Set(['/health'])
+const IGNORED = new Set(['/health', '/health/live', '/health/ready'])
 
 export function requestLog(req: Request, res: Response, next: NextFunction): void {
   const requestId = crypto.randomUUID()

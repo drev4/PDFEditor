@@ -47,7 +47,8 @@ Browser ── Vite dev server / static build (Vue SPA)
    │
    └── HTTP ──> Express (single Node process, default port 3000)
                   ├── /api/*      JSON API
-                  ├── /health     liveness probe
+                  ├── /health, /health/live     liveness probes
+                  ├── /health/ready             PostgreSQL + worker readiness
                   ├── /uploads/pdfs/:token/:filename  ← signed, expiring (0006)
                   ├── Prisma ──> PostgreSQL (docker-compose in dev)
                   └── services/embed-queue.ts ──> Redis  [only when REDIS_URL is set]
