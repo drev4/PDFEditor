@@ -35,8 +35,8 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | yes | — | PostgreSQL connection string |
-| `JWT_SECRET` | **yes** | — | The process refuses to start without it (`app.ts`) |
+| `DATABASE_URL` | yes | — | PostgreSQL connection string. [Validated at boot](#what-refuses-to-boot-and-what-only-warns) |
+| `JWT_SECRET` | **yes** | — | The process refuses to start without it (`app.ts`), and [validated at boot](#what-refuses-to-boot-and-what-only-warns): at least 32 characters |
 | `JWT_ACCESS_TTL` | no | `15m` | Access-token lifetime. An access token cannot be revoked, so this is the window in which a stolen one still works. Session length is the refresh token below |
 | `REFRESH_TOKEN_TTL_DAYS` | no | `7`, min `1` | How long a user stays signed in. Revocable, unlike the access token |
 | `COOKIE_SECURE` | no | `true` | `Secure` on the refresh cookie. Browsers treat `localhost` as trustworthy, so the safe default also works in development. Set `false` only for a non-localhost deployment on plain HTTP, which should not exist |
@@ -244,7 +244,35 @@ Verified behaviour, worth keeping true: with the default, rotating `X-Forwarded-
 |---|---|---|---|
 | `VITE_API_URL` | no | `http://localhost:3000/api` | Baked in at build time, so each environment needs its own build |
 
-One gap remains: there is no startup validation of configuration beyond `JWT_SECRET`. Validating the whole environment with a Zod schema at boot — the same technique already used for request bodies — turns a class of production misconfiguration into a startup crash, which is where you want it. `config/env.ts` does the narrow version of this for integers: an unparseable value is logged and the safe default is used, never a permissive one.
+### What refuses to boot, and what only warns
+
+Configuration is checked once, at the boundary of a real process ([`features/0028`](../../features/0028-boot-time-configuration-validation.md)). `backend/src/config/validate-env.ts` owns it: `assertEnv('api')` runs in `src/index.ts` and `assertEnv('worker')` in `src/worker.ts`, both immediately after `dotenv.config()` and **before anything else is imported**. A problem is logged and the process exits `1`.
+
+Three things about it are worth knowing before changing a variable or a rule.
+
+**Every problem is reported, not the first.** A deployment missing four things learns all four from one restart; the alternative is discovering them one container start at a time.
+
+**Strictness is an allowlist on `NODE_ENV`, and the ambiguous cases are strict.** Required variables are enforced unless `NODE_ENV` is *exactly* `development` or `test` — so a `NODE_ENV` that is unset, misspelled or dropped by a process manager gets the check, not a pass. It is the same argument, and literally the same constant (`OVERRIDE_ENVIRONMENTS`), that decides whether `DEV_PLAN_KEY` is honoured; note that the two point in opposite directions on purpose, because the safe answer is "enforce limits" there and "validate" here.
+
+**Shape errors fire in every environment, including development.** A `PDF_STORAGE_DRIVER` nobody implements or a `WEBHOOK_SIGNING_KEY` of the wrong length are not missing values, they are values that cannot work, and a developer benefits from hearing about them as much as a deployment does.
+
+| Refuses to boot | When |
+|---|---|
+| `JWT_SECRET` | Missing, or shorter than 32 characters (strict only) |
+| `DATABASE_URL` | Missing (strict only), or a scheme that is not `postgresql`/`postgres` |
+| `BASE_URL` | **API only.** Missing (strict only), not an absolute `http(s)` URL, or ending in `/` — which produces a double slash in every signed PDF link |
+| `FRONTEND_URL` | **API only.** Missing (strict only), or not an absolute `http(s)` URL |
+| `PDF_STORAGE_DRIVER` | Not `local` or `s3`; or `s3` with no `PDF_STORAGE_BUCKET` |
+| `WEBHOOK_SIGNING_KEY` | Present but not exactly 32 bytes of base64 |
+| `REDIS_URL` | Present but not a `redis:`/`rediss:` URL |
+| `TRUST_PROXY_HOPS` | **API only.** Present but not a non-negative integer |
+| `STRIPE_SECRET_KEY` | **API only.** Set without `STRIPE_WEBHOOK_SECRET`, or with neither price id |
+
+`BASE_URL`, `FRONTEND_URL`, `TRUST_PROXY_HOPS` and the Stripe group are **not** asked of the worker, and that is deliberate rather than an omission: the worker mints no URLs (`services/pdf-embed.ts` parses `form.pdfUrl` with `pdfFilenameFrom`, it never builds one), serves no HTTP and never calls Stripe, so requiring them would fail a correct deployment. `JWT_SECRET` and `DATABASE_URL` *are* asked of both, even though nothing on the worker's path signs a token today — the two processes are one image reading one environment, and a rule that holds for one and not the other produces the worst outcome available: an environment that boots the worker and then fails the API, one deploy later.
+
+**Everything else still warns and falls back**, and that contract has not changed. `config/env.ts` is the narrow version of this for tunables: an unparseable `EMBED_WORKER_CONCURRENCY` is logged and the safe default is used, never a permissive one, because a typo in a tunable must not take the service down. `validate-env.ts` lists every one of those in `KNOWN_VARIABLES` with a one-line reason for leaving it unchecked, and `backend/tests/config-coverage.spec.ts` fails when a variable is read anywhere in `src/` and named nowhere in that list — the same lint-rule-shaped spec as `tests/async-handler-coverage.spec.ts`, for the same reason: `npm run lint` lints nothing.
+
+The worker's own `REDIS_URL` refusal stays where it was, in `worker.ts`, and the validator deliberately does not duplicate it. Two different messages for one condition is worse than one.
 
 ## Database migrations
 

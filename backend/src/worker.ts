@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'
+import { assertEnv } from './config/validate-env.js'
 import { logger } from './services/logger.js'
 import { installProcessGuards } from './process-guards.js'
 import { createEmbedWorker, isEmbedQueueEnabled } from './services/embed-queue.js'
@@ -6,6 +7,21 @@ import { createWebhookWorker, isWebhookQueueEnabled } from './services/webhook-q
 import { prisma } from './services/db.js'
 
 dotenv.config()
+
+/**
+ * Same check as the API, with the API-only rules dropped (features/0028).
+ *
+ * The worker mints no URLs — `services/pdf-embed.ts` reads `form.pdfUrl` and
+ * calls `pdfFilenameFrom`, which parses rather than builds — and it renders no
+ * invitation or Stripe return link, so `BASE_URL` and `FRONTEND_URL` are not
+ * its business and requiring them here would fail a correct deployment.
+ *
+ * It does **not** check `REDIS_URL`: `main()` below already refuses to start
+ * without one, with a message explaining why a worker with no queue must not
+ * idle and look healthy. Two different messages for one condition is worse
+ * than one.
+ */
+assertEnv('worker')
 
 /**
  * The queue worker: the same image as the API with a different entrypoint
