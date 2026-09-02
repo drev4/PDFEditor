@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { MembershipRole } from '@prisma/client'
+import { MembershipRole, Prisma } from '@prisma/client'
 import { prisma } from './db.js'
 import { envInt } from '../config/env.js'
 
@@ -41,16 +41,27 @@ export interface IssuedInvitation {
   expiresAt: Date
 }
 
-export async function createInvitation(params: {
-  organizationId: string
-  email: string
-  role: MembershipRole
-  invitedByUserId: string
-}): Promise<IssuedInvitation> {
+/**
+ * `tx` is the client the row is inserted with, and defaults to `prisma`.
+ *
+ * `POST /api/organizations/invitations` passes the transaction it opened around
+ * `assertCanInvite`, so the seat count and the insert are one unit: counting in
+ * a different transaction from the write is what let two invitations share the
+ * last seat (features/0027).
+ */
+export async function createInvitation(
+  params: {
+    organizationId: string
+    email: string
+    role: MembershipRole
+    invitedByUserId: string
+  },
+  tx: Prisma.TransactionClient = prisma
+): Promise<IssuedInvitation> {
   const token = crypto.randomBytes(TOKEN_BYTES).toString('base64url')
   const expiresAt = new Date(Date.now() + invitationTtlMs())
 
-  const invitation = await prisma.invitation.create({
+  const invitation = await tx.invitation.create({
     data: {
       organizationId: params.organizationId,
       email: normalizeEmail(params.email),

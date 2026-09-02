@@ -25,7 +25,28 @@ export function passThroughTransaction(
   prismaMock: DeepMockProxy<PrismaClient>,
   { planKey = 'free', responses = 1 }: { planKey?: string; responses?: number } = {}
 ): void {
+  passThroughTransactionOnly(prismaMock)
   prismaMock.organization.findUnique.mockResolvedValue({ planKey } as any)
   prismaMock.usageCounter.upsert.mockResolvedValue({ responses } as any)
+}
+
+/**
+ * The pass-through on its own, for the routes that open a transaction but read
+ * no meter.
+ *
+ * Publishing a form and sending an invitation run their limit check and their
+ * write in one transaction since features/0027, so a spec exercising either
+ * needs `$transaction` to hand the callback something — but seeding a plan and
+ * a usage counter for them would be answering questions they never ask, and the
+ * specs that *are* about the published-form limit set `form.count` themselves.
+ *
+ * Note what the mock silently does not do: `lockOrganization` issues a
+ * `SELECT … FOR UPDATE` through `$queryRaw`, and against a mock that resolves
+ * to `undefined` and nothing waits on anything. **The lock is the entire point
+ * of that feature and this level cannot see it at all** — which is why the
+ * race itself is asserted in `tests/integration/plan-limit-races.spec.ts`,
+ * against a real PostgreSQL and two concurrent requests.
+ */
+export function passThroughTransactionOnly(prismaMock: DeepMockProxy<PrismaClient>): void {
   prismaMock.$transaction.mockImplementation((fn: any) => fn(prismaMock))
 }

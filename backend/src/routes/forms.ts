@@ -212,15 +212,21 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
   // `services/entitlements.ts`. This route can publish too, because
   // `updateFormSchema` accepts `status`; gating only PATCH /:id/status would
   // leave the limit reachable through the back door.
-  if (data.status === 'published') {
-    await assertCanPublishForm(existing.organizationId, id)
-  }
-
-  const form = await prisma.form.update({
-    where: { id },
-    data: data as any,
-    include: formCounts
-  })
+  //
+  // The check and the write are one transaction, because the check counts the
+  // rows the write changes: outside it, two publishes at the last slot both saw
+  // it free (features/0027). Everything above stays outside — `verifyFormOwnership`
+  // and validation write nothing, and a transaction should be short.
+  const form = data.status === 'published'
+    ? await prisma.$transaction(async (tx) => {
+        await assertCanPublishForm(tx, existing.organizationId, id)
+        return tx.form.update({ where: { id }, data: data as any, include: formCounts })
+      })
+    : await prisma.form.update({
+        where: { id },
+        data: data as any,
+        include: formCounts
+      })
 
   res.json({ form: toApiForm(form) })
 }))
@@ -236,15 +242,18 @@ formsRouter.patch('/:id/status', authenticate, asyncHandler(async (req: AuthRequ
 
   const existing = await verifyFormOwnership(req, id)
 
-  if (status === 'published') {
-    await assertCanPublishForm(existing.organizationId, id)
-  }
-
-  const form = await prisma.form.update({
-    where: { id },
-    data: { status },
-    include: formCounts
-  })
+  // One transaction around the check and the write, for the reason spelled out
+  // in PUT /:id above (features/0027).
+  const form = status === 'published'
+    ? await prisma.$transaction(async (tx) => {
+        await assertCanPublishForm(tx, existing.organizationId, id)
+        return tx.form.update({ where: { id }, data: { status }, include: formCounts })
+      })
+    : await prisma.form.update({
+        where: { id },
+        data: { status },
+        include: formCounts
+      })
 
   res.json({ form: toApiForm(form) })
 }))

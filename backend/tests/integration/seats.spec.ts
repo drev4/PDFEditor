@@ -143,7 +143,7 @@ describe('team seats', () => {
     it('uses the purchased quantity when it is above the catalogue floor', async () => {
       await activate(owner.organization.id, { quantity: 8 })
 
-      expect(await seatLimitFor(owner.organization.id)).toBe(8)
+      expect(await seatLimitFor(prisma, owner.organization.id)).toBe(8)
     })
 
     it.each([
@@ -153,7 +153,7 @@ describe('team seats', () => {
     ])('degrades to the Team floor on %s — never to unlimited', async (_label, quantity) => {
       await activate(owner.organization.id, { quantity: quantity as number | undefined })
 
-      const limit = await seatLimitFor(owner.organization.id)
+      const limit = await seatLimitFor(prisma, owner.organization.id)
 
       expect(limit).toBe(PLANS.team.seats)
       // The bug this guards against is `null`, which `isWithin` treats as
@@ -167,7 +167,7 @@ describe('team seats', () => {
       // A quantity on a plan whose seats are declared is not a limit. Only
       // `PER_SEAT_PLANS` reads it, which is the containment that keeps this
       // exception from becoming a general one.
-      expect(await seatLimitFor(owner.organization.id)).toBe(PLANS.pro.seats)
+      expect(await seatLimitFor(prisma, owner.organization.id)).toBe(PLANS.pro.seats)
     })
 
     it('lifts a refusal when the customer buys another seat, with no deploy', async () => {
