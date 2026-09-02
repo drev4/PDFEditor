@@ -1,5 +1,10 @@
 import { logger } from '../services/logger.js'
 import { OVERRIDE_ENVIRONMENTS } from '../services/plans.js'
+import {
+  MIN_CODE_LENGTH,
+  REGISTRATION_MODES,
+  type RegistrationMode
+} from './registration.js'
 
 /**
  * Configuration checked once, at the boundary of a real process (features/0028).
@@ -123,6 +128,8 @@ export const KNOWN_VARIABLES: readonly string[] = [
   'STRIPE_WEBHOOK_SECRET',
   'STRIPE_PRICE_PRO',
   'STRIPE_PRICE_TEAM',
+  'REGISTRATION_MODE',
+  'REGISTRATION_CODE',
 
   // Deliberately unchecked, one reason each.
   'NODE_ENV',                          // the input to `isStrict`; checking it against itself proves nothing
@@ -312,6 +319,57 @@ export function validateEnv(env: NodeJS.ProcessEnv, role: ProcessRole): string[]
         `REDIS_URL has scheme "${scheme}"; expected redis or rediss. An ` +
         'unusable value here is read as "a queue is configured", so the API ' +
         'stops embedding inline and no worker can pick the jobs up.'
+      )
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Registration (features/0033). Checked for **both** roles, although the
+  // worker registers nobody — the same argument JWT_SECRET makes above: the
+  // two processes are one image reading one environment, and a rule that
+  // holds for one and not the other produces an environment that boots the
+  // worker and then fails the API, one deploy later.
+  //
+  // `config/registration.ts` defaults an unset mode to `open`. That default
+  // is only safe because of the strict check here: without it a production
+  // deploy that forgot the variable would run an open beta and nothing would
+  // say so. The pair is the whole mechanism, so neither half may be removed
+  // without the other.
+  // ---------------------------------------------------------------------
+  const registrationMode = value(env, 'REGISTRATION_MODE')
+
+  if (strict && !registrationMode) {
+    problems.push(
+      'REGISTRATION_MODE is missing. It decides whether POST /api/auth/register ' +
+      'accepts new accounts from the open internet; unset means "open", so a ' +
+      'deployment running a private beta would quietly let anybody sign up. Set ' +
+      'it to "open" or "invite_only" explicitly.'
+    )
+  } else if (registrationMode !== undefined && !REGISTRATION_MODES.includes(registrationMode as RegistrationMode)) {
+    // A shape error, so it is checked in every environment: a typo like
+    // "inviteonly" is not a missing value, it is a value that cannot work.
+    problems.push(
+      `REGISTRATION_MODE="${registrationMode}" is not a mode. Expected "open" or ` +
+      '"invite_only".'
+    )
+  }
+
+  if (registrationMode === 'invite_only') {
+    const code = value(env, 'REGISTRATION_CODE')
+
+    if (!code) {
+      problems.push(
+        'REGISTRATION_MODE=invite_only requires REGISTRATION_CODE. Without it no ' +
+        'code can ever match, so registration is closed with no way back in ' +
+        'short of another deploy — which is the one thing this switch exists to ' +
+        'avoid.'
+      )
+    } else if (code.length < MIN_CODE_LENGTH) {
+      problems.push(
+        `REGISTRATION_CODE is ${code.length} characters; expected at least ` +
+        `${MIN_CODE_LENGTH}. It is a shared secret sent by email and guessed ` +
+        'through the register rate limiter, so a short one is a word somebody ' +
+        'picked rather than a credential.'
       )
     }
   }

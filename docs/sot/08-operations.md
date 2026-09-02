@@ -48,6 +48,8 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `LOG_LEVEL` | no | `info` (`silent` under `NODE_ENV=test`) | `pino`'s level ([`features/0025`](../../features/0025-structured-logging.md)). `NODE_ENV=development` also switches the output to human-readable; anything else is one JSON object per line — see [Observability](#observability) |
 | `NODE_ENV` | no | — | Sets Prisma's query logging (`services/db.ts`), and **gates `DEV_PLAN_KEY` below**. That gate is an allowlist, so an unset or unexpected value is the safe case |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
+| `REGISTRATION_MODE` | **in strict environments** | `open` | `open` or `invite_only`. Whether `POST /api/auth/register` accepts new accounts from anybody. [Validated at boot](#what-refuses-to-boot-and-what-only-warns), and see [closing and reopening sign-ups](#closing-and-reopening-sign-ups) |
+| `REGISTRATION_CODE` | only when `invite_only` | — | The shared signup code, at least 16 characters. Never logged |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
 | `UPLOAD_URL_TTL_SECONDS` | no | `900` (15 min), min `60` | How long a signed PDF URL stays valid. The link is a bearer capability, so longer is not free — see [07](./07-security-and-privacy.md) |
 | `PDF_STORAGE_DRIVER` | no | `local` | Where PDF bytes live: `local` (this process's disk) or `s3` (any S3-compatible store). **An unrecognised value refuses to boot** — see below |
@@ -269,12 +271,38 @@ Three things about it are worth knowing before changing a variable or a rule.
 | `REDIS_URL` | Present but not a `redis:`/`rediss:` URL |
 | `TRUST_PROXY_HOPS` | **API only.** Present but not a non-negative integer |
 | `STRIPE_SECRET_KEY` | **API only.** Set without `STRIPE_WEBHOOK_SECRET`, or with neither price id |
+| `REGISTRATION_MODE` | Missing (strict only), or not `open`/`invite_only` |
+| `REGISTRATION_CODE` | Missing, or shorter than 16 characters, when `REGISTRATION_MODE=invite_only` |
+
+`REGISTRATION_MODE` is the newest entry and the only one whose *required* rule exists to protect a **default** rather than to catch a missing value ([`features/0033`](../../features/0033-close-public-registration.md)). `config/registration.ts` treats an unset mode as `open`, which is the right behaviour for a developer and the wrong one for a deployment running a private beta — so the two halves are a pair, and removing either leaves the other unsafe. Like `JWT_SECRET`, it is asked of the worker too, although the worker registers nobody: same image, same environment, same argument as the paragraph below.
 
 `BASE_URL`, `FRONTEND_URL`, `TRUST_PROXY_HOPS` and the Stripe group are **not** asked of the worker, and that is deliberate rather than an omission: the worker mints no URLs (`services/pdf-embed.ts` parses `form.pdfUrl` with `pdfFilenameFrom`, it never builds one), serves no HTTP and never calls Stripe, so requiring them would fail a correct deployment. `JWT_SECRET` and `DATABASE_URL` *are* asked of both, even though nothing on the worker's path signs a token today — the two processes are one image reading one environment, and a rule that holds for one and not the other produces the worst outcome available: an environment that boots the worker and then fails the API, one deploy later.
 
 **Everything else still warns and falls back**, and that contract has not changed. `config/env.ts` is the narrow version of this for tunables: an unparseable `EMBED_WORKER_CONCURRENCY` is logged and the safe default is used, never a permissive one, because a typo in a tunable must not take the service down. `validate-env.ts` lists every one of those in `KNOWN_VARIABLES` with a one-line reason for leaving it unchecked, and `backend/tests/config-coverage.spec.ts` fails when a variable is read anywhere in `src/` and named nowhere in that list — the same lint-rule-shaped spec as `tests/async-handler-coverage.spec.ts`, for the same reason: `npm run lint` lints nothing.
 
 The worker's own `REDIS_URL` refusal stays where it was, in `worker.ts`, and the validator deliberately does not duplicate it. Two different messages for one condition is worse than one.
+
+## Closing and reopening sign-ups
+
+The private beta is invitation-only and public registration opens a week later ([`features/0033`](../../features/0033-close-public-registration.md)). **Both directions are one operator action, on purpose** — opening on the day was never going to be a code change, a PR and a deploy.
+
+**To close sign-ups:**
+
+```bash
+REGISTRATION_MODE=invite_only
+REGISTRATION_CODE=<at least 16 characters>   # generate: openssl rand -base64 24
+```
+
+Restart the API. **The worker needs no restart** — it registers nobody — but it *does* validate both variables at boot, so a worker restarted later with a half-finished environment refuses to start. Set them for both processes.
+
+**To reopen:** set `REGISTRATION_MODE=open` and restart the API. `REGISTRATION_CODE` can be left in place; it is ignored in `open` mode, and a wrong code is not an error there.
+
+Four things to know before you touch it:
+
+- **The code is shared, not per person.** Anyone it is forwarded to can register. That was weighed and accepted because the beta is free — a forwarded code costs an unpaid account, not revenue. If a cohort ever needs per-person revocable admission, that is the org-less-invitation item in [`docs/BACKLOG.md`](../BACKLOG.md).
+- **There is no way to rotate it without a restart**, and no screen that shows it. It lives only in the environment.
+- **Existing members are unaffected in both directions.** Closing sign-ups does not touch anybody who already has an account, and `POST /api/organizations/invitations/accept` keeps working — a customer can still add colleagues while the front door is shut.
+- **`REGISTRATION_MODE=invite_only` with no `REGISTRATION_CODE` refuses to boot**, rather than starting with a door nothing can open.
 
 ## Telling a complete export from a truncated one
 

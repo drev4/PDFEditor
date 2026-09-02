@@ -23,13 +23,21 @@ import {
 } from '../services/session-cookie.js'
 import { organizationSlug, personalOrganizationName } from '../services/organization.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
+import { registrationMode, registrationIsClosed, codeMatches } from '../config/registration.js'
 
 export const authRouter = Router()
 
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  name: z.string().optional()
+  name: z.string().optional(),
+  /**
+   * The private beta's signup code (features/0033). Optional in the schema in
+   * every mode: whether it is *required* is configuration, not shape, and a
+   * missing code must answer 403 like a wrong one rather than 400 with a
+   * validation detail naming the field.
+   */
+  code: z.string().optional()
 })
 
 const loginSchema = z.object({
@@ -59,6 +67,22 @@ async function startSession(res: Response, userId: string): Promise<string> {
   return signAccessToken(userId)
 }
 
+// GET /api/auth/registration
+//
+// What the signup screen reads before anybody has an account, so it can draw
+// the code field — or not — instead of letting a visitor fill in a whole form
+// and discover the beta from a 403 (features/0033).
+//
+// Two things it deliberately does not do. **It carries no rate limiter**: it
+// reads no database, takes no input and returns one enum, so there is nothing
+// here to exhaust or to guess. And **it returns the mode alone** — never the
+// code, its length, or whether one is configured. Knowing that sign-ups are
+// invitation-only is the message the screen has to show anyway; anything more
+// would be helping somebody guess.
+authRouter.get('/registration', (_req, res) => {
+  res.json({ mode: registrationMode() })
+})
+
 // POST /api/auth/register
 authRouter.post('/register', registerRateLimit, asyncHandler(async (req, res, next) => {
   const validation = registerSchema.safeParse(req.body)
@@ -69,7 +93,29 @@ authRouter.post('/register', registerRateLimit, asyncHandler(async (req, res, ne
     })
   }
 
-  const { email, password, name } = validation.data
+  const { email, password, name, code } = validation.data
+
+  // Closed registration for the private beta (features/0033).
+  //
+  // **Before the email lookup, deliberately.** Refusing after it would let an
+  // unadmitted caller tell a registered address from an unregistered one by
+  // comparing the 400 "Email already registered" against this 403 — turning a
+  // beta gate into an account-enumeration oracle.
+  //
+  // A missing code and a wrong code are one answer for the same reason.
+  //
+  // 403, not 402: 402 means a plan limit in this API and this is not one. And
+  // this gate is *only* here — `POST /api/organizations/invitations/accept`
+  // also creates users and must keep working in every mode, because the person
+  // redeeming a single-use, expiring, address-bound token was already admitted
+  // by a customer.
+  if (registrationIsClosed() && !codeMatches(code)) {
+    throw new AppError(
+      403,
+      'Sign-ups are invitation-only right now. Use the code from your ' +
+      'invitation email, or join the waitlist at docaiflow.com.'
+    )
+  }
 
   const existingUser = await prisma.user.findUnique({ where: { email } })
   if (existingUser) {

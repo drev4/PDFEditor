@@ -32,7 +32,30 @@ describe('Auth Service', () => {
     token: 'test-token'
   }
 
+  /** features/0033 — what the signup screen reads before it draws. */
+  describe('getRegistrationMode', () => {
+    it('reads the mode from the unauthenticated endpoint', async () => {
+      vi.mocked(api.get).mockResolvedValue({ mode: 'invite_only' })
+
+      await expect(authService.getRegistrationMode()).resolves.toBe('invite_only')
+      expect(api.get).toHaveBeenCalledWith('/auth/registration')
+    })
+  })
+
   describe('register', () => {
+    it('sends the signup code when one is given', async () => {
+      vi.mocked(api.post).mockResolvedValue(mockAuthResponse)
+
+      await authService.register('test@example.com', 'password123', 'Test User', 'a-code')
+
+      expect(api.post).toHaveBeenCalledWith('/auth/register', {
+        email: 'test@example.com',
+        password: 'password123',
+        name: 'Test User',
+        code: 'a-code'
+      })
+    })
+
     it('holds the access token in memory, never in localStorage', async () => {
       vi.mocked(api.post).mockResolvedValue(mockAuthResponse)
 

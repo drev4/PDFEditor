@@ -10,9 +10,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!user.value)
 
-  async function register(email: string, password: string, name?: string) {
+  async function register(email: string, password: string, name?: string, code?: string) {
     return useAsyncAction({ loading, error }, async () => {
-      const response = await authService.register(email, password, name)
+      const response = await authService.register(email, password, name, code)
       user.value = response.user
       sessionSettled()
       return response

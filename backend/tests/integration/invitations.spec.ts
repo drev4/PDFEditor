@@ -151,6 +151,65 @@ describe('invitations', () => {
       expect(res.status).toBe(400)
       expect(await prisma.user.count()).toBe(1)
     })
+
+    /**
+     * Closed registration does not close this path (features/0033).
+     *
+     * `REGISTRATION_MODE=invite_only` shuts `POST /api/auth/register`, and the
+     * tempting way to build that was a gate over every route that creates a
+     * `User` — which would catch this one. It must not: the person redeeming a
+     * single-use, expiring, address-bound token was already admitted by a
+     * paying customer, and closing it would lock out the colleagues of exactly
+     * the customers the beta is for.
+     *
+     * Set on `process.env` rather than in the vitest config because it is one
+     * case, and deleted in `finally` so it cannot leak into the specs that run
+     * next — `vitest.integration.config.ts` pins the mode open for all of them.
+     */
+    it('still works while registration is closed', async () => {
+      process.env.REGISTRATION_MODE = 'invite_only'
+      process.env.REGISTRATION_CODE = 'a-code-nobody-here-sends'
+
+      try {
+        const { organization, authHeader } = await ownerWithOrganization()
+        const address = email('newcomer')
+        const { token } = await invite(authHeader, address)
+
+        // No `code` in the body: this endpoint does not take one.
+        const res = await request(app)
+          .post('/api/organizations/invitations/accept')
+          .send({ token, password: PASSWORD, name: 'New Person' })
+
+        expect(res.status).toBe(201)
+        await prisma.membership.findFirstOrThrow({
+          where: { organizationId: organization.id, user: { email: address } }
+        })
+      } finally {
+        delete process.env.REGISTRATION_MODE
+        delete process.env.REGISTRATION_CODE
+      }
+    })
+
+    /**
+     * The other half of the same guarantee: the door that *is* closed stays
+     * closed while that one is open.
+     */
+    it('does not reopen public registration', async () => {
+      process.env.REGISTRATION_MODE = 'invite_only'
+      process.env.REGISTRATION_CODE = 'a-code-nobody-here-sends'
+
+      try {
+        const res = await request(app)
+          .post('/api/auth/register')
+          .send({ email: email('stranger'), password: PASSWORD })
+
+        expect(res.status).toBe(403)
+        expect(await prisma.user.count()).toBe(0)
+      } finally {
+        delete process.env.REGISTRATION_MODE
+        delete process.env.REGISTRATION_CODE
+      }
+    })
   })
 
   describe('accepting with an account', () => {

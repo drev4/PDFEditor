@@ -85,6 +85,14 @@ export default defineConfig({
                 STRIPE_WEBHOOK_SECRET: '',
                 STRIPE_PRICE_PRO: '',
                 STRIPE_PRICE_TEAM: '',
+                // Registration is OPEN for this suite, whatever the developer's
+                // `.env` says (features/0033). Same reasoning as `DEV_PLAN_KEY`
+                // above: `app.ts` calls `dotenv.config()`, so a local
+                // `REGISTRATION_MODE=invite_only` would close the sign-up
+                // `e2e/helpers.ts` performs to create every fixture user, and
+                // the whole suite would fail on a 403 that has nothing to do
+                // with what it is testing.
+                REGISTRATION_MODE: 'open',
             },
         },
         {
