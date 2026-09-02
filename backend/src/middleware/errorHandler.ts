@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { ZodError } from 'zod'
 import { logger } from '../services/logger.js'
+import { captureError } from '../services/error-tracking.js'
 
 export class AppError extends Error {
   constructor(
@@ -51,6 +52,10 @@ export function errorHandler(
   // connection instead, which is the honest outcome (features/0026).
   if (res.headersSent) {
     log.error({ err }, 'request failed after the response had started')
+    // Reported too: a stream that died mid-write is a fault, and it is one of
+    // the few this API can produce where the client sees a truncated body and
+    // no status to explain it.
+    captureError(err, { requestId: req.requestId, source: 'api-stream' })
     return next(err)
   }
 
@@ -63,6 +68,20 @@ export function errorHandler(
     // The stack, and only here. A 4xx printing one is what taught everybody to
     // ignore this output.
     log.error({ err }, 'request failed')
+
+    // And the tracker, on exactly the same branch (features/0034). Putting it
+    // here rather than above the `if` is the whole decision: a 4xx must not be
+    // reported, for the reason this file already argues at length. The context
+    // is built one field at a time — no request object is handed over, because
+    // a body on this API is answer values typed by a member of the public.
+    captureError(err, {
+      requestId: req.requestId,
+      // The matched pattern, never the URL, so an id or a token in the path
+      // never reaches a third party. Same rule as the log line.
+      route: req.route?.path ? `${req.baseUrl}${req.route.path}` : req.baseUrl || undefined,
+      statusCode: err instanceof AppError ? err.statusCode : 500,
+      source: 'api'
+    })
   }
 
   if (err instanceof AppError) {

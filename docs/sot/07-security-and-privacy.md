@@ -57,6 +57,13 @@ OUTBOUND — the only requests this product makes to an address a CUSTOMER chose
   └── POST <customer endpoint>                https only, resolved and checked,
                                               connected to the checked address,
                                               no redirects, 10s cap (features/0020)
+
+OUTBOUND — to addresses WE chose, and only when configured
+  ├── Stripe API                              billing; off unless STRIPE_SECRET_KEY is set
+  └── Sentry ingest                           exception message, stack, request id,
+                                              route name. An allowlist, never a body.
+                                              Off unless a DSN is set; never from a
+                                              respondent's page (features/0034)
 ```
 
 **Outbound requests are new, and they are SSRF until proven otherwise** ([`features/0020`](../../features/0020-outbound-webhooks.md)). Until webhooks there was no outbound HTTP anywhere in `backend/src` — no `fetch(`, no axios, no `http.request` — and the only egress was the Stripe SDK, to an address this repository chose. A webhook inverts that: the URL comes from a customer and the request is made from inside the deployment's network, which without checks makes this product a proxy to `169.254.169.254` (cloud metadata, credentials on many providers), to `localhost:3000` (this API, behind whatever sits in front of it) and to the private range the database is on.
@@ -263,8 +270,11 @@ Needed for any privacy policy, DPA or security questionnaire, so it is maintaine
 | Answer values, **a third time, as an outbound push** | **Respondent** | Sent in the body of `response.created` to a URL the customer chose | The form author's basis; we are the processor | Not stored by us at all — but it leaves the building on somebody else's schedule, and where it lands is the customer's system ([`features/0020`](../../features/0020-outbound-webhooks.md)) |
 | Webhook endpoint URL, encrypted secret, delivery metadata | Account holder (the organization) | `webhook_endpoints`, `webhook_deliveries` | Contract | Until the endpoint is deleted (`onDelete: Cascade`). **The delivery log holds no payload**, deliberately: it would otherwise be a copy of respondent answers that outlives the form they came from |
 | IP address, user agent | **Respondent** | `responses` | The form author's, disclosed to the respondent in the notice on the public form | **Not collected unless the form's author turns it on** ([`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md)), and then indefinitely — there is no retention limit, because there is no scheduler. Rows written before that change keep what they hold |
+| Exception message, stack, request id, route name | Account holder — **and never a respondent** | Sent to Sentry when `SENTRY_DSN`/`VITE_SENTRY_DSN` is configured; not stored by us | Legitimate interest (keeping the service working) | Held by Sentry on its own retention, so it belongs on the subprocessor list below. What leaves is an **allowlist** — message, stack, request id, matched route, status, process — never a body, a query string or a header ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). A stack can still name a variable, which is why the allowlist is the control rather than a filter over everything |
 | Stripe customer and subscription identifiers | Account holder (the paying organization) | `subscriptions` | Contract | Until the organization is deleted (`onDelete: Cascade`) |
 | Stripe event ids | — | `stripe_events` | Legitimate interest (correct billing) | Indefinite, and deliberately not linked to an organization — see [03-domain-model](./03-domain-model.md) |
+
+**Sentry is a subprocessor whenever a DSN is configured**, and it is the second one on a list this product still does not formally have. Two things bound it, and both are enforced in code rather than promised here. What is sent is an **allowlist**, because the reason a denylist cannot work for the log applies identically: answer values arrive keyed by field id, so their paths are the customer's data and no fixed set of names covers them. And **the respondent surface reports nothing at all** — the three routes marked `meta: { public: true }` are excluded at the call site and again in `beforeSend`, so a person filling in a public form is never the subject of an event. Session Replay is not enabled anywhere. Details and the accepted cost are in [08-operations](./08-operations.md#error-tracking).
 
 **Neither Stripe row is card data.** `subscriptions` holds `stripe_customer_id`, `stripe_subscription_id`, `price_id`, a status string and two dates. The name on the card, the card number, the billing address and the invoice history are all held by **Stripe**, which is therefore a subprocessor and belongs on the subprocessor list this product does not yet have (see below). `stripe_events` holds an event id, an event type and a timestamp, and describes no person at all.
 

@@ -74,7 +74,13 @@ app.use(helmet({
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  credentials: true,
+  // The SPA is a different origin, and a cross-origin response exposes only a
+  // handful of headers to script unless the server says otherwise. Without this
+  // line `X-Request-Id` is set on the wire, visible in devtools, and
+  // unreadable by `fetch` — so the browser could never attach it to an error
+  // report (features/0034).
+  exposedHeaders: ['X-Request-Id']
 }))
 // ─────────────────────────────────────────────────────────────────────────────
 // DO NOT MOVE THIS BELOW `express.json()`.

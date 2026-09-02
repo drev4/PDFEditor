@@ -50,6 +50,7 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
 | `REGISTRATION_MODE` | **in strict environments** | `open` | `open` or `invite_only`. Whether `POST /api/auth/register` accepts new accounts from anybody. [Validated at boot](#what-refuses-to-boot-and-what-only-warns), and see [closing and reopening sign-ups](#closing-and-reopening-sign-ups) |
 | `REGISTRATION_CODE` | only when `invite_only` | — | The shared signup code, at least 16 characters. Never logged |
+| `SENTRY_DSN` | no | — | Error tracking ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). Unset means off. A malformed value [refuses to boot](#what-refuses-to-boot-and-what-only-warns), because the SDK would disable itself silently. See [Error tracking](#error-tracking) |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
 | `UPLOAD_URL_TTL_SECONDS` | no | `900` (15 min), min `60` | How long a signed PDF URL stays valid. The link is a bearer capability, so longer is not free — see [07](./07-security-and-privacy.md) |
 | `PDF_STORAGE_DRIVER` | no | `local` | Where PDF bytes live: `local` (this process's disk) or `s3` (any S3-compatible store). **An unrecognised value refuses to boot** — see below |
@@ -273,6 +274,7 @@ Three things about it are worth knowing before changing a variable or a rule.
 | `STRIPE_SECRET_KEY` | **API only.** Set without `STRIPE_WEBHOOK_SECRET`, or with neither price id |
 | `REGISTRATION_MODE` | Missing (strict only), or not `open`/`invite_only` |
 | `REGISTRATION_CODE` | Missing, or shorter than 16 characters, when `REGISTRATION_MODE=invite_only` |
+| `SENTRY_DSN` | Present but not an `http(s)` URL. Optional — absence is fine and means tracking is off |
 
 `REGISTRATION_MODE` is the newest entry and the only one whose *required* rule exists to protect a **default** rather than to catch a missing value ([`features/0033`](../../features/0033-close-public-registration.md)). `config/registration.ts` treats an unset mode as `open`, which is the right behaviour for a developer and the wrong one for a deployment running a private beta — so the two halves are a pair, and removing either leaves the other unsafe. Like `JWT_SECRET`, it is asked of the worker too, although the worker registers nobody: same image, same environment, same argument as the paragraph below.
 
@@ -407,16 +409,40 @@ What CI still does not do:
 
 **What the error handler logs.** `middleware/errorHandler.ts` logs 5xx and any non-`AppError` at `error` with the stack, and a 4xx at `info` with its status and message — no stack, because it is not a fault. A 4xx is the API answering correctly — the client asked for something it may not have — and it is already reported in the response. This is not fastidiousness: opening the login page with no session calls `POST /api/auth/refresh`, which correctly answers `401 Not authenticated`, and that printed a stack trace on every anonymous page load. A log that cries fault when nothing is wrong is a log people stop reading, which is where the real fault will be. That is what [`features/0025`](../../features/0025-structured-logging.md) settled: a 4xx is no longer dropped, it is one `info` line carrying the same request id as everything else that request did.
 
-There is no log aggregation, no metrics, no error tracking and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone.
+There is no log aggregation, no metrics and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone — **error tracking now reports the exception, but nothing wakes anybody up**.
 
 Minimum viable observability, in order:
 
 1. ~~**`pino` with a request id** on every log line, and redaction configured for `authorization`, `password` and answer values.~~ **Done** ([`features/0025`](../../features/0025-structured-logging.md)).
-2. **Error tracking** (Sentry or equivalent) on both the API and the SPA, so browser-side editor failures are visible at all.
+2. ~~**Error tracking** (Sentry or equivalent) on both the API and the SPA, so browser-side editor failures are visible at all.~~ **Done** ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)) — see [Error tracking](#error-tracking) below.
 3. **Real health checks** — the current `/health` returns `ok` even when the database is unreachable. Split liveness from readiness, and have readiness check the database.
 4. **Business metrics** — forms published, responses received, PDF embed failures. These are also the numbers that plan metering will need.
 
 Two of these are now sharper than they were, because a second process exists. Readiness should answer for the queue as well as the database, and the "dead worker" case above has no signal at all today beyond reading logs — a queue depth that only grows is the metric to export first.
+
+### Error tracking
+
+Sentry, on both sides, and **off unless configured** ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). `backend/src/services/error-tracking.ts` and `frontend/src/services/error-tracking.ts` are the only modules that import the SDK, the same boundary `services/stripe.ts` draws.
+
+| | |
+|---|---|
+| `SENTRY_DSN` | Backend. Unset means error tracking is off — no init, no network, no throw. A **present but malformed** value refuses to boot (see below) |
+| `VITE_SENTRY_DSN` | SPA. **Compile time**: it is baked into the bundle by `npm run build` and cannot be changed by restarting anything. It is also **public by design**, because it ships in that bundle — it is not a secret and must not be handled as one |
+
+**What is sent is an allowlist, not a redaction list.** The message, the stack, the request id, the matched route, the status and the process — and nothing else. The mechanism is `defaultIntegrations: false` on both sides, so the SDK collects nothing on its own; `beforeSend` deletes `request`, `user` and `breadcrumbs` as a **backstop against a future change that forgets**, exactly as pino's `redact` is a backstop rather than the mechanism. The reason a denylist cannot work here is the one this document already gives for the log: answer values arrive keyed by **field id**, so their paths are the customer's data and there is no fixed set of names to strip.
+
+**No Session Replay, anywhere.** It is off because it is never switched on.
+
+**The public respondent surface reports nothing at all.** The three routes marked `meta: { public: true }` in the SPA router — `/form/:shareId`, its confirmation page and `/invitations/:token` — are excluded, at the call site and again in `beforeSend`. That is a decision rather than an oversight: [`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md) had just stopped storing a respondent's IP by default because collecting it for an unimplemented purpose was indefensible, and sending the same person's browser session to a third-party processor without touching the notice that feature wrote would walk it back silently. **The cost is real: a bug that only happens on the public form is still invisible.** Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+**Nothing is sent from development or test**, decided by `isStrict` rather than by `NODE_ENV !== 'production'` — so an unset, misspelled or dropped `NODE_ENV` falls into the reporting branch rather than the silent one. Same allowlist, and the same constant, as `DEV_PLAN_KEY` and `REGISTRATION_MODE`.
+
+**A 4xx is never reported.** `middleware/errorHandler.ts` reports on exactly the branch that logs at `error` — 5xx and non-`AppError` throws — for the reason that file already argues: a 4xx is the API answering correctly, and reporting it buries the real fault and spends the quota that would have caught it.
+
+Two failure modes worth knowing, because both are silent by nature and both were closed deliberately:
+
+- **A malformed `SENTRY_DSN` does not make the SDK complain.** It disables itself quietly, so the process boots, serves, and reports nothing. That was observed, not assumed. `validate-env.ts` now refuses to boot on it, the same treatment `WEBHOOK_SIGNING_KEY` gets.
+- **The SPA's CSP is an allowlist**, so an ingest origin missing from `connect-src` means the browser refuses every event while the SDK reports success. The origin is therefore *derived from the DSN* in `frontend/src/services/sentry-dsn.ts` rather than configured separately, and a DSN that is not a URL **fails the build** rather than emitting a policy without it.
 
 ## Backups and recovery
 

@@ -412,6 +412,17 @@ X-VuePDF-Event-Type: response.created
 
 **What is deliberately absent.** No payload bodies in the delivery log (they would be a second copy of respondent answers, outliving the form). No replay endpoint. No event types other than `response.created`. No customer-facing screen — endpoints are configured through this API only ([`docs/BACKLOG.md`](../BACKLOG.md)).
 
+## `X-Request-Id`, on every response
+
+Every response carries `X-Request-Id`, set by `middleware/requestLog.ts` ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). It is the id every log line for that request was written under, so a client that reports a failure can name the request and the server log for it can be found.
+
+Four things about it:
+
+- **It is always the id this API generated**, never the inbound `x-request-id`. That value is the caller's, is treated as untrusted, and is only ever *recorded* as `upstreamRequestId` on the completion line ([08-operations](./08-operations.md#observability)). Echoing it back would reflect an attacker-chosen string and make the header useless as a key.
+- **It is set before the `/health` early return**, so a health check is traceable too even though it is not logged.
+- **`app.ts` names it in the CORS `exposedHeaders`.** The SPA is a different origin, and without that a cross-origin response exposes only a handful of headers to script — the header would be on the wire, visible in devtools, and unreadable by `fetch`.
+- `frontend/src/services/api.ts` reads it and puts it on `ApiError.requestId`, which is what lets a browser-side error report be joined to the server line that explains it.
+
 ## Error format — `middleware/errorHandler.ts`
 
 ```

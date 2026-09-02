@@ -130,6 +130,7 @@ export const KNOWN_VARIABLES: readonly string[] = [
   'STRIPE_PRICE_TEAM',
   'REGISTRATION_MODE',
   'REGISTRATION_CODE',
+  'SENTRY_DSN',
 
   // Deliberately unchecked, one reason each.
   'NODE_ENV',                          // the input to `isStrict`; checking it against itself proves nothing
@@ -309,6 +310,39 @@ export function validateEnv(env: NodeJS.ProcessEnv, role: ProcessRole): string[]
       'wrong-length key as absent, so webhook delivery switches itself off ' +
       'silently and endpoints can no longer be configured.'
     )
+  }
+
+  // Same shape as `WEBHOOK_SIGNING_KEY` above, and for the same reason
+  // (features/0034). The variable is **optional** — unset means error tracking
+  // is off, which is a deployment with less visibility rather than a broken
+  // one — but a value that is *present and unusable* is a different thing.
+  //
+  // The SDK does not throw on a malformed DSN: it logs to its own debug channel
+  // and disables itself, so the process boots, serves, reports success and
+  // sends nothing. That was verified rather than assumed — an API started with
+  // `SENTRY_DSN=totally-not-a-dsn` produced no error on any path anybody
+  // watches. It is precisely the failure this feature exists to remove, so it
+  // is caught here instead.
+  //
+  // Checked in every environment, like the other shape errors: a typo is not a
+  // missing value, and a developer benefits from hearing about it too.
+  const sentryDsn = value(env, 'SENTRY_DSN')
+  if (sentryDsn !== undefined) {
+    let parsed: URL | null = null
+    try {
+      parsed = new URL(sentryDsn)
+    } catch {
+      parsed = null
+    }
+
+    if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
+      problems.push(
+        `SENTRY_DSN="${sentryDsn}" is not a DSN. Expected ` +
+        'https://<key>@<host>/<projectId>. The SDK does not reject a bad one — ' +
+        'it disables itself quietly — so the process would boot, look ' +
+        'instrumented and report nothing.'
+      )
+    }
   }
 
   const redisUrl = value(env, 'REDIS_URL')

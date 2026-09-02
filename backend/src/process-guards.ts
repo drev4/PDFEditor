@@ -1,4 +1,11 @@
 import { logger } from './services/logger.js'
+import { captureError, flushErrorTracking } from './services/error-tracking.js'
+
+/**
+ * How long the uncaught-exception handler waits for the tracker before exiting.
+ * Bounded on purpose — see the handler below.
+ */
+const EXIT_FLUSH_MS = 2000
 /**
  * The last line of defence in a long-running process (features/0017, trap 4).
  *
@@ -39,13 +46,35 @@ export function installProcessGuards(processName: string): void {
       { err: reason },
       `[${processName}] unhandled promise rejection - staying up, but this is a bug`
     )
+    // "This is a bug" is exactly what an error tracker is for, and on the
+    // worker this is the only signal that exists (features/0034).
+    captureError(reason, { source: `${processName}:unhandledRejection` })
   })
 
   process.on('uncaughtException', error => {
     log.error({ err: error }, `[${processName}] uncaught exception - shutting down`)
+    captureError(error, { source: `${processName}:uncaughtException` })
     // Give the log a tick to flush before the process disappears. It matters
     // more with pino than it did with `console`: the write is asynchronous, so
     // exiting immediately would lose the one line explaining why (features/0025).
-    setTimeout(() => process.exit(1), 100).unref()
+    //
+    // The tracker needs the same courtesy and needs it more, because its write
+    // is a network call — an event still in the transport's buffer when the
+    // process exits is lost, and it is precisely the event explaining the
+    // crash.
+    //
+    // So the exit is sequenced **after** the flush rather than racing it: a
+    // 2-second flush behind a 100ms exit would lose the event almost every
+    // time, which is the same "looks instrumented, records nothing" failure
+    // this feature exists to avoid. The flush is bounded and cannot reject —
+    // `flushErrorTracking` swallows its own failure — so the worst case is
+    // `EXIT_FLUSH_MS` plus the pino tick, and a slow third party delays the
+    // exit rather than preventing it.
+    //
+    // **When tracking is off, which is every test and every developer machine,
+    // it resolves immediately and the timing is exactly what it was.**
+    void flushErrorTracking(EXIT_FLUSH_MS).finally(() => {
+      setTimeout(() => process.exit(1), 100).unref()
+    })
   })
 }

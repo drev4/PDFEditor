@@ -310,6 +310,69 @@ describe('validateEnv', () => {
   })
 
   /**
+   * Error tracking (features/0034).
+   *
+   * Optional, so absence is never a problem — but a value that is present and
+   * unusable is, because the SDK does not reject a bad DSN. It disables itself
+   * quietly, and the process then boots, serves and reports nothing. That was
+   * observed, not assumed: an API started with `SENTRY_DSN=totally-not-a-dsn`
+   * logged nothing at all. Same rule as `WEBHOOK_SIGNING_KEY`.
+   */
+  describe('SENTRY_DSN', () => {
+    it('is optional — an absent one is not a problem', () => {
+      const env = validStrictApi()
+      delete env.SENTRY_DSN
+
+      expect(validateEnv(env, 'api')).toEqual([])
+    })
+
+    it('accepts a real DSN', () => {
+      const env = validStrictApi()
+      env.SENTRY_DSN = 'https://abc123@o4507.ingest.de.sentry.io/42'
+
+      expect(validateEnv(env, 'api')).toEqual([])
+    })
+
+    it('rejects a value that is not a URL at all', () => {
+      const env = validStrictApi()
+      env.SENTRY_DSN = 'totally-not-a-dsn'
+
+      const problems = validateEnv(env, 'api')
+      expect(problems).toHaveLength(1)
+      expect(problems[0]).toContain('is not a DSN')
+    })
+
+    it('rejects a scheme the SDK will not post to', () => {
+      const env = validStrictApi()
+      env.SENTRY_DSN = 'ftp://abc123@ingest.example.com/42'
+
+      expect(validateEnv(env, 'api').join(' ')).toContain('is not a DSN')
+    })
+
+    /**
+     * A shape error, so development hears about it too — the same treatment
+     * `PDF_STORAGE_DRIVER` gets.
+     */
+    it('is checked in a lenient environment as well', () => {
+      const problems = validateEnv(
+        { NODE_ENV: 'development', SENTRY_DSN: 'nonsense' },
+        'api'
+      )
+
+      expect(problems.join(' ')).toContain('SENTRY_DSN')
+    })
+
+    it('is checked for the worker too', () => {
+      const env = validStrictApi()
+      env.SENTRY_DSN = 'nonsense'
+      delete env.BASE_URL
+      delete env.FRONTEND_URL
+
+      expect(validateEnv(env, 'worker').join(' ')).toContain('SENTRY_DSN')
+    })
+  })
+
+  /**
    * The messages are the deliverable. An operator reading one at 3am must be
    * able to act without opening this repository, which means every message
    * names its variable and says what goes wrong if it is left alone.
