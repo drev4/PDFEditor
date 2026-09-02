@@ -381,13 +381,24 @@ organizationsRouter.post('/invitations', authenticate, asyncHandler(async (req: 
   // It **buys nothing**. On a per-seat plan the seats are bought by the owner
   // in Stripe's portal and this only refuses the one that was not; see
   // `assertCanInvite` for why pushing a quantity from here was rejected.
-  await assertCanInvite(caller.organizationId)
+  //
+  // The check and the insert are one transaction, because the check counts the
+  // rows the insert adds to: outside it, two invitations sent at the same
+  // instant on the last seat both counted `n` and both got in (features/0027).
+  // `requireRole`, validation and the "already a member" check stay above it —
+  // none of them writes, and a transaction should be short.
+  const { id, token, expiresAt } = await prisma.$transaction(async (tx) => {
+    await assertCanInvite(tx, caller.organizationId)
 
-  const { id, token, expiresAt } = await createInvitation({
-    organizationId: caller.organizationId,
-    email,
-    role,
-    invitedByUserId: req.userId!
+    return createInvitation(
+      {
+        organizationId: caller.organizationId,
+        email,
+        role,
+        invitedByUserId: req.userId!
+      },
+      tx
+    )
   })
 
   // The token is returned exactly once, here. There is no email service in

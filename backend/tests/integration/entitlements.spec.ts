@@ -391,9 +391,9 @@ describe('plan limits', () => {
       // One member plus one outstanding invitation is already two seats on a
       // one-seat plan. Counting memberships alone would let an organization at
       // its limit hand out any number of working keys.
-      await expect(assertCanInvite(author.organization.id)).rejects.toMatchObject({
-        statusCode: 402
-      })
+      await expect(
+        prisma.$transaction((tx) => assertCanInvite(tx, author.organization.id))
+      ).rejects.toMatchObject({ statusCode: 402 })
     })
 
     it('ignores a revoked invitation', async () => {
@@ -412,7 +412,9 @@ describe('plan limits', () => {
         data: { planKey: 'team' }
       })
 
-      await expect(assertCanInvite(author.organization.id)).resolves.toBeUndefined()
+      await expect(
+        prisma.$transaction((tx) => assertCanInvite(tx, author.organization.id))
+      ).resolves.toBeUndefined()
     })
 
     it('is enforced by the invitation endpoint, with 402', async () => {

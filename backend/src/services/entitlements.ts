@@ -40,6 +40,18 @@ import { PLANS, effectivePlan, isPerSeat, isWithin, type Plan } from './plans.js
  * somebody paid for. It reads one column of one table for one plan family, it
  * still does not import Stripe or know what a webhook is, and every other limit
  * — published forms, responses, branding — answers from `PLANS` alone.
+ *
+ * features/0027 gave every limit *check* one shape, and the signature is where
+ * to read it. **A function that refuses something takes a
+ * `Prisma.TransactionClient` first**, runs inside the same transaction as the
+ * write it guards, and locks the organization row before it counts anything —
+ * `assertCanPublishForm`, `assertCanInvite`, `assertResponseWithinLimit`. A
+ * function that only reports (`getEntitlements`, `isOverResponseLimit`,
+ * `mustShowBranding`, `assertHasApiAccess`) passes `prisma` and does not,
+ * because it writes nothing and there is no window to close. Before 0027 the
+ * meter was the only one of the three with a `tx`, and the other two were
+ * read-then-write across two transactions: two requests at `limit - 1` both
+ * passed. See `lockOrganization`.
  */
 
 /**
@@ -82,9 +94,50 @@ export interface Entitlements {
   seatLimit: number | null
 }
 
+/**
+ * Takes the organization's row lock, and must be the **first** statement of any
+ * transaction that checks a limit (features/0027).
+ *
+ * Every non-metered limit here is a count followed by a write, and a
+ * transaction alone does not make those two atomic against each other. Under
+ * Postgres's default `READ COMMITTED`, two concurrent transactions both run the
+ * count before either commits its insert, neither sees the other's uncommitted
+ * row, and both pass at `limit - 1`. A transaction makes the pair atomic; it
+ * does not serialise them.
+ *
+ * This does. The second transaction blocks here until the first commits, then
+ * counts and sees `n + 1`. **The order is the whole mechanism** — taking the
+ * lock after the count restores the race exactly, which is why it is a named
+ * function called on the first line rather than an option somewhere.
+ *
+ * Locking `organizations` rather than anything narrower is deliberate twice
+ * over. The row always exists — it is the tenant — so unlike the subscription
+ * row in `organization-lock.ts` there is never nothing to lock. And it is the
+ * scope the limits are actually about: two organizations publishing at the same
+ * moment take different rows and never wait on each other.
+ *
+ * Note what this is that `services/organization-lock.ts` is not: it is in
+ * Postgres, which every replica shares. The in-process checkout lock covers one
+ * process; this covers the deployment. The two answer different problems and
+ * the reasoning in that file, which refuses a database lock, is about a
+ * transaction that would have to stay open across a call to Stripe. Nothing
+ * here calls anything over a network.
+ *
+ * Tagged `$queryRaw`, so the id is a bound parameter. Never `$queryRawUnsafe`.
+ */
+export async function lockOrganization(
+  tx: Prisma.TransactionClient,
+  organizationId: string
+): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM organizations WHERE id = ${organizationId} FOR UPDATE`
+}
+
 /** The organization's plan, or the free plan if the row has vanished. */
-async function planFor(organizationId: string): Promise<Readonly<Plan>> {
-  const organization = await prisma.organization.findUnique({
+async function planFor(
+  tx: Prisma.TransactionClient,
+  organizationId: string
+): Promise<Readonly<Plan>> {
+  const organization = await tx.organization.findUnique({
     where: { id: organizationId },
     select: { planKey: true }
   })
@@ -103,8 +156,12 @@ async function planFor(organizationId: string): Promise<Readonly<Plan>> {
  * `LimitReached` screen offers as the alternative to upgrading. Responses are
  * different — they are events, and an event cannot be un-happened.
  */
-function countPublishedForms(organizationId: string, excludeFormId?: string) {
-  return prisma.form.count({
+function countPublishedForms(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  excludeFormId?: string
+) {
+  return tx.form.count({
     where: {
       organizationId,
       status: 'published',
@@ -121,18 +178,23 @@ function countPublishedForms(organizationId: string, excludeFormId?: string) {
  * key. The predicate for "still redeemable" is the same one
  * `GET /api/organizations/invitations` uses.
  */
-async function countSeatsInUse(organizationId: string): Promise<number> {
-  const [members, pendingInvitations] = await Promise.all([
-    prisma.membership.count({ where: { organizationId } }),
-    prisma.invitation.count({
-      where: {
-        organizationId,
-        revokedAt: null,
-        acceptedAt: null,
-        expiresAt: { gt: new Date() }
-      }
-    })
-  ])
+async function countSeatsInUse(
+  tx: Prisma.TransactionClient,
+  organizationId: string
+): Promise<number> {
+  // Sequential, not `Promise.all`. An interactive transaction runs on one
+  // connection, so two queries fired at it are queued rather than parallel and
+  // there is nothing to win — while awaiting them in order keeps the statements
+  // inside the transaction in a defined sequence.
+  const members = await tx.membership.count({ where: { organizationId } })
+  const pendingInvitations = await tx.invitation.count({
+    where: {
+      organizationId,
+      revokedAt: null,
+      acceptedAt: null,
+      expiresAt: { gt: new Date() }
+    }
+  })
 
   return members + pendingInvitations
 }
@@ -165,12 +227,15 @@ async function countSeatsInUse(organizationId: string): Promise<number> {
  *     what they already have
  *   - a quantity above the floor → the quantity
  */
-export async function seatLimitFor(organizationId: string): Promise<number | null> {
-  const plan = await planFor(organizationId)
+export async function seatLimitFor(
+  tx: Prisma.TransactionClient,
+  organizationId: string
+): Promise<number | null> {
+  const plan = await planFor(tx, organizationId)
 
   if (!isPerSeat(plan.key)) return plan.seats
 
-  const subscription = await prisma.subscription.findUnique({
+  const subscription = await tx.subscription.findUnique({
     where: { organizationId },
     select: { quantity: true }
   })
@@ -208,12 +273,15 @@ async function readResponseUsage(organizationId: string): Promise<number> {
  * not something a limit is computed from.
  */
 export async function getEntitlements(organizationId: string): Promise<Entitlements> {
+  // `prisma` as the client, not a transaction: this is a read for a screen, and
+  // a slightly stale meter on Settings is not a limit being bypassed. Only the
+  // checks that refuse something need to be serialised (features/0027).
   const [plan, publishedForms, responsesThisPeriod, seats, seatLimit] = await Promise.all([
-    planFor(organizationId),
-    countPublishedForms(organizationId),
+    planFor(prisma, organizationId),
+    countPublishedForms(prisma, organizationId),
     readResponseUsage(organizationId),
-    countSeatsInUse(organizationId),
-    seatLimitFor(organizationId)
+    countSeatsInUse(prisma, organizationId),
+    seatLimitFor(prisma, organizationId)
   ])
 
   return { plan, usage: { publishedForms, responsesThisPeriod, seats }, seatLimit }
@@ -230,13 +298,24 @@ export async function getEntitlements(organizationId: string): Promise<Entitleme
  * Creating a form is never refused. Only publishing is, which is what the
  * `LimitReached` artboard describes: the form "stays a draft until you free up
  * a slot or upgrade".
+ *
+ * Must be called with a transaction client, inside the same transaction that
+ * writes `status`, and the caller must **not** catch what it throws — the same
+ * contract `assertResponseWithinLimit` has had since features/0012, for the
+ * same reason. Counting outside the write's transaction lets two publishes both
+ * see the last slot free (features/0027).
  */
 export async function assertCanPublishForm(
+  tx: Prisma.TransactionClient,
   organizationId: string,
   formId?: string
 ): Promise<void> {
-  const plan = await planFor(organizationId)
-  const published = await countPublishedForms(organizationId, formId)
+  // First, before either count. See `lockOrganization`: after the count it
+  // would serialise nothing.
+  await lockOrganization(tx, organizationId)
+
+  const plan = await planFor(tx, organizationId)
+  const published = await countPublishedForms(tx, organizationId, formId)
 
   if (!isWithin(published, plan.maxPublishedForms)) {
     throw new AppError(
@@ -274,13 +353,22 @@ export async function assertCanPublishForm(
  * failure, and the invitations route can answer both: an admin inviting an owner
  * gets `403`, an owner out of seats gets `402`. Collapsing them would leave the
  * client unable to tell "you may not" from "you have not paid for this".
+ *
+ * Must be called with a transaction client, inside the same transaction that
+ * inserts the `Invitation`, and the caller must **not** catch what it throws
+ * (features/0027).
  */
-export async function assertCanInvite(organizationId: string): Promise<void> {
-  const [plan, inUse, seatLimit] = await Promise.all([
-    planFor(organizationId),
-    countSeatsInUse(organizationId),
-    seatLimitFor(organizationId)
-  ])
+export async function assertCanInvite(
+  tx: Prisma.TransactionClient,
+  organizationId: string
+): Promise<void> {
+  // First, before the count. See `lockOrganization`: two invitations sent at
+  // the same instant on the last seat both counted `n` and both inserted.
+  await lockOrganization(tx, organizationId)
+
+  const plan = await planFor(tx, organizationId)
+  const inUse = await countSeatsInUse(tx, organizationId)
+  const seatLimit = await seatLimitFor(tx, organizationId)
 
   if (isWithin(inUse, seatLimit)) return
 
@@ -317,7 +405,7 @@ export async function assertCanInvite(organizationId: string): Promise<void> {
  * `DEV_PLAN_KEY=free|pro` is set on purpose.
  */
 export async function assertHasApiAccess(organizationId: string): Promise<void> {
-  const plan = await planFor(organizationId)
+  const plan = await planFor(prisma, organizationId)
   if (plan.hasApiAccess) return
 
   throw new AppError(
@@ -346,7 +434,7 @@ export async function assertHasApiAccess(organizationId: string): Promise<void> 
  * mark disappears from every local form.
  */
 export async function mustShowBranding(organizationId: string): Promise<boolean> {
-  const plan = await planFor(organizationId)
+  const plan = await planFor(prisma, organizationId)
   return !plan.hasBranding
 }
 
@@ -359,7 +447,7 @@ export async function mustShowBranding(organizationId: string): Promise<boolean>
  * only at submit time means the respondent types everything and then loses it.
  */
 export async function isOverResponseLimit(organizationId: string): Promise<boolean> {
-  const plan = await planFor(organizationId)
+  const plan = await planFor(prisma, organizationId)
   if (plan.maxResponsesPerMonth === null) return false
 
   const used = await readResponseUsage(organizationId)

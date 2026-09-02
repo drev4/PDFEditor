@@ -4,6 +4,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { mockCallerMembership } from './mock-caller.js'
+import { passThroughTransactionOnly } from './mock-transaction.js'
 import { PrismaClient } from '@prisma/client'
 import { PLANS, DEV_PLAN, resolvePlan, effectivePlan, isWithin } from '../src/services/plans'
 import { currentPeriod } from '../src/services/entitlements'
@@ -37,6 +38,10 @@ describe('plan limits', () => {
   beforeEach(() => {
     mockReset(prismaMock)
     mockCallerMembership(prismaMock)
+    // Publishing runs its limit check and its update in one transaction since
+    // features/0027. `mockReset` clears the pass-through, so it is reinstalled
+    // here rather than in each publishing test.
+    passThroughTransactionOnly(prismaMock)
   })
 
   const membership = { organizationId: 'org-1', role: 'owner' as const }

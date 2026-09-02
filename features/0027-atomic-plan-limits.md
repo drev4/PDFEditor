@@ -1,8 +1,8 @@
 # 0027 — Plan limits that two requests cannot both pass
 
-**Status:** backlog
+**Status:** done
 **Priority:** P1 (see [`docs/BACKLOG.md`](../docs/BACKLOG.md) — *Plan limits are read-then-write, so two concurrent requests can both pass at the boundary*)
-**Branch:** *(filled in when it moves to "in progress")*
+**Branch:** `feature/0027-atomic-plan-limits`
 **Related:** [04-backend-patterns §10](../docs/sot/04-backend-patterns.md) · [03-domain-model](../docs/sot/03-domain-model.md) · [09-quality-and-testing](../docs/sot/09-quality-and-testing.md) · [`features/0012`](0012-plan-catalogue-and-entitlements.md) · [`features/0014`](0014-close-the-subscription-surface.md) · [`features/0015`](0015-team-plan-and-purchased-seats.md)
 
 ## Context
@@ -113,4 +113,19 @@ Checkable when the work is done:
 
 ## Outcome
 
-*(filled in when the work is done)*
+Built as specified, with the row lock rather than `SERIALIZABLE` and with no schema change.
+
+**What changed.** `lockOrganization(tx, organizationId)` is a new export in `backend/src/services/entitlements.ts` — `SELECT id FROM organizations WHERE id = $1 FOR UPDATE` through tagged `$queryRaw` — and it is the first statement of both `assertCanPublishForm(tx, organizationId, formId?)` and `assertCanInvite(tx, organizationId)`. Their helpers (`planFor`, `countPublishedForms`, `countSeatsInUse`, `seatLimitFor`) all take the client as a first parameter too, so the file now reads by signature: a function that refuses something takes a `tx`, one that only reports passes `prisma`. `POST /api/organizations/invitations` opens the transaction around the check and `createInvitation` (which gained an optional `tx`), and both publish paths in `routes/forms.ts` do the same around `form.update` — only when `status === 'published'`, so an ordinary save still costs no transaction.
+
+**Two things that were not in the spec.**
+
+- `countSeatsInUse` and `assertCanInvite` used `Promise.all` over their reads. Inside an interactive transaction that runs on one connection, so the parallelism buys nothing and only makes the statement order inside the transaction undefined. Both are sequential now.
+- `seatLimitFor` is exported and called directly by `tests/integration/seats.spec.ts`, so its three call sites there gained a `prisma` argument. **Every assertion in that file is unchanged** and it passes as it stood — but the spec asked for it to pass *unchanged*, and three lines of it are not. The alternative was a defaulted `tx` as the last parameter on that one function, which would have left the module with two argument orders; consistency won.
+
+**Tests.** `backend/tests/integration/plan-limit-races.spec.ts`, four tests. Three were written first and run against the unfixed code: two concurrent invitations on the last seat both returned `201`, a concurrent `PUT` and `PATCH` on the last publishing slot both returned `200`, and four publishes across two organizations all succeeded where two should have. All three pass now, and re-running them against `git stash push -- backend/src` reproduced the same three failures — which is what says they test the fix and not the weather. The fourth holds a `FOR UPDATE` on one organization's row from the test itself and asserts a publish in a *different* organization completes anyway: it passes either way today, and it is what makes goal 6 checkable rather than assumed — a global lock or a mutex around the check would fail it.
+
+The mocked suite needed `$transaction` to pass through in `tests/forms.spec.ts` and `tests/entitlements.spec.ts`, so `tests/mock-transaction.ts` gained `passThroughTransactionOnly`, whose comment says plainly that the lock is invisible at that level and names the integration spec that can see it.
+
+**All suites green:** frontend 393/393, backend mocked 248/248, integration 215 passed + 10 skipped (the Redis-dependent specs, unchanged), e2e 53/53, plus `tsc --noEmit`, `typecheck:tests` and the frontend build. `$queryRawUnsafe` appears nowhere in `backend/src` or `backend/tests`.
+
+**Drift fixed on the way past**, since the documents were open: [10-saas-roadmap](../docs/sot/10-saas-roadmap.md) still described B1 (structured logging) and B2 (`asyncHandler`) as unbuilt after [`0025`](0025-structured-logging.md) and [`0026`](0026-async-handler.md) shipped, and [06-api-reference](../docs/sot/06-api-reference.md) still said `402` came from the two form routes only, when the invitation, API key and webhook routes emit it too.

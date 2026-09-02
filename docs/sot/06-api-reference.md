@@ -373,7 +373,9 @@ X-VuePDF-Event-Type: response.created
 
 A client that receives no `showBranding` at all must **show** the mark. `frontend/src/services/forms.ts` defaults it to `true` for that reason: the failure mode of guessing the other way is silently giving away the paid tier's only visible benefit.
 
-`402 Payment Required` means a **plan limit**, and `403` means a **permission failure**. They are never collapsed, so a client can show "upgrade your plan" versus "you do not have access" without parsing a message string. Today `402` is emitted by `PUT /forms/:id` and `PATCH /forms/:id/status` only ([`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md)); it is never sent to an unauthenticated caller. Note that the billing routes emit `403` and never `402`: refusing someone who is not an owner is a permission failure, not a plan limit.
+`402 Payment Required` means a **plan limit**, and `403` means a **permission failure**. They are never collapsed, so a client can show "upgrade your plan" versus "you do not have access" without parsing a message string. Today `402` is emitted by `PUT /forms/:id` and `PATCH /forms/:id/status` (the published-form limit), `POST /organizations/invitations` (the seat limit), and `POST /organizations/api-keys` and the webhook routes (`hasApiAccess`); it is never sent to an unauthenticated caller.
+
+**Every one of those refusals is decided inside the transaction that writes** ([`features/0027`](../../features/0027-atomic-plan-limits.md)), behind a `SELECT … FOR UPDATE` on the organization row. It is not a property a client can observe on one request, and it is stated here because the shape it replaced looked identical from outside: two requests sent at the same instant on the last seat or the last publishing slot both used to receive success, and now exactly one does. Note that the billing routes emit `403` and never `402`: refusing someone who is not an owner is a permission failure, not a plan limit.
 
 ## Not implemented
 

@@ -4,6 +4,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { mockCallerMembership } from './mock-caller.js'
+import { passThroughTransactionOnly } from './mock-transaction.js'
 import { PrismaClient } from '@prisma/client'
 
 // Mock Prisma
@@ -28,6 +29,10 @@ describe('Forms Routes', () => {
   beforeEach(() => {
     mockReset(prismaMock)
     mockCallerMembership(prismaMock)
+    // Publishing runs its limit check and its update in one transaction since
+    // features/0027. `mockReset` clears the pass-through, so it is reinstalled
+    // here rather than in each publishing test.
+    passThroughTransactionOnly(prismaMock)
   })
 
   const mockForm = {

@@ -13,7 +13,7 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 |---|---|---|---|
 | Frontend unit / component | 47 specs, 393 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
 | Backend route (mocked Prisma) | 21 specs, 248 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 24 specs, 221 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| **Backend database-backed** | 25 specs, 225 tests | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 53 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **Two specs guard a shape rather than a behaviour**, and both are the closest thing this repository has to a lint rule while `npm run lint` lints nothing. `backend/tests/async-handler-coverage.spec.ts` reads the route sources and fails when an `async` handler is not wrapped in `asyncHandler` ([`features/0026`](../../features/0026-async-handler.md)) — because a wrapper somebody has to remember fails exactly like the `try`/`catch` it replaced. It carries a **negative control**: a fixture the scan must flag, asserted in the same file, so a regex that quietly stopped matching cannot report a clean codebase for ever. That control earned itself immediately — the first draft matched the literal `asyncHandler(` and missed `asyncHandler<ApiKeyRequest>(`.
@@ -84,6 +84,18 @@ npm run test:integration --workspace=backend   # or from the workspace
 
 Put a test here when the assertion is about **what the database does**, and only then. Validation, status codes and ownership belong in the mocked suite, which is an order of magnitude faster.
 
+### Testing a race, where `Promise.all` is the assertion
+
+`tests/integration/plan-limit-races.spec.ts` is the reference ([`features/0027`](../../features/0027-atomic-plan-limits.md)). Three rules came out of writing it, and every one of them is a way to produce a test that passes against broken code.
+
+**The requests must overlap.** `await invite(a); await invite(b)` is two requests one after the other and it passes against the unfixed code — the second one counts the row the first one committed. The window being tested is between a check and a write, and the only way to be inside it is to be there at the same time, so the calls go through one `Promise.all` and the assertion is on the *set* of statuses: exactly one `201` and one `402`, never a specific request winning. Which one wins is a race and asserting it would be flaky.
+
+**It cannot be a mocked test.** A mocked Prisma has no lock, no transaction and no second connection; it would report both requests succeeding and both failing identically. `tests/mock-transaction.ts` now says this about itself in the comment on `passThroughTransactionOnly`, because the mocked suite *does* exercise these routes and a reader could reasonably think it covers them.
+
+**Assert the rows, not only the statuses.** A handler can answer `402` and still have written. Each race test finishes with the `count` that the plan limit is about.
+
+Timing-dependent tests earn their keep only if they are known to fail against the bug, so **run them against the unfixed code and see them fail** — `git stash push -- backend/src` is enough. The three race tests here failed that way before the fix and pass after it. The fourth, which holds a `FOR UPDATE` on one organization's row and asserts a publish in a *different* organization does not wait on it, passes either way today: it is a guard on the fix's scope rather than a reproduction of the bug, and it is what stops "serialise everything" from being an acceptable answer later.
+
 ### Testing something configured by the environment
 
 `backend/tests/rate-limit.spec.ts` is the reference. It sets the limits with `vi.stubEnv`, through the same `process.env` path production reads, rather than importing the limiter and changing its numbers — a test that reaches past the configuration is no longer testing what a deploy will do. It also resets the shared limiter state around every test, because the suites share one `app` and hit counts otherwise leak between tests.
@@ -151,6 +163,7 @@ Anything that can switch a behaviour off is therefore **pinned in the test confi
 | Does this pure function compute the right value? | Unit, beside the code |
 | Does this endpoint validate, authorize and respond correctly? | `backend/tests/`, `supertest` over a mocked Prisma |
 | **Does the database do what this handler assumes** — cascades, constraints, transactions? | `backend/tests/integration/`, against a real PostgreSQL |
+| Do two requests arriving at once leave the data correct? | `backend/tests/integration/`, and nowhere else — a mock has no lock and no second connection |
 | Does a store or composable produce the right state and requests? | Frontend unit |
 | Does a full user journey work across both apps? | Playwright E2E |
 | Does the PDF that comes out actually have the fields where the editor put them? | **No test exists at any level** |
