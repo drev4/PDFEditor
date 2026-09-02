@@ -11,6 +11,7 @@ import { formFieldsRouter } from './routes/form-fields.js'
 import { uploadRouter } from './routes/upload.js'
 import { responsesRouter } from './routes/responses.js'
 import { organizationsRouter } from './routes/organizations.js'
+import { accountRouter } from './routes/account.js'
 import { billingRouter, webhookRouter } from './routes/billing.js'
 import { v1Router } from './routes/v1/index.js'
 import { errorHandler } from './middleware/errorHandler.js'
@@ -228,6 +229,7 @@ app.use('/api/forms', formFieldsRouter)
 app.use('/api/upload', uploadRouter)
 app.use('/api/responses', responsesRouter)
 app.use('/api/organizations', organizationsRouter)
+app.use('/api/account', accountRouter)
 // The webhook is NOT here — see the raw-body mount above `express.json()`.
 app.use('/api/billing', billingRouter)
 

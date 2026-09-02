@@ -213,6 +213,13 @@
         then, roles and members are managed in
         <RouterLink to="/dashboard/team">Members</RouterLink>.
       </NotBuiltYet>
+
+      <!--
+        Last on the tab, deliberately. It is the one control here that destroys
+        data, so it sits below everything a person came to Settings to read
+        rather than beside it (features/0029).
+      -->
+      <DangerZone />
       </template>
 
       <ApiKeysPanel v-else-if="activeTab === 'api-keys'" class="mt-5" />
@@ -231,6 +238,7 @@ import NotBuiltYet from '@/components/ui/NotBuiltYet.vue'
 import UsageMeter from '@/components/plan/UsageMeter.vue'
 import ApiKeysPanel from '@/components/settings/ApiKeysPanel.vue'
 import WebhooksPanel from '@/components/settings/WebhooksPanel.vue'
+import DangerZone from '@/components/settings/DangerZone.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlanStore } from '@/stores/plan.store'
 import { useOrganizationStore } from '@/stores/organization.store'
