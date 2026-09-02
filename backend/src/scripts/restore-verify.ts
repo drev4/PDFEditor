@@ -176,10 +176,24 @@ async function main() {
     // going past a failed constraint creation and reports success at the end,
     // which is precisely the green-check-over-broken-data failure this
     // repository has shipped once already.
+    // `--dbname` is required and is not the same as `pg_dump`'s handling of the
+    // environment: pg_dump takes its source from `PGDATABASE`, and pg_restore
+    // refuses to start without an explicit `-d`. Found by the first drill run,
+    // which is what a drill is for. Only the *name* goes on the argument list —
+    // the host, user and password still arrive through the environment, so the
+    // password stays off the process list.
+    const targetEnv = pgEnvFrom(target)
     await run(
       'pg_restore',
-      ['--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', dumpFile],
-      pgEnvFrom(target)
+      [
+        '--dbname', targetEnv.PGDATABASE ?? '',
+        '--no-owner',
+        '--no-acl',
+        '--exit-on-error',
+        '--single-transaction',
+        dumpFile
+      ],
+      targetEnv
     )
 
     const restoreSeconds = Math.round((Date.now() - startedAt) / 1000)
