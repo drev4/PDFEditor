@@ -1,6 +1,6 @@
 # 0037 — Backups with a tested restore
 
-**Status:** in progress
+**Status:** done
 **Priority:** P1 (see `docs/BACKLOG.md`, *Automated backups with a tested restore*)
 **Branch:** `feature/0037-backups-with-a-tested-restore`
 **Related:** [08-operations](../docs/sot/08-operations.md#backups-and-recovery) · [03-domain-model](../docs/sot/03-domain-model.md) · [10-saas-roadmap D3](../docs/sot/10-saas-roadmap.md#d--the-beta-on-2026-09-30) · [`features/0016`](0016-object-storage-for-uploaded-pdfs.md) · [`features/0029`](0029-account-deletion-and-real-erasure.md) · [`features/0031`](0031-production-deployment.md)
@@ -82,3 +82,39 @@ Each of these is true or false when the work is finished.
 > ```
 >
 > **On the way out:** run `sot-sync`. `docs/sot/08-operations.md` §Backups and recovery is the section this feature exists to rewrite — it must no longer say recovery time is unknown, and it must carry the measured numbers and the date. Update `docs/sot/10-saas-roadmap.md` D3 with what shipped and what deliberately did not. Remove the *Automated backups with a tested restore* row from `docs/BACKLOG.md` P1, and file the new rows this work creates (backup-failure alerting; anything the drill uncovered). Set this file to `**Status:** done` with an Outcome section. Then run `ship-checklist` before the PR.
+
+
+## Outcome
+
+**Done**, with one goal partially open and named below.
+
+Built on `origin/develop` rather than on top of [`features/0031`](0031-production-deployment.md), which is finished but unmerged. Everything the scripts touch already exists on `develop`; the only cost is that `docs/runbooks/backup-and-restore.md` cannot yet link `production-deployment.md`, and it says so in the one place it would have. **The reciprocal link belongs in that runbook when 0031 merges.**
+
+**Three deliverables, plus a service the spec did not ask for.** `backend/src/services/backup.ts` holds every decision — the two refusals, the manifest, the comparisons, the document check — with no shelling out, so `tests/backup.spec.ts` (30 tests) exercises them without a PostgreSQL binary, a bucket or a network. The scripts (`backup-db.ts`, `backup-objects.ts`, `restore-verify.ts`) are thin wrappers over it. The spec said "three things and no more"; splitting the logic out was the only way to satisfy its own constraint that no test may require `pg_dump`.
+
+**The object side is a script, not provider versioning**, and the reason is in `backup-objects.ts`. Versioning has per-provider semantics and protects against deletion *inside* a bucket; it does nothing when the bucket, account or region is what is lost. The runbook says to enable it as well — it is the better answer for one deleted object.
+
+### The drill was run, and it is what justified the feature
+
+Against the development database — 16 tables, 1,925 users, 1,824 organizations, 155 forms, 154 referenced documents — on PostgreSQL 16. Node and the PostgreSQL 16 client had to be in the same place, so it ran in a throwaway Linux container against the existing `vuepdf-db`; the container, its image and the three scratch databases were removed afterwards and the source database was left untouched (154 forms before and after).
+
+- 736 KB dump in 0.4 s; 154 documents (5.7 MB) in 1.8 s; restore and full verification in under 1 s.
+- **The first run failed on a real defect.** `pg_restore` requires an explicit `--dbname` and, unlike `pg_dump`, will not take its target from `PGDATABASE` — so the pair of scripts would have shipped producing artifacts the restore path could not consume. Nothing but running it would have found this, which is the entire argument for the word *tested*.
+- **All three refusals were exercised against real databases**, not mocks. Pointing `--target` at the live database under a *different username* was refused — a string comparison would have allowed it. A target holding 16 tables was refused. A dump with four bytes appended was refused on its checksum, and the target was confirmed still empty afterwards.
+- **The document check was made to fail on purpose.** Three PDFs were removed from storage; the drill named exactly those three and exited non-zero. A check that has only ever passed proves nothing.
+
+### Goal 7 is half open, deliberately
+
+The drill ran and its numbers are recorded, so `08-operations` no longer says recovery time is unknown. But **736 KB of development data says the procedure is correct and says nothing about production recovery time**, and there is no production database to measure because D1 is not provisioned. The runbook says to re-run the drill within a week of the first deploy and replace its log row; the backlog carries it as its own P1 item rather than leaving it implied.
+
+### Filed rather than built
+
+Three rows added to `docs/BACKLOG.md`: **no schedule, so no RPO** (P1 — the third row waiting on a scheduler, and the only one with a legitimate non-code answer: a platform cron, which the deployment must own), **recovery time measured on development data only** (P1), and **nothing alerts when a backup fails** (P2 — both scripts exit non-zero into a void, blocked on the same missing notification path as two existing rows).
+
+### Verified
+
+- Backend: 27 files, 366 tests passed (was 26/336 — 30 added).
+- Frontend: 56 files, 479 tests passed.
+- Integration: 25 files, 250 passed, 10 skipped (the three specs needing `TEST_REDIS_URL`).
+- `tsc --noEmit`, `typecheck:tests` and the full build all passed.
+- E2E was not run: this change adds no route, schema, constraint or user-visible flow.

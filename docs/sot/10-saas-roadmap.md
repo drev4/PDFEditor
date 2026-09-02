@@ -155,7 +155,7 @@ Verified against the code on **2026-09-02**; every claim below names the file it
 |---|---|---|---|
 | D1 | **A deployment target, and the packaging to reach it** | Operability | The app/API domain decision — nothing in this repository |
 | D2 | ~~**Boot-time configuration validation** (was B4)~~ — done ([`features/0028`](../../features/0028-boot-time-configuration-validation.md)) | Operability | — |
-| D3 | **Backups with a tested restore** (was B5) | Operability | D1 |
+| D3 | ~~**Backups with a tested restore** (was B5)~~ — tooling and drill done ([`features/0037`](../../features/0037-backups-with-a-tested-restore.md)); **the schedule and the production drill wait on D1** | Operability | D1 |
 | D4 | ~~**Error tracking on API and SPA**~~ — done ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)) | Operability | — |
 | D5 | ~~**Erasure that is real**, and portability with it~~ — done ([`features/0029`](../../features/0029-account-deletion-and-real-erasure.md), [`features/0030`](../../features/0030-account-data-export.md)). **S8 is closed** | Privacy | — |
 | D6 | ~~**A respondent privacy notice**~~ — done ([`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md)), together with a per-form control that is **off by default**. The **retention limit** was deliberately not built: it needs a scheduler | Privacy | — |
@@ -182,7 +182,13 @@ Verified against the code on **2026-09-02**; every claim below names the file it
 
 Why it was dated at all: **the first deploy is exactly when a variable is wrong for the first time**, and the failures this repository has already reasoned about — `STRIPE_WEBHOOK_SECRET`, `BASE_URL`, `WEBHOOK_SIGNING_KEY`, `PDF_STORAGE_DRIVER` — all produce no error on any path somebody is watching.
 
-**D3. Backups with a tested restore.** Was B5. None exist and recovery time is unknown. The word that matters is **tested**: a backup nobody has restored is a belief, and the first customer document is the wrong moment to find that out. This is the one row in D that genuinely waits on D1.
+**D3. Backups with a tested restore.** **Tooling and drill done** ([`features/0037`](../../features/0037-backups-with-a-tested-restore.md)); the schedule and the production measurement still wait on D1. `backup:db`, `backup:objects` and `restore:verify` exist, and the drill was run and recorded in [`docs/runbooks/backup-and-restore.md`](../runbooks/backup-and-restore.md). Three things it settled are worth carrying forward.
+
+**The word that mattered was *tested*, and it earned its place.** The first drill run failed on a real defect — `pg_restore` requires an explicit `--dbname` and, unlike `pg_dump`, will not take its target from `PGDATABASE` — so the backup script would have produced artifacts that the restore path could not consume. Nothing but running it would have found that. The document check was then made to fail on purpose, by removing three PDFs from storage, because a check that has only ever passed proves nothing.
+
+**The interesting half was never PostgreSQL.** It is that there are **two** stores and `Form.pdfUrl` is the pointer between them, which nothing in the application keeps consistent — and since [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) they actively diverge. So the restore order is **bytes first, rows second**, the mirror of the deletion order rather than a copy of it, and the drill's headline assertion is the cross-store one: does each restored `pdfUrl` resolve to bytes that are actually there. A `pg_restore` that exits `0` answers none of that.
+
+**What still waits on D1 is the part that makes it a control rather than a capability.** There is no schedule, because nothing in this codebase runs on a clock — the third row to hit that wall, after the deletion grace period and response retention — so the RPO is whatever a platform cron is set to and the deployment has to set it. And the measured recovery time is from a 736 KB development dataset, which says the procedure is correct and says nothing about production; the runbook says to re-run the drill against the real database within a week of the first deploy.
 
 **D4. Error tracking.** **Done** ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). Sentry on both sides, off unless a DSN is configured, reporting an allowlist and never a request body. Three things it settled are worth carrying forward.
 
