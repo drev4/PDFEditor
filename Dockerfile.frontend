@@ -15,6 +15,11 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build --workspace=frontend
 
 FROM nginx:1.30.4-alpine AS runtime
+# Alpine maps `.js` but not `.mjs` by default. Extend the inherited global
+# MIME table instead of declaring a server-level `types` block, which would
+# discard the mappings for HTML, CSS, fonts and images and make browsers
+# download the SPA under `nosniff`.
+RUN sed -i 's#application/javascript[[:space:]]*js;#application/javascript                           js mjs;#' /etc/nginx/mime.types
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 EXPOSE 8080
