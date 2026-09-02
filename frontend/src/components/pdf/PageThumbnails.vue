@@ -1,79 +1,69 @@
 <template>
   <div class="page-thumbnails-container">
-    <div class="thumbnails-header">
-      <div class="flex items-center justify-between">
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">
-          Pages
-        </h3>
-        <span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full font-semibold">
-          {{ documentStore.activeDocument?.numPages || 0 }}
-        </span>
-      </div>
-    </div>
-
+    <!--
+      No header here. The editor rail already labels this section and shows the
+      page count; a second "Pages" heading inside it was the same thing said
+      twice, in two different sizes.
+    -->
     <div class="thumbnails-content">
-      <!-- Loading State -->
-      <div v-if="!pdfDoc" class="text-center py-8">
-        <ProgressSpinner style="width: 40px; height: 40px" />
-        <p class="text-sm text-gray-500 mt-2">Loading pages...</p>
+      <!--
+        Nothing at all until there is a document. This used to show a spinner
+        with "Loading pages..." whenever `pdfDoc` was absent, which is also the
+        state of an editor with no document open — so an empty editor claimed to
+        be loading something, forever.
+      -->
+      <p v-if="!pdfDoc && !totalPages" class="px-2.5 py-3 text-mono text-faint">
+        Open a PDF to see its pages.
+      </p>
+
+      <div v-else-if="!pdfDoc" class="px-2.5 py-3 flex items-center gap-2 text-mono text-faint">
+        <i class="pi pi-spin pi-spinner text-[11px]" />
+        <span>Rendering pages</span>
       </div>
 
-      <!-- Thumbnails Grid -->
-      <div v-else class="thumbnails-grid space-y-3">
-      <div
-        v-for="pageNum in pageOrder"
-        :key="`page-${pageNum}`"
-        draggable="true"
-        @dragstart="onDragStart($event, pageNum)"
-        @dragover.prevent="onDragOver($event, pageNum)"
-        @drop="onDrop($event, pageNum)"
-        @dragend="onDragEnd"
-        @click="goToPage(pageNum)"
-        :class="[
-          'thumbnail-card group cursor-move transition-all duration-200',
-          pageNum === currentPage
-            ? 'ring-2 ring-blue-600 bg-blue-50'
-            : 'hover:ring-2 hover:ring-gray-300 bg-white',
-          draggedPage === pageNum ? 'opacity-50' : '',
-          dropTargetPage === pageNum ? 'ring-2 ring-green-500' : ''
-        ]"
-      >
-        <!-- Page Number Badge -->
-        <div class="absolute top-2 right-2 z-10">
-          <span :class="[
-            'text-xs font-bold px-2 py-1 rounded-full shadow-sm',
-            pageNum === currentPage
-              ? 'bg-blue-600 text-white'
-              : 'bg-white text-gray-700'
-          ]">
-            {{ pageNum }}
-          </span>
-        </div>
+      <!-- Two columns, as the Editor artboard lays them out. -->
+      <div v-else class="grid grid-cols-2 gap-2.5 px-2.5">
+        <div
+          v-for="pageNum in pageOrder"
+          :key="`page-${pageNum}`"
+          draggable="true"
+          @dragstart="onDragStart($event, pageNum)"
+          @dragover.prevent="onDragOver($event, pageNum)"
+          @drop="onDrop($event, pageNum)"
+          @dragend="onDragEnd"
+          @click="goToPage(pageNum)"
+          :class="[
+            'thumbnail-card cursor-pointer',
+            pageNum === currentPage ? 'ring-2 ring-accent' : '',
+            draggedPage === pageNum ? 'opacity-50' : '',
+            dropTargetPage === pageNum ? 'ring-2 ring-published' : ''
+          ]"
+          :data-testid="`page-thumbnail-${pageNum}`"
+        >
+          <div
+            class="h-[78px] rounded-chip border bg-surface overflow-hidden flex items-center justify-center"
+            :class="pageNum === currentPage ? 'border-accent' : 'border-line'"
+          >
+            <img
+              v-if="thumbnails.get(pageNum)"
+              :src="thumbnails.get(pageNum)"
+              :alt="`Page ${pageNum}`"
+              class="max-h-full max-w-full object-contain"
+            />
+            <!-- A single dim glyph, not a second spinner: at two columns this
+                 grid can hold dozens of them at once. -->
+            <i v-else class="pi pi-file text-faint text-[13px]" />
+          </div>
 
-        <!-- Thumbnail Image -->
-        <div class="thumbnail-image-container">
-          <img
-            v-if="thumbnails.get(pageNum)"
-            :src="thumbnails.get(pageNum)"
-            :alt="`Page ${pageNum}`"
-            class="thumbnail-image"
-          />
-          <div v-else class="thumbnail-placeholder">
-            <i class="pi pi-image text-3xl text-gray-400"></i>
-            <p class="text-xs text-gray-500 mt-2">Loading...</p>
+          <!-- The number goes under the page, in mono, like every other number
+               in the product. -->
+          <div
+            class="num mt-1.5 text-center text-tiny"
+            :class="pageNum === currentPage ? 'text-accent' : 'text-faint'"
+          >
+            {{ pageNum }}
           </div>
         </div>
-
-        <!-- Page Info -->
-        <div :class="[
-          'thumbnail-info',
-          pageNum === currentPage
-            ? 'bg-blue-600 text-white'
-            : 'bg-gray-50 text-gray-700 group-hover:bg-gray-100'
-        ]">
-          <span class="text-xs font-medium">Page {{ pageNum }}</span>
-        </div>
-      </div>
       </div>
     </div>
   </div>
@@ -81,7 +71,6 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, computed } from 'vue'
-import ProgressSpinner from 'primevue/progressspinner'
 import { useDocumentStore } from '@/stores/document.store'
 import { useThumbnails } from '@/composables/useThumbnails'
 
@@ -285,7 +274,7 @@ onMounted(() => {
 .thumbnail-image-container {
   width: 100%;
   aspect-ratio: 8.5 / 11; /* Standard letter size ratio */
-  background: #f8fafc;
+  background: #fbfbfc;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -323,11 +312,11 @@ onMounted(() => {
 }
 
 .thumbnails-content::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #d8dae1;
   border-radius: 3px;
 }
 
 .thumbnails-content::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #9ba1ac;
 }
 </style>

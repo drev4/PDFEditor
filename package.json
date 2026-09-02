@@ -5,31 +5,47 @@
   "description": "VuePDF Forms Platform - Monorepo",
   "scripts": {
     "start": "docker-compose up -d && npm run dev",
+    "predev": "node scripts/check-node.mjs --native",
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
+    "prebuild": "node scripts/check-node.mjs",
     "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
+    "prebuild:frontend": "node scripts/check-node.mjs",
     "build:frontend": "npm run build --workspace=frontend",
+    "prebuild:backend": "node scripts/check-node.mjs",
     "build:backend": "npm run build --workspace=backend",
+    "pretest": "node scripts/check-node.mjs",
     "test": "npm run test --workspace=frontend",
+    "pretest:frontend": "node scripts/check-node.mjs",
     "test:frontend": "npm run test --workspace=frontend",
+    "pretest:backend": "node scripts/check-node.mjs --native",
     "test:backend": "npm run test --workspace=backend",
+    "pretest:integration": "node scripts/check-node.mjs --native",
+    "test:integration": "npm run test:integration --workspace=backend",
+    "pretest:e2e": "node scripts/check-node.mjs --native",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
-    "test:all": "npm run test:frontend && npm run test:backend && npm run test:e2e",
+    "pretest:all": "node scripts/check-node.mjs --native",
+    "test:all": "npm run test:frontend && npm run test:backend && npm run test:integration && npm run test:e2e",
+    "pretest:coverage": "node scripts/check-node.mjs",
     "test:coverage": "npm run test:coverage --workspace=frontend && npm run test:coverage --workspace=backend",
+    "pretest:coverage:frontend": "node scripts/check-node.mjs",
     "test:coverage:frontend": "npm run test:coverage --workspace=frontend",
+    "pretest:coverage:backend": "node scripts/check-node.mjs",
     "test:coverage:backend": "npm run test:coverage --workspace=backend",
     "lint": "npm run lint --workspaces --if-present",
     "db:generate": "npm run db:generate --workspace=backend",
     "db:push": "npm run db:push --workspace=backend",
     "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace=backend",
     "db:studio": "npm run db:studio --workspace=backend",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
-    "setup": "npm install && npm run db:generate"
+    "setup": "npm install && npm run db:generate",
+    "check:node": "node scripts/check-node.mjs --native"
   },
   "workspaces": [
     "frontend",
@@ -40,6 +56,6 @@
     "concurrently": "^9.1.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.12.0"
   }
 }

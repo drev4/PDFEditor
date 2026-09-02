@@ -1,255 +1,121 @@
-# E2E Tests - VuePDF Forms Platform
+# E2E Tests — VuePDF Forms Platform
 
-This folder contains the end-to-end (E2E) tests for the VuePDF Forms Platform, using Playwright.
+End-to-end tests for the VuePDF Forms Platform, using Playwright.
 
-## Test Structure
+**The rule that keeps this suite trustworthy: a test creates the data it needs, and shares no identifier with any other test.** No fixed email, no fixed `shareId`, no dependence on a clean database or on what ran before. See [`docs/sot/09-quality-and-testing.md`](../docs/sot/09-quality-and-testing.md) and [`features/0003`](../features/0003-e2e-suite-green-and-independent.md) for why — the suite was red for months because tests shared a registration email.
 
-### 1. `auth-flow.spec.ts` (6 tests)
-Tests for the complete authentication flow:
-- New user registration
-- Login with existing credentials
-- Error with invalid credentials
-- Logout
-- Route protection without authentication
-- Redirection when already authenticated
+## Helpers — use these, do not inline setup
 
-### 2. `pdf-workflow.spec.ts` (7 tests)
-Tests for the PDF workflow:
-- PDF upload
-- Upload progress
-- PDF viewing
-- Editor toolbar
-- Navigation between views
-- Fields toolbar
-- Save panel
+Everything shared lives in [`helpers.ts`](./helpers.ts):
 
-### 3. `form-management.spec.ts` (9 tests)
-Form management tests:
-- Empty state on startup
-- Upload functionality
-- User information in header
-- Correct page title
-- Session persistence
-- Responsive layout
-- Routing redirects
-- Navigation between pages
+| Helper | What it does |
+|---|---|
+| `registerNewUser(page, prefix?)` | Registers a fresh account through the UI, lands on `/dashboard`, returns the user |
+| `loginUser(page, user)` | Logs an existing user in through the UI |
+| `createPublishedForm(request, fieldLabel?)` | Seeds a published form with one text field over the HTTP API, returns its `shareId` and `fieldId` |
+| `newUser(prefix?)` / `uniqueEmail(prefix?)` | A unique identity: `Date.now()` **plus** a uuid fragment |
 
-### 4. `error-handling.spec.ts` (13 tests)
-Error handling and UX tests:
-- Validation errors
-- Email format validation
-- Password validation
-- Invalid credentials errors
-- Network errors
-- Loading states
-- Keyboard navigation
-- Show/hide password toggle
-- Consistent branding
-- Form accessibility
+`createPublishedForm` uses Playwright's `request` fixture against the real API rather than Prisma, so the routes are actually exercised — a database seed would skip them.
 
-### 5. `example.spec.ts` (1 test)
-Initial Playwright example test.
+## Test structure
 
-## Running the Tests
+| File | Tests | Covers |
+|---|---|---|
+| `auth-flow.spec.ts` | 6 | Registration, login, logout, route protection, redirect when authenticated |
+| `error-handling.spec.ts` | 12 | Validation errors, invalid credentials, network errors, loading states, keyboard nav, branding, accessibility |
+| `form-management.spec.ts` | 10 | Empty state, upload affordance, header, page title, session persistence, responsive layout, routing |
+| `pdf-workflow.spec.ts` | 3 | **Real PDF upload → viewer render**, upload affordance, header controls |
+| `public-form-flow.spec.ts` | 2 | Public submission end to end, draft persistence in `localStorage` |
+| `example.spec.ts` | 1 | Page title smoke test |
 
-### Prerequisites
-1. Backend must be running at `http://localhost:3000`
-2. Frontend must be running at `http://localhost:5173`
-3. PostgreSQL database must be available
+**Total: 34 tests.**
 
-### Commands
+## Running
+
+Playwright starts both apps itself (`webServer` in [`playwright.config.ts`](../playwright.config.ts)). You need PostgreSQL up — `docker compose up -d` — and nothing else. Rate limits are raised for the suite in `webServer.env`, so no local `.env` editing is required.
 
 ```bash
-# Run all E2E tests
-npm run test:e2e
+npm run test:e2e                    # parallel, the normal run
+npm run test:e2e -- --workers=1     # the CI setting
+npm run test:e2e:ui                 # visual UI, best for development
+npm run test:e2e:headed             # watch the browser
+npm run test:e2e:debug              # Playwright Inspector
 
-# Run with visual UI (recommended for development)
-npm run test:e2e:ui
-
-# Run with the browser visible
-npm run test:e2e:headed
-
-# Run in debug mode
-npm run test:e2e:debug
-
-# Run a specific file
-npx playwright test e2e/auth-flow.spec.ts
-
-# Run a specific test
-npx playwright test -g "should register a new user"
+npx playwright test e2e/auth-flow.spec.ts       # one file
+npx playwright test -g "should register"        # one test
 ```
 
-## Test Coverage
+### Verifying independence, not just green
 
-Total: **36 E2E tests**
+A green run is not enough — these are what catch a test that depends on another:
 
-### By Category:
-- Authentication: 6 tests (17%)
-- PDF Workflow: 7 tests (19%)
-- Form Management: 9 tests (25%)
-- Error Handling & UX: 13 tests (36%)
-- Example: 1 test (3%)
-
-### Areas Covered:
-- Registration and login
-- Route protection
-- File upload
-- Navigation and routing
-- Form validation
-- Error handling
-- Loading states
-- Basic accessibility
-- Responsive design
-- Session persistence
-
-## Configuration
-
-The Playwright configuration lives in [`playwright.config.ts`](../playwright.config.ts):
-
-```typescript
-{
-  testDir: './e2e',
-  baseURL: 'http://localhost:5173',
-  webServer: {
-    command: 'npm run dev --prefix frontend',
-    url: 'http://localhost:5173',
-  }
-}
+```bash
+npm run test:e2e -- --workers=1     # serial
+npm run test:e2e                    # parallel
+npm run test:e2e                    # again, WITHOUT resetting the database
+npm run test:e2e -- --repeat-each=2 # order and state sensitivity
 ```
 
-## Writing New Tests
-
-### Basic Template
+## Writing new tests
 
 ```typescript
 import { test, expect } from '@playwright/test';
+import { registerNewUser } from './helpers';
 
 test.describe('Feature Name', () => {
-  const testEmail = `test-${Date.now()}@example.com`;
-
-  test.beforeEach(async ({ page }) => {
-    // Setup: Login, navigate, etc.
-  });
-
   test('should do something', async ({ page }) => {
-    // Arrange
-    await page.goto('/some-page');
+    // Its own account. Never a shared one.
+    const user = await registerNewUser(page, 'feature');
 
-    // Act
-    await page.click('button');
+    await page.click('[data-testid="some-button"]');
 
-    // Assert
-    await expect(page.locator('text=Success')).toBeVisible();
+    await expect(page.locator('[data-testid="result"]')).toBeVisible();
   });
 });
 ```
 
-### Best Practices
+### Best practices
 
-1. **Use semantic selectors**
+1. **Never share an identifier between tests.** Not an email, not a `shareId`, not a form id.
+
    ```typescript
-   // Good
-   page.locator('button:has-text("Submit")')
-   page.locator('input[type="email"]')
+   // Good — a fresh account, inside the test
+   const user = await registerNewUser(page);
 
-   // Avoid
-   page.locator('.class-name-12345')
-   ```
-
-2. **Unique emails for each test**
-   ```typescript
+   // Wrong — evaluated once per module, reused by every test in the block.
+   // The second registration returns 400 and the app never leaves /register.
    const testEmail = `test-${Date.now()}@example.com`;
    ```
 
-3. **Use beforeEach for shared setup**
+   `Date.now()` on its own is not unique either: parallel workers import a module in the same millisecond.
+
+2. **Prefer `data-testid` over visible copy.** Copy changes; a test that breaks on wording is a test people learn to ignore. If a control has no testid, add one to the component in the same change.
+
    ```typescript
-   test.beforeEach(async ({ page }) => {
-     // Shared login
-   });
+   // Good
+   page.locator('[data-testid="logout-button"]')
+
+   // Fragile — and this one silently matched nothing, because the desktop
+   // logout button is icon-only and "Logout" lives in a tooltip.
+   page.locator('button:has-text("Logout")')
    ```
 
-4. **Verify loading states**
-   ```typescript
-   await expect(button).toBeDisabled();
-   await expect(spinner).toBeVisible();
-   ```
+3. **Check a class actually exists before selecting on it.** A CSS selector matches whole class tokens: `.pdf-viewer` does **not** match `class="pdf-viewer-container"`, even though grep suggests it does.
 
-5. **Appropriate timeouts**
-   ```typescript
-   await expect(element).toBeVisible({ timeout: 5000 });
-   ```
+4. **A test must be able to fail for the reason its name gives.** If it is named for PDF upload, it has to upload a PDF. A test that asserts something unrelated reports coverage that does not exist, which is worse than no test.
+
+5. **Appropriate timeouts.** Real uploads and PDF.js rendering are slow; give them room (`{ timeout: 30000 }`) rather than making the whole suite patient.
 
 ## Debugging
 
-### View Tests in UI Mode
-```bash
-npm run test:e2e:ui
-```
-This opens a visual interface where you can:
-- View all tests
-- Run individual tests
-- View screenshots and videos
-- Inspect the DOM
+- **UI mode:** `npm run test:e2e:ui` — run individual tests, inspect the DOM, view screenshots and video.
+- **Inspector:** `npm run test:e2e:debug` — step through.
+- **Screenshots** on failure are written to `test-results/`.
+- **Traces:** `npx playwright show-trace trace.zip` (captured on first retry).
 
-### Debug Mode
-```bash
-npm run test:e2e:debug
-```
-Opens the Playwright Inspector for step-by-step debugging.
+## CI
 
-### Screenshots on Failure
-Playwright automatically captures screenshots when a test fails.
-They are saved in `test-results/`.
-
-### Trace Viewer
-```bash
-npx playwright show-trace trace.zip
-```
-
-## Performance
-
-### Running in Parallel
-By default, Playwright runs tests in parallel:
-```typescript
-// playwright.config.ts
-{
-  fullyParallel: true,
-  workers: process.env.CI ? 1 : undefined
-}
-```
-
-### Retrying Failed Tests
-In CI, tests are automatically retried:
-```typescript
-{
-  retries: process.env.CI ? 2 : 0
-}
-```
-
-## CI/CD
-
-To run in CI:
-
-```yaml
-# .github/workflows/e2e.yml
-- name: Install dependencies
-  run: npm ci
-
-- name: Install Playwright
-  run: npx playwright install --with-deps
-
-- name: Run E2E tests
-  run: npm run test:e2e
-```
-
-## Planned Tests
-
-Upcoming tests to add, covering the public form flow:
-- [ ] Public form flow (`/form/:shareId`)
-- [ ] Response submission
-- [ ] Field validation in the public view
-- [ ] Sharing a form
-- [ ] Copy link to clipboard
+The `e2e-tests` job in [`.github/workflows/test.yml`](../.github/workflows/test.yml) runs a `postgres:16` service, applies migrations with `prisma migrate deploy`, installs Chromium, and runs the suite with `workers: 1` and `retries: 2`.
 
 ## Resources
 
@@ -257,9 +123,3 @@ Upcoming tests to add, covering the public form flow:
 - [Playwright Best Practices](https://playwright.dev/docs/best-practices)
 - [Playwright Selectors](https://playwright.dev/docs/selectors)
 - [Playwright Assertions](https://playwright.dev/docs/test-assertions)
-
----
-
-**Last updated:** 2026-01-29
-**Total tests:** 36
-**Coverage:** Full authentication, dashboard, and routing flows

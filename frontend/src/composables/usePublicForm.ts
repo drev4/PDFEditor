@@ -7,6 +7,27 @@ export function usePublicForm() {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
+  /**
+   * Whether to render the "Made with VuePDF" mark (features/0014).
+   *
+   * Decided by the server from the owner's plan and passed through untouched —
+   * nothing here re-derives it, because the client is given no plan to derive
+   * it from. Starts `true` so a form that has not loaded, or one whose payload
+   * lacks the flag, keeps the mark.
+   */
+  const showBranding = ref(true)
+
+  /**
+   * Whether this respondent's address and browser are stored with their
+   * submission (features/0032), which is what the privacy notice says.
+   *
+   * Starts `false` — the opposite direction to `showBranding` above, and
+   * deliberately so. A form that has not loaded, or a payload missing the flag,
+   * must not tell a stranger their address is being recorded when it may not
+   * be: the safe failure for a privacy statement is to claim less.
+   */
+  const collectsMetadata = ref(false)
+
   const fields = computed(() => form.value?.fields || [])
   const pdfUrl = computed(() => form.value?.pdfUrl || null)
   const title = computed(() => form.value?.title || '')
@@ -17,7 +38,10 @@ export function usePublicForm() {
     error.value = null
 
     try {
-      form.value = await formsService.getPublic(shareId)
+      const published = await formsService.getPublic(shareId)
+      form.value = published.form
+      showBranding.value = published.showBranding
+      collectsMetadata.value = published.collectsMetadata
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 404) {
         error.value = 'Form not found or not published'
@@ -36,10 +60,14 @@ export function usePublicForm() {
     form.value = null
     error.value = null
     isLoading.value = false
+    showBranding.value = true
+    collectsMetadata.value = false
   }
 
   return {
     form,
+    showBranding,
+    collectsMetadata,
     fields,
     pdfUrl,
     title,

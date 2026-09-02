@@ -10,6 +10,26 @@ export const useDocumentStore = defineStore('document', () => {
   const error = ref<string | null>(null)
   const pdfReloadTrigger = ref(0)
 
+  /**
+   * Whether the open document has edits that are only in the browser.
+   *
+   * The drawing tools (text, images) modify the PDF in memory. Those edits used
+   * to be uploaded the instant they were made, which meant a stray click was
+   * written to the server as fact and a user experimenting had no way back.
+   * They are held here instead until an explicit save, and this flag is what
+   * lets the editor say so rather than letting the work quietly disappear on
+   * reload.
+   */
+  const hasUnsavedEdits = ref(false)
+
+  const markEdited = () => {
+    hasUnsavedEdits.value = true
+  }
+
+  const markSaved = () => {
+    hasUnsavedEdits.value = false
+  }
+
   // Computed
   const activeDocument = computed(() => {
     return documents.value.find(doc => doc.id === activeDocumentId.value) || null
@@ -111,6 +131,9 @@ export const useDocumentStore = defineStore('document', () => {
     // State
     documents,
     activeDocumentId,
+    hasUnsavedEdits,
+    markEdited,
+    markSaved,
     isLoading,
     error,
     pdfReloadTrigger,

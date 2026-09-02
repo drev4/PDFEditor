@@ -8,20 +8,362 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  name         String?
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  forms        Form[]
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String         @map("password_hash")
+  name          String?
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  createdForms  Form[]
+  memberships   Membership[]
+  sentInvitations Invitation[]
+  refreshTokens RefreshToken[]
+  createdApiKeys ApiKey[]
+  createdWebhookEndpoints WebhookEndpoint[]
+
+  /// Which organization this account is currently acting in (features/0023).
+  ///
+  /// **A cache of a choice, never a grant.** `requireMembership` uses it only to
+  /// *select* among memberships that already exist: if the caller no longer has
+  /// a live `Membership` here it is ignored and the oldest membership is used,
+  /// so removing somebody takes effect on their next request and a stale or
+  /// hand-edited value cannot reach anything. Nothing else in the codebase may
+  /// read it.
+  ///
+  /// `null` means "never chose", which is every account that has only ever
+  /// belonged to one organization — the common case, and not a broken state.
+  activeOrganizationId String?       @map("active_organization_id")
+  activeOrganization   Organization? @relation("ActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
 
   @@map("users")
 }
 
+/// The tenant. Every `Form` belongs to one, and a user reaches a form only
+/// through a `Membership` — never by having created it.
+///
+/// A B2C account is an organization with exactly one member, created at signup.
+/// There is no separate "personal account" concept and no second code path, so
+/// nothing downstream has to branch on which kind of account it is dealing with.
+model Organization {
+  id          String       @id @default(uuid())
+  name        String
+  slug        String       @unique
+  /// Which entry of the plan catalogue in `services/plans.ts` this organization
+  /// is entitled to. A plain string rather than a Prisma enum on purpose:
+  /// adding or renaming a plan is a product decision that must not require a
+  /// migration, and an unknown value here resolves to the free plan rather than
+  /// crashing (`resolvePlan`).
+  ///
+  /// **Derived, with exactly one writer** (features/0013). Every read still
+  /// goes through this column — `getEntitlements` and `assertCanPublishForm`
+  /// were not changed — but the only thing that *writes* it is
+  /// `reconcileSubscription` in `services/stripe.ts`, driven by the Stripe
+  /// webhook, plus the `@default("free")` that registration relies on. Keeping
+  /// the read here rather than joining `Subscription` is what stops there being
+  /// two answers to "which plan is this?".
+  planKey     String       @default("free") @map("plan_key")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  forms       Form[]
+  memberships Membership[]
+  invitations Invitation[]
+  /// Back-relation for `User.activeOrganizationId`. `SetNull` on delete: the
+  /// account survives its organization disappearing and falls back to whatever
+  /// membership it has left.
+  activeForUsers User[]    @relation("ActiveOrganization")
+  usageCounters UsageCounter[]
+  subscription  Subscription?
+  apiKeys       ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+
+  @@map("organizations")
+}
+
+/// A credential that authenticates an **organization**, not a person
+/// (features/0019).
+///
+/// This is the second way into this API and the only one with no user behind
+/// it. Everything under `/api/*` resolves a `Membership` from `req.userId`
+/// (`middleware/formOwnership.ts`); `/api/v1/*` resolves this row instead and
+/// scopes on `organizationId` directly. Giving a key a user id was rejected
+/// deliberately: it would tie a customer's integration to one employee, so
+/// removing that person from the organization would silently break production.
+///
+/// `createdByUserId` is provenance and never an authorization input, exactly
+/// like `Form.createdByUserId` — and nullable for the same reason, so deleting
+/// a user does not delete the organization's working credentials.
+///
+/// **`hash` is a SHA-256 of the secret, not bcrypt.** The same decision, for the
+/// same reason, as `RefreshToken.tokenHash`: the secret is 32 bytes of CSPRNG
+/// output rather than a human password, so there is nothing to brute force, and
+/// this one is verified on *every* API request — a deliberately slow hash there
+/// is a CPU sink an attacker feeds with invalid keys.
+///
+/// `prefix` is the public half: it identifies which row to check without being
+/// a credential, so verification is one indexed lookup plus one constant-time
+/// comparison rather than a scan of every key in the table.
+model ApiKey {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  /// Chosen by the customer, so a key can be recognised in a list before it is
+  /// revoked. Not unique: naming two keys "CI" is their business.
+  name           String
+  /// Public identifier, embedded in the secret the customer holds.
+  prefix         String    @unique
+  /// SHA-256 of the full secret, hex. The secret itself is returned once, when
+  /// the key is created, and stored nowhere.
+  hash           String
+  /// Provenance only. Null once that user is deleted; the key keeps working,
+  /// because it belongs to the organization.
+  createdByUserId String?  @map("created_by_user_id")
+  /// Roughly when the key was last accepted. Written at most once a minute per
+  /// key (`services/api-key.ts`), because an API that is mostly reads must not
+  /// turn every read into a write on this row.
+  lastUsedAt     DateTime? @map("last_used_at")
+  /// Revocation is a timestamp rather than a delete, so a customer can still
+  /// see that a key existed and when it stopped working. A revoked key is
+  /// refused on the next request - there is no cache in front of this table.
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+/// Where an organization wants to be told that something happened
+/// (features/0020).
+///
+/// The first thing in this schema that makes this server call **out**, to an
+/// address the customer picked, which is why `services/webhook-egress.ts` is
+/// the only module allowed to use `url` and why it is re-validated on every
+/// delivery rather than only when it was saved: a hostname that was public
+/// yesterday can point at `10.0.0.5` today.
+///
+/// **`secret` is stored encrypted, not hashed, and that is a real difference
+/// from `ApiKey.hash`.** A key is only ever *verified*, so a one-way hash is
+/// enough; this secret has to be *used* to sign every payload, so it must be
+/// recoverable. Encrypted with `WEBHOOK_SIGNING_KEY` (AES-256-GCM,
+/// `services/webhooks.ts`), which does nothing against a compromised
+/// application process and everything against the far more common incident: a
+/// leaked backup, a snapshot, a read-only SQL injection.
+///
+/// `consecutiveFailures` and `disabledAt` are how a dead endpoint stops costing
+/// deliveries for ever. Note what this product cannot do when it disables one:
+/// **tell anybody.** There is no email service here, so the customer finds out
+/// by reading `disabledAt` and `lastError` through the API - which is why both
+/// are returned rather than kept internal.
+model WebhookEndpoint {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  /// Always https, never with credentials, never resolving to a private
+  /// address. Enforced by `assertDeliverableUrl`, at configuration time and
+  /// again at delivery time.
+  url            String
+  /// AES-256-GCM ciphertext. Shown to the customer once, at creation, in
+  /// plaintext, and never retrievable again.
+  secret         String
+  /// Which events this endpoint wants. Only `response.created` exists today;
+  /// a list rather than a boolean so adding one is not a migration.
+  events         String[]
+  consecutiveFailures Int   @default(0) @map("consecutive_failures")
+  /// Non-null means this endpoint is off: too many failures in a row, or the
+  /// customer turned it off. Nothing is delivered while it is set.
+  disabledAt     DateTime? @map("disabled_at")
+  /// The last thing that went wrong, in the customer's words rather than ours.
+  /// Truncated, and never contains a payload or a credential.
+  lastError      String?   @map("last_error")
+  /// Provenance only, nullable for the same reason as `ApiKey.createdByUserId`:
+  /// an integration must not stop working because an employee left.
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?             @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+/// One attempt to deliver one event (features/0020).
+///
+/// **It deliberately holds no payload body.** The payload of `response.created`
+/// contains the answers a member of the public typed into a form, so a log that
+/// stored it would be a second copy of respondent personal data — in a table
+/// nobody thinks of as holding any, with a longer life than the original:
+/// `Response` cascades from `Form`, so deleting a form destroys the answers,
+/// and a delivery row holding the payload would keep them afterwards. What is
+/// here is metadata: which event, which endpoint, which attempt, what the
+/// customer's server said, and how long it took.
+///
+/// The consequence is deliberate and is written down in
+/// docs/sot/07-security-and-privacy.md: a delivery cannot be replayed from this
+/// table alone, only re-rendered from a `Response` that still exists.
+///
+/// `eventId` is **stable across retries** and is what a customer deduplicates
+/// on — this product built the receiving half of that answer in `StripeEvent`
+/// for the same reason: delivery is at-least-once.
+model WebhookDelivery {
+  id         String   @id @default(uuid())
+  endpointId String   @map("endpoint_id")
+  /// The same value in every attempt, and in the `X-VuePDF-Event-Id` header.
+  eventId    String   @map("event_id")
+  eventType  String   @map("event_type")
+  /// 1 for the first try. BullMQ's attempt number, not a count of rows.
+  attempt    Int
+  /// What the customer's endpoint answered, or null when nothing did.
+  status     Int?
+  durationMs Int?     @map("duration_ms")
+  succeeded  Boolean
+  /// Short and safe to store: never a payload, never a credential.
+  error      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, createdAt])
+  @@index([eventId])
+  @@map("webhook_deliveries")
+}
+
+/// One row per organization per calendar month: how many responses that
+/// organization **accepted** during the period.
+///
+/// It is a meter, not a cache of `SELECT count(*)`, and the difference is the
+/// whole reason the table exists. It counts *submissions accepted during the
+/// period*: deleting a form cascades its responses away (see the cascade map in
+/// docs/sot/03-domain-model.md) and does **not** decrement this. Anyone
+/// comparing this number to the surviving `responses` rows will find them
+/// disagreeing, and that is correct — a customer must not be able to reclaim
+/// the month's quota by deleting their data, and the number an invoice is one
+/// day computed from cannot move retroactively.
+///
+/// `period` is `YYYY-MM` in **UTC**, produced only by `currentPeriod()` in
+/// `services/entitlements.ts`. A period boundary computed in two places is a
+/// period boundary computed two ways.
+///
+/// Incremented inside the same transaction that writes the `Response`, so a
+/// rejected submission leaves neither a response nor an inflated count.
+model UsageCounter {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  /// `YYYY-MM`, UTC.
+  period         String
+  responses      Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, period])
+  @@index([organizationId])
+  @@map("usage_counters")
+}
+
+/// `owner` invites anyone, changes roles, removes members and can delete the
+/// organization; `admin` manages forms and invites `member`s; `member` manages
+/// forms.
+///
+/// ENFORCED since features/0010, in `middleware/membership.ts` — `requireRole`
+/// is the only thing that reads this field, and an organization is never left
+/// without an owner. See docs/sot/07-security-and-privacy.md.
+enum MembershipRole {
+  owner
+  admin
+  member
+}
+
+/// Which users may act on which organization's resources. This is the only
+/// thing an authorization check reads.
+model Membership {
+  id             String         @id @default(uuid())
+  organizationId String         @map("organization_id")
+  userId         String         @map("user_id")
+  role           MembershipRole @default(member)
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+/// A pending offer of membership, redeemable once.
+///
+/// The link that carries it is a **bearer capability**, the same class as the
+/// signed PDF URL in features/0006: there is no email infrastructure in this
+/// service, so the inviter copies the link and delivers it themselves. Whoever
+/// holds it can spend it. That is why it expires, can be revoked before it is
+/// accepted, and is bound to the email address it was issued for.
+///
+/// `tokenHash` is a SHA-256, never the token — the same reasoning as
+/// `RefreshToken`, and a JWT would have been wrong here for the same reason it
+/// was wrong there: it could not be cancelled.
+model Invitation {
+  id              String         @id @default(uuid())
+  organizationId  String         @map("organization_id")
+  email           String
+  role            MembershipRole @default(member)
+  tokenHash       String         @unique @map("token_hash")
+  expiresAt       DateTime       @map("expires_at")
+  revokedAt       DateTime?      @map("revoked_at")
+  acceptedAt      DateTime?      @map("accepted_at")
+  invitedByUserId String?        @map("invited_by_user_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation(fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("invitations")
+}
+
+/// One row per issued refresh token. This is what makes a session revocable:
+/// access tokens stay stateless and short-lived, and everything that can end a
+/// session early acts here.
+///
+/// `tokenHash` is a SHA-256 of the token, never the token itself — this table is
+/// a credential store and has to survive being read. A fast hash rather than
+/// bcrypt is correct here and only here: the token is 32 bytes of CSPRNG output,
+/// so there is no low-entropy secret to slow an attacker down over, and the
+/// lookup has to be a deterministic index hit.
+///
+/// `family` ties every token descended from one login together. Rotation issues
+/// a new row in the same family and revokes the old one, so presenting an
+/// already-revoked token means it was captured and replayed — at which point the
+/// whole family is revoked rather than just that row.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  family    String
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}
+
 model Form {
   id          String     @id @default(uuid())
-  userId      String     @map("user_id")
+  /// The owner. Every authorization decision reads this, through a Membership.
+  organizationId String  @map("organization_id")
+  /// Provenance, not ownership: who first created this form. Nullable because a
+  /// deleted user must not take the organization's forms with them — losing the
+  /// record of who made it is the right trade, and blocking user deletion
+  /// forever is not. Never read by an authorization check.
+  createdByUserId String? @map("created_by_user_id")
   title       String
   description String?
   shareId     String     @unique @map("share_id")
@@ -31,11 +373,29 @@ model Form {
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
   viewCount   Int        @default(0) @map("view_count")
+  /// Whether a submission to this form stores the respondent's IP address and
+  /// user agent (features/0032).
+  ///
+  /// **The default is `false`, and that is a decision rather than caution.**
+  /// Both columns were written on every submission with no notice to the person
+  /// filling the form in, for an anti-abuse purpose nothing in this codebase
+  /// implements — `ipAddress` is read only by the responses screen, the CSV
+  /// exporter and the organization export, all of which are ways *out* of the
+  /// building. docs/sot/07-security-and-privacy.md calls that the weakest row in
+  /// its data inventory, and the answer taken here is the second of the two it
+  /// offers: stop collecting it unless somebody asks for it.
+  ///
+  /// It governs **what a submission stores**, never who may read anything, and
+  /// it has nothing to do with rate limiting: `middleware/rateLimit.ts` counts
+  /// `req.ip` on the request in flight and never reads this column or the ones
+  /// it controls. Turning this off does not weaken abuse protection.
+  collectsRespondentMetadata Boolean @default(false) @map("collects_respondent_metadata")
   fields      Field[]
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   responses   Response[]
 
-  @@index([userId])
+  @@index([organizationId])
   @@map("forms")
 }
 
@@ -51,6 +411,7 @@ model Field {
   validation Json?
   order      Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
+  deletedAt  DateTime? @map("deleted_at")
   answers    Answer[]
   form       Form      @relation(fields: [formId], references: [id], onDelete: Cascade)
 
@@ -82,6 +443,7 @@ model Answer {
   response   Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
 
   @@index([responseId])
+  @@index([fieldId])
   @@map("answers")
 }
 
@@ -97,4 +459,103 @@ enum FieldType {
   checkbox
   radio
   dropdown
+}
+
+/// The organization's relationship with Stripe, and the **only** entity in this
+/// schema that knows Stripe exists (features/0013).
+///
+/// One row per organization, created the first time an owner opens Checkout —
+/// which is why `stripeSubscriptionId`, `priceId` and `currentPeriodEnd` are
+/// nullable. At that moment there is a Stripe *customer* and no subscription
+/// yet, and the customer id has to be stored right then: minting a second
+/// customer for the same organization on the next attempt is how somebody ends
+/// up with two subscriptions and two invoices.
+///
+/// **`Organization.planKey` is derived from this row and has exactly one
+/// writer** — `reconcileSubscription` in `services/stripe.ts`, driven by the
+/// webhook. Nothing else may write `plan_key`. Reading the plan still goes
+/// through `Organization.planKey` and `effectivePlan`, so no limit check joins
+/// this table and no second source of truth exists (features/0013, trap 4).
+///
+/// **No card data.** `stripe_customer_id` and `stripe_subscription_id` are
+/// opaque Stripe identifiers; there is no PAN, no last four digits and no
+/// expiry here, because Checkout and the Customer Portal are hosted by Stripe
+/// and no card ever reaches this origin. See docs/sot/07-security-and-privacy.md.
+///
+/// `onDelete: Cascade`: deleting an organization deletes its billing record.
+/// The subscription at Stripe is **not** cancelled by that — Stripe is a
+/// separate system and nothing here can roll it back. See the cascade map in
+/// docs/sot/03-domain-model.md.
+model Subscription {
+  id             String @id @default(uuid())
+  /// One per organization. A second row would be a second answer to "what did
+  /// this customer buy".
+  organizationId String @unique @map("organization_id")
+  /// The Stripe customer. Present from the first Checkout attempt onward.
+  stripeCustomerId     String  @map("stripe_customer_id")
+  /// Null until a subscription actually exists at Stripe — i.e. until the
+  /// webhook says the checkout completed.
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id")
+  /// Stripe's own subscription status, stored verbatim. Not an enum: Stripe
+  /// adds statuses, and a value this schema has not heard of must be storable
+  /// so that `planKeyForStatus` can decide about it, rather than failing the
+  /// webhook. The status→plan map lives in `services/stripe.ts` and is the only
+  /// thing that interprets this string.
+  status               String  @default("incomplete")
+  /// The Stripe price the subscription is on. What `planKeyForStatus` turns
+  /// into a plan key. **No amount is stored** — the price lives in Stripe and
+  /// nowhere else (features/0013, trap 7).
+  priceId              String? @map("price_id")
+  /// End of the paid period, as reported by Stripe. Displayed, never enforced:
+  /// the plan comes from `status`, not from comparing this to the clock.
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  /// True when the customer has cancelled and keeps the plan until the period
+  /// ends. The normal cancellation path; a mid-period drop to free only ever
+  /// comes from a payment that finally failed.
+  cancelAtPeriodEnd    Boolean @default(false) @map("cancel_at_period_end")
+  /// The number of seats **paid for**, read from the Stripe subscription item
+  /// and never computed here (features/0015).
+  ///
+  /// The first plan limit that is bought rather than declared, and the only one
+  /// that does not come wholly from `services/plans.ts`. `reconcileSubscription`
+  /// is its only writer, and it writes what the event said — this application
+  /// never sends Stripe a quantity beyond the initial one on a Checkout line
+  /// item, because a customer can change it in the portal without this code
+  /// being in the request at all. A remembered "what we last asked for" would
+  /// drift from what was actually bought, silently.
+  ///
+  /// `null` means Stripe reported none. It resolves to the catalogue floor, not
+  /// to unlimited: `seatLimitFor` in `services/entitlements.ts` degrades
+  /// downward, the same discipline as `resolvePlan`.
+  quantity             Int?
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+/// Every Stripe event this application has already processed.
+///
+/// It exists because **Stripe delivers at least once, not exactly once**: an
+/// event is retried when the endpoint is slow or errors, and the same
+/// `event.id` can arrive several times. The primary key *is* Stripe's event id,
+/// so a replay collides on insert and is ignored instead of re-running the
+/// handler.
+///
+/// Rows for event types this application does not handle are recorded too — the
+/// webhook answers `200` to everything it verified, and the record is what says
+/// it was seen rather than lost.
+///
+/// Not related to `Organization`: an event can arrive for a customer this
+/// application cannot resolve, and losing the idempotency record because the
+/// organization was deleted would let that event be reprocessed forever.
+model StripeEvent {
+  /// Stripe's `event.id` (`evt_…`), not a uuid of ours. That is the whole point.
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("stripe_events")
 }

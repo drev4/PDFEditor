@@ -39,15 +39,41 @@ describe('PageThumbnails', () => {
     setupPinia()
   })
 
-  it('muestra loading cuando no hay pdfDoc', () => {
+  // An editor with no document open is not "loading pages" — it used to say so
+  // forever, because `!pdfDoc` is also the state of having nothing to show.
+  it('says there is nothing to show when no document is open', () => {
     const wrapper = mount(PageThumbnails, {
       props: {
         pdfDoc: null
       }
     })
 
-    expect(wrapper.find('.p-progress-spinner').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Loading pages...')
+    expect(wrapper.find('.p-progress-spinner').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Open a PDF to see its pages')
+  })
+
+  it('only reports rendering once there is a document with pages', () => {
+    const documentStore = useDocumentStore()
+    documentStore.activeDocumentId = 'doc1'
+    documentStore.documents = [{
+      id: 'doc1',
+      name: 'test.pdf',
+      file: new File([], 'test.pdf'),
+      data: new Uint8Array(),
+      numPages: 3,
+      currentPage: 1,
+      scale: 1.5,
+      rotation: 0,
+      pageOrder: [1, 2, 3]
+    }] as any
+
+    const wrapper = mount(PageThumbnails, {
+      props: {
+        pdfDoc: null
+      }
+    })
+
+    expect(wrapper.text()).toContain('Rendering pages')
   })
 
   it('renderiza lista de thumbnails cuando hay pdfDoc', async () => {
@@ -112,7 +138,7 @@ describe('PageThumbnails', () => {
     await new Promise(resolve => setTimeout(resolve, 50))
 
     const thumbnails = wrapper.findAll('.thumbnail-card')
-    expect(thumbnails[1].classes()).toContain('ring-blue-600')
+    expect(thumbnails[1].classes()).toContain('ring-accent')
   })
 
   it('navega a página al hacer clic en thumbnail', async () => {
@@ -190,7 +216,9 @@ describe('PageThumbnails', () => {
     expect(documentStore.activeDocument?.pageOrder).toEqual([2, 3, 1])
   })
 
-  it('muestra número total de páginas en header', () => {
+  // The rail owns the "Pages" heading and its count now; this component used to
+  // render a second one inside it.
+  it('does not render a heading of its own', () => {
     const documentStore = useDocumentStore()
     documentStore.activeDocumentId = 'doc1'
     documentStore.documents = [{
@@ -211,6 +239,6 @@ describe('PageThumbnails', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('5')
+    expect(wrapper.text()).not.toContain('Pages')
   })
 })

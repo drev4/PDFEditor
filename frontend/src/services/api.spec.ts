@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { api, ApiError } from './api'
+import { api, ApiError, setAccessToken, getAccessToken } from './api'
 
 describe('API Service', () => {
   beforeEach(() => {
     global.fetch = vi.fn()
     localStorage.clear()
+    setAccessToken(null)
   })
 
   afterEach(() => {
@@ -13,7 +14,7 @@ describe('API Service', () => {
 
   describe('request with token', () => {
     it('should include authorization header when token exists', async () => {
-      localStorage.setItem('token', 'test-token')
+      setAccessToken('test-token')
 
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
@@ -121,7 +122,9 @@ describe('API Service', () => {
     })
 
     it('should clear token on 401 error', async () => {
-      localStorage.setItem('token', 'invalid-token')
+      setAccessToken('invalid-token')
+      // Two 401s: the request, then the refresh attempt it triggers. Without
+      // the second the retry would loop.
       vi.mocked(fetch).mockResolvedValue({
         ok: false,
         status: 401,
@@ -129,7 +132,48 @@ describe('API Service', () => {
       } as Response)
 
       await expect(api.get('/test')).rejects.toThrow(ApiError)
-      expect(localStorage.getItem('token')).toBeNull()
+      expect(getAccessToken()).toBeNull()
+    })
+
+    it('refreshes once and replays the request when the access token expired', async () => {
+      setAccessToken('expired-token')
+
+      vi.mocked(fetch)
+        .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ error: 'Unauthorized' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ token: 'fresh-token' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ data: 'success' }) } as Response)
+
+      await expect(api.get('/test')).resolves.toEqual({ data: 'success' })
+
+      // A 15-minute access token must be invisible to the user, not a logout
+      // every fifteen minutes.
+      expect(getAccessToken()).toBe('fresh-token')
+      const replay = vi.mocked(fetch).mock.calls[2]
+      expect((replay[1]?.headers as Record<string, string>).Authorization).toBe('Bearer fresh-token')
+    })
+
+    it('fires a single refresh for a burst of parallel 401s', async () => {
+      setAccessToken('expired-token')
+
+      vi.mocked(fetch).mockImplementation(async (url: any) => {
+        const path = String(url)
+        if (path.includes('/auth/refresh')) {
+          return { ok: true, json: async () => ({ token: 'fresh-token' }) } as Response
+        }
+        if (getAccessToken() === 'expired-token') {
+          return { ok: false, status: 401, json: async () => ({ error: 'Unauthorized' }) } as Response
+        }
+        return { ok: true, json: async () => ({ data: 'success' }) } as Response
+      })
+
+      await Promise.all([api.get('/a'), api.get('/b'), api.get('/c')])
+
+      // Refresh tokens rotate, so a second concurrent refresh would present an
+      // already-exchanged token, the server would read it as a replay, and the
+      // whole family would be revoked — logging the user out via the mechanism
+      // meant to keep them signed in.
+      const refreshCalls = vi.mocked(fetch).mock.calls.filter(c => String(c[0]).includes('/auth/refresh'))
+      expect(refreshCalls).toHaveLength(1)
     })
 
     it('should include error details in ApiError', async () => {

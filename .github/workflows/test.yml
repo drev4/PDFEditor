@@ -6,27 +6,43 @@ on:
   pull_request:
     branches: [main, develop]
 
+# A superseded run tells you nothing and costs minutes. Keep only the newest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # One place for the throwaway CI database URL, used by every job that needs it.
+  DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/vuepdf_test
+
 jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          # `.nvmrc` is the single source of truth for the Node version, in every
+          # job. It previously said 22.12.0 while CI pinned 20.x, so nobody was
+          # running what CI ran.
+          node-version-file: .nvmrc
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify the toolchain
+        run: npm run check:node
+
+      - name: Type check and build both workspaces
+        run: |
+          npm run build --workspace=frontend
+          npx tsc --noEmit --project backend/tsconfig.json
 
       - name: Run frontend tests with coverage
         run: npm run test:coverage:frontend
@@ -50,25 +66,21 @@ jobs:
           name: backend-coverage
           fail_ci_if_error: false
 
-      - name: Archive frontend coverage
+      - name: Archive coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-coverage-report
-          path: frontend/coverage/
+          name: coverage-report
+          path: |
+            frontend/coverage/
+            backend/coverage/
           retention-days: 7
 
-      - name: Archive backend coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage-report
-          path: backend/coverage/
-          retention-days: 7
-
-  e2e-tests:
-    name: E2E Tests
+  integration-tests:
+    name: Backend Integration Tests (real PostgreSQL)
     runs-on: ubuntu-latest
+    # The database suites cannot pass if the fast ones are already failing.
+    needs: unit-tests
 
     services:
       postgres:
@@ -85,37 +97,103 @@ jobs:
         ports:
           - 5432:5432
 
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          # One source of truth for the version developers install.
+          node-version-file: .nvmrc
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        # Redundant with backend's `postinstall`, deliberately: a pipeline that
+        # installs with --ignore-scripts still works, and a reader of this file
+        # can see that the client is generated. `migrate deploy` does NOT
+        # generate it - only `migrate dev` does.
+        run: npx prisma generate
+        working-directory: backend
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
+
+      - name: Run backend integration tests
+        run: npm run test:integration --workspace=backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
+          JWT_SECRET: test-secret-key-for-ci
+          NODE_ENV: test
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vuepdf_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: backend
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Setup database
-        run: npm run db:push
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+        working-directory: backend
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vuepdf_test
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
 
       - name: Run E2E tests
         run: npm run test:e2e
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vuepdf_test
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
           JWT_SECRET: test-secret-key-for-ci
           NODE_ENV: test
+          RATE_LIMIT_LOGIN_MAX: '100000'
+          RATE_LIMIT_REGISTER_MAX: '100000'
+          RATE_LIMIT_RESPONSES_MAX: '100000'
 
       - name: Upload Playwright report
         if: always()

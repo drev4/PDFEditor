@@ -26,8 +26,12 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# Local AI tooling configs
-.claude/
+# Local AI tooling configs.
+# Skills and agents are versioned on purpose - they encode how work is done here.
+# See .claude/skills/ and .claude/agents/, and docs/sot/11-conventions.md
+.claude/*
+!.claude/skills/
+!.claude/agents/
 .agents/
 
 # Test coverage
@@ -49,6 +53,7 @@ nul
 
 # Environment
 .env
+.env.deploy
 .env.local
 .env.*.local
 
@@ -65,3 +70,14 @@ poc/*.pdf
 # Uploaded files
 backend/uploads/**/*
 !backend/uploads/**/.gitkeep
+
+# Copias de .env. El patron `.env` de arriba NO las cubre — un fichero llamado
+# `.env.backup-...` se commitea tan tranquilamente como cualquier otro, con el
+# JWT_SECRET y la contraseña de la base de datos dentro.
+.env.backup*
+.env.*.backup
+*.env.bak
+
+# Backup artifacts: dumps and copied PDF documents are customer data
+# (features/0037). The default output of `npm run backup:db` is backend/backups.
+backups/

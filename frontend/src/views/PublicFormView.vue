@@ -1,99 +1,100 @@
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex flex-col font-sans">
-    <!-- Loading State -->
-    <div v-if="isLoading" class="flex flex-col items-center justify-center min-h-screen animate-fade-in">
-      <div class="relative w-20 h-20 mb-8">
-        <div class="absolute inset-0 border-4 border-blue-100 rounded-2xl"></div>
-        <div class="absolute inset-0 border-4 border-blue-600 rounded-2xl border-t-transparent animate-spin"></div>
-        <i class="pi pi-file-pdf absolute inset-0 flex items-center justify-center text-3xl text-blue-600 animate-pulse"></i>
-      </div>
-      <p class="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent tracking-wide">
-        PREPARING FORM
-      </p>
-      <div class="mt-4 flex gap-1">
-        <div class="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-        <div class="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-        <div class="w-1.5 h-1.5 bg-blue-600 rounded-full animate-bounce"></div>
-      </div>
+  <div class="min-h-screen bg-surface-sunken flex flex-col">
+    <!-- Loading -->
+    <div v-if="isLoading" class="flex flex-col items-center justify-center min-h-screen">
+      <ProgressSpinner style="width: 30px; height: 30px" strokeWidth="4" />
+      <p class="mt-4 text-body text-muted">Preparing the form</p>
     </div>
 
-    <!-- Error State -->
-    <div v-else-if="error" class="flex items-center justify-center min-h-screen px-4 animate-scale-in">
-      <div class="text-center max-w-md w-full bg-white/70 backdrop-blur-xl p-10 rounded-3xl shadow-2xl border border-white">
-        <div class="w-20 h-20 bg-red-50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-red-500 shadow-inner">
-          <i class="pi pi-exclamation-circle text-4xl"></i>
-        </div>
-        <h2 class="text-2xl font-black text-gray-900 mb-3">Something went wrong</h2>
-        <p class="text-gray-600 leading-relaxed mb-8">{{ error }}</p>
-        <button 
+    <!-- Error -->
+    <div v-else-if="error" class="flex items-center justify-center min-h-screen px-4">
+      <div class="text-center max-w-[400px] w-full bg-surface p-8 rounded-card border border-line shadow-paper">
+        <h2 class="text-section">This form could not be opened</h2>
+        <p class="text-body text-muted mt-2 mb-7">{{ error }}</p>
+        <button
+          type="button"
+          class="w-full h-control rounded-control bg-accent hover:bg-accent-pressed text-white text-row font-medium transition-colors"
           @click="router.go(0)"
-          class="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold hover:bg-black transition-all shadow-lg hover:shadow-black/20"
         >
-          Try Again
+          Try again
         </button>
       </div>
     </div>
 
-    <!-- Form Content -->
+    <!-- Form -->
     <div v-else-if="form" class="flex-1 flex flex-col h-screen overflow-hidden">
-      <!-- Premium Glass Header -->
-      <header class="bg-white/70 backdrop-blur-xl border-b border-white z-30 shadow-sm">
-        <div class="max-w-screen-2xl mx-auto px-6 py-4 flex justify-between items-center gap-4">
-          <div class="flex items-center gap-4 animate-fade-in">
-            <div class="bg-gradient-to-br from-blue-600 to-indigo-600 p-2 rounded-xl shadow-lg shadow-blue-500/20">
-              <i class="pi pi-file-pdf text-white text-xl"></i>
-            </div>
-            <div class="overflow-hidden">
-              <h1 class="text-lg font-black text-gray-900 truncate tracking-tight">{{ title }}</h1>
-              <div class="flex items-center gap-2 mt-0.5">
-                <span class="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-                <p class="text-[10px] uppercase font-bold text-gray-500 tracking-widest truncate">Live Form</p>
-              </div>
-            </div>
-          </div>
+      <header
+        class="flex items-center gap-4 h-14 flex-shrink-0 px-6 bg-surface border-b border-line z-30"
+      >
+        <div class="min-w-0">
+          <div class="text-base font-medium truncate">{{ title }}</div>
+          <div v-if="description" class="text-micro text-faint truncate">{{ description }}</div>
+        </div>
 
-          <div class="flex items-center gap-4">
-            <!-- Save Status Indicator -->
-            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 rounded-lg border border-slate-200/50 transition-all" v-if="responsesStore.hasUnsavedChanges || responsesStore.lastSaved">
-               <i class="pi text-[10px]" :class="responsesStore.isSaving ? 'pi-spin pi-spinner text-blue-500' : 'pi-check text-green-500'"></i>
-               <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  {{ responsesStore.isSaving ? 'Syncing...' : 'Encrypted & Saved' }}
-               </span>
-            </div>
-            
-            <div class="h-6 w-px bg-slate-200 mx-1 hidden md:block"></div>
+        <div class="flex-grow" />
 
-            <button
-              @click="handleSubmit"
-              :disabled="isSubmitting"
-              class="relative group px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
-            >
-              <div v-if="isSubmitting" class="flex items-center gap-2">
-                <i class="pi pi-spin pi-spinner text-sm"></i>
-                <span class="tracking-tight">SENDING...</span>
-              </div>
-              <div v-else class="flex items-center gap-2">
-                <span class="tracking-tight">SUBMIT FORM</span>
-                <i class="pi pi-arrow-right text-xs group-hover:translate-x-1 transition-transform"></i>
-              </div>
-            </button>
+        <!-- Progress. Mono, because it is a count. -->
+        <div class="hidden md:flex items-center gap-2.5">
+          <span class="text-meta text-muted">
+            <span class="num">{{ filledCount }}</span> of
+            <span class="num">{{ fields.length }}</span> fields
+          </span>
+          <div class="w-[116px] h-1 rounded-pill bg-surface-track overflow-hidden">
+            <div class="h-1 rounded-pill bg-accent transition-all" :style="{ width: progressWidth }" />
           </div>
         </div>
+
+        <!-- Says what actually happened: the draft is in this browser. It does
+             not claim encryption, which the old copy did and nothing does. -->
+        <div
+          v-if="responsesStore.hasUnsavedChanges || responsesStore.lastSaved"
+          class="hidden sm:flex items-center gap-1.5 h-[26px] px-2.5 rounded-pill bg-neutral-soft"
+        >
+          <i
+            class="pi text-[10px]"
+            :class="responsesStore.isSaving ? 'pi-spin pi-spinner text-faint' : 'pi-check text-published'"
+          />
+          <span class="text-micro text-muted">
+            {{ responsesStore.isSaving ? 'Saving' : 'Progress saved' }}
+          </span>
+        </div>
+
+        <div class="w-px h-[22px] bg-line hidden sm:block" />
+
+        <button
+          type="button"
+          :disabled="isSubmitting"
+          data-testid="public-submit-button"
+          class="flex items-center gap-2 h-control-sm min-h-touch sm:min-h-0 px-4 rounded-control bg-accent hover:bg-accent-pressed disabled:bg-surface-control disabled:text-disabled text-white text-row font-medium transition-colors"
+          @click="handleSubmit"
+        >
+          <i v-if="isSubmitting" class="pi pi-spin pi-spinner text-[12px]" />
+          <span>{{ isSubmitting ? 'Sending' : 'Submit form' }}</span>
+        </button>
       </header>
 
-      <!-- Main Visual Workspace -->
-      <main class="flex-1 overflow-hidden relative bg-slate-200/30">
-        <div v-if="loadingPdf" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/80 backdrop-blur-sm z-20 animate-fade-in">
-          <ProgressSpinner style="width: 40px; height: 40px" strokeWidth="4" />
-          <p class="mt-4 text-[10px] font-black tracking-[0.2em] text-blue-600 uppercase">Generating Document</p>
+      <!-- The PublicForm artboard sets the page on a grey ground as a sheet of
+           paper with its own border and shadow. `.public-paper` gives the
+           rendered canvas that treatment; elevation is for paper and menus
+           only, and this is the paper. -->
+      <main class="flex-1 overflow-hidden relative bg-surface-sunken public-paper">
+        <div
+          v-if="loadingPdf"
+          class="absolute inset-0 flex flex-col items-center justify-center bg-surface-sunken/80 z-20"
+        >
+          <ProgressSpinner style="width: 30px; height: 30px" strokeWidth="4" />
+          <p class="mt-4 text-body text-muted">Loading the document</p>
         </div>
-        
-        <div class="h-full w-full animate-scale-in">
+
+        <div class="h-full w-full">
           <PDFViewer :read-only="true">
-            <template #fields-overlay="{ scale }">
+            <template #fields-overlay="{ scale, width, height, displayScale }">
               <PublicFormFieldsOverlay
                 :fields="fields"
                 :scale="scale"
+                :canvas-width="width"
+                :canvas-height="height"
+                :display-scale="displayScale"
                 :validation-errors="validationErrors"
                 @field-change="handleFieldChange"
               />
@@ -101,6 +102,58 @@
           </PDFViewer>
         </div>
       </main>
+
+      <!-- The mark, now a real plan entitlement (features/0014).
+           `showBranding` is decided by the server from `Plan.hasBranding` and
+           passed through; nothing here re-derives it, because the client is
+           deliberately given no plan to derive it from — this endpoint is
+           anonymous, and what the owner pays is not the respondent's business.
+           Note that DEV_PLAN_KEY=dev grants the entitlement, so the mark
+           disappears in local development. That is the override working, not a
+           bug. -->
+      <!--
+        What happens to what this person is about to send (features/0032,
+        finding S7). It is generated from what is actually true for this form,
+        never written by the author: the product knows what the product stores
+        and an author does not, so a free-text field here would produce a privacy
+        notice that is wrong in the confident direction.
+
+        Note the second sentence and the condition on the third. Answers go to
+        the organization that published the form and it is that organization,
+        not us, who is asked about them — we are the processor. And the address
+        is mentioned **only** when it is actually recorded; a notice that
+        over-claims is as wrong as one that under-claims, and this one is
+        rendered from the same boolean the server enforces.
+      -->
+      <p
+        class="px-6 py-3 flex-shrink-0 text-meta text-muted border-t border-line"
+        data-testid="respondent-notice"
+      >
+        Your answers are sent to the organization that published this form, and
+        they are who to contact about them.
+        <template v-if="collectsMetadata">
+          Your IP address and browser are recorded with your submission.
+        </template>
+      </p>
+
+      <footer
+        class="flex items-center h-[52px] flex-shrink-0 px-6 bg-surface border-t border-line"
+      >
+        <span v-if="requiredLeft" class="text-meta text-muted">
+          <span class="num">{{ requiredLeft }}</span>
+          required {{ requiredLeft === 1 ? 'field' : 'fields' }} left
+        </span>
+        <div class="flex-grow" />
+        <div
+          v-if="showBranding"
+          class="flex items-center gap-1.5 h-[26px] px-2.5 rounded-pill border border-line"
+        >
+          <div class="flex items-center justify-center w-3.5 h-3.5 rounded-chip bg-ink text-white flex-shrink-0">
+            <i class="pi pi-file text-[8px]" />
+          </div>
+          <span class="text-micro text-muted">Made with VuePDF</span>
+        </div>
+      </footer>
 
       <SubmitPreviewModal
         v-model:visible="showPreview"
@@ -131,7 +184,8 @@ const route = useRoute()
 const router = useRouter()
 const documentStore = useDocumentStore()
 
-const { form, fields, pdfUrl, title, description, isLoading, error, loadForm } = usePublicForm()
+const { form, showBranding, collectsMetadata, fields, pdfUrl, title, description, isLoading, error, loadForm } =
+  usePublicForm()
 const { isSubmitting, error: submitError, validationErrors: submitValidationErrors, submit } = useResponseSubmit()
 const { errors: clientErrors, validateField, validate } = useFormValidation()
 const responsesStore = usePublicResponsesStore()
@@ -139,6 +193,26 @@ const responsesStore = usePublicResponsesStore()
 const shareId = computed(() => route.params.shareId as string)
 const loadingPdf = ref(false)
 const showPreview = ref(false)
+
+// Progress, as the PublicForm artboard shows it. An answer counts as given if
+// it is a non-empty string or a ticked checkbox; `false` on an unticked
+// checkbox is a value the store holds but not something the respondent did.
+const isAnswered = (value: unknown) =>
+  typeof value === 'string' ? value.trim().length > 0 : value === true
+
+const filledCount = computed(() => {
+  const answers = responsesStore.getAllResponses()
+  return fields.value.filter(f => isAnswered(answers[f.id])).length
+})
+
+const progressWidth = computed(() =>
+  fields.value.length ? `${Math.round((filledCount.value / fields.value.length) * 100)}%` : '0%'
+)
+
+const requiredLeft = computed(() => {
+  const answers = responsesStore.getAllResponses()
+  return fields.value.filter(f => f.required && !isAnswered(answers[f.id])).length
+})
 
 const validationErrors = computed(() => ({
   ...clientErrors.value,
@@ -203,8 +277,12 @@ function handleFieldChange(payload: { fieldId: string, value: any }) {
       clearTimeout(validationTimeouts.get(fieldId))
     }
 
-    const timeout = window.setTimeout(() => {
-      validateField(field, value)
+    const timeout = window.setTimeout(async () => {
+      // Awaited: the pattern check now runs in a worker (features/0035). The
+      // return value is unused here — the composable writes `errors` — but
+      // awaiting keeps the error-clearing below ordered after the verdict
+      // rather than racing it.
+      await validateField(field, value)
       
       // Clear server error only if client validation passes or if we want to reset it on input
       if (submitValidationErrors.value && submitValidationErrors.value[field.name]) {
@@ -224,8 +302,12 @@ async function handleSubmit() {
 
   const answers = responsesStore.getAllResponses()
 
-  // Client validation
-  if (!validate(fields.value, answers)) {
+  // Client validation. **The `await` is load-bearing** (features/0035):
+  // `validate` returns a promise now, and a promise is always truthy, so
+  // dropping it would let every submission through with no error and no
+  // console line — the server would still refuse the values, making it look
+  // like the check had merely gone quiet.
+  if (!(await validate(fields.value, answers))) {
     // Optional: Scroll to first error or show toast
     return
   }
@@ -264,3 +346,18 @@ async function handleConfirmSubmit() {
   }
 }
 </script>
+
+<style scoped>
+.public-paper :deep(.pdf-canvas-wrapper) {
+  background: theme('colors.surface.DEFAULT');
+  border: 1px solid theme('colors.line.paper');
+  box-shadow: theme('boxShadow.paper');
+}
+
+/* The respondent's page is a document, not a workspace: no grid, no drawing
+   chrome, and room around the sheet the way the artboard frames it. */
+.public-paper :deep(.grid-overlay) {
+  display: none;
+}
+</style>
+

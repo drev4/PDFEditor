@@ -1,14 +1,40 @@
 <template>
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <div>
-      <h2 class="text-2xl font-bold text-gray-800 mb-2">Create Account</h2>
-      <p class="text-gray-600 text-sm">Start editing PDFs professionally</p>
+      <h2 class="text-title font-bold text-ink mb-2">Create Account</h2>
+      <p class="text-muted text-body">Start editing PDFs professionally</p>
+    </div>
+
+    <!-- Private beta (features/0033). Shown before anything is typed, so a
+         visitor learns the beta is closed here rather than from a 403 after
+         filling in the whole form. -->
+    <Message v-if="showCodeField" severity="info" :closable="false">
+      Sign-ups are invitation-only while we run the private beta. Enter the code
+      from your invitation email below.
+    </Message>
+
+    <!-- Invitation Code -->
+    <div v-if="showCodeField" class="space-y-2">
+      <label for="code" class="block text-body font-medium text-ink">
+        Invitation Code
+      </label>
+      <InputText
+        id="code"
+        v-model="code"
+        type="text"
+        placeholder="From your invitation email"
+        :invalid="!!errors.code"
+        class="w-full"
+        autocomplete="off"
+        data-testid="register-code-input"
+      />
+      <small v-if="errors.code" class="text-danger">{{ errors.code }}</small>
     </div>
 
     <!-- Name Field (Optional) -->
     <div class="space-y-2">
-      <label for="name" class="block text-sm font-medium text-gray-700">
-        Full Name <span class="text-gray-400">(optional)</span>
+      <label for="name" class="block text-body font-medium text-ink">
+        Full Name <span class="text-faint">(optional)</span>
       </label>
       <InputText
         id="name"
@@ -23,7 +49,7 @@
 
     <!-- Email Field -->
     <div class="space-y-2">
-      <label for="email" class="block text-sm font-medium text-gray-700">
+      <label for="email" class="block text-body font-medium text-ink">
         Email Address
       </label>
       <InputText
@@ -37,12 +63,12 @@
         autocomplete="email"
         data-testid="register-email-input"
       />
-      <small v-if="errors.email" class="text-red-500">{{ errors.email }}</small>
+      <small v-if="errors.email" class="text-danger">{{ errors.email }}</small>
     </div>
 
     <!-- Password Field -->
     <div class="space-y-2">
-      <label for="password" class="block text-sm font-medium text-gray-700">
+      <label for="password" class="block text-body font-medium text-ink">
         Password
       </label>
       <Password
@@ -60,17 +86,17 @@
         data-testid="register-password-input"
       >
         <template #footer>
-          <p class="text-xs text-gray-600 mt-2">
+          <p class="text-meta text-muted mt-2">
             Password must be at least 6 characters long
           </p>
         </template>
       </Password>
-      <small v-if="errors.password" class="text-red-500">{{ errors.password }}</small>
+      <small v-if="errors.password" class="text-danger">{{ errors.password }}</small>
     </div>
 
     <!-- Confirm Password Field -->
     <div class="space-y-2">
-      <label for="confirmPassword" class="block text-sm font-medium text-gray-700">
+      <label for="confirmPassword" class="block text-body font-medium text-ink">
         Confirm Password
       </label>
       <Password
@@ -87,7 +113,7 @@
         inputId="register-confirm-password-input"
         data-testid="register-confirm-password-input"
       />
-      <small v-if="errors.confirmPassword" class="text-red-500">{{ errors.confirmPassword }}</small>
+      <small v-if="errors.confirmPassword" class="text-danger">{{ errors.confirmPassword }}</small>
     </div>
 
     <!-- Error General -->
@@ -109,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import InputText from 'primevue/inputtext'
@@ -117,6 +143,7 @@ import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useAuthStore } from '@/stores/auth.store'
+import { authService } from '@/services/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -126,11 +153,34 @@ const name = ref('')
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const code = ref('')
 const errors = ref<{
   email?: string
   password?: string
   confirmPassword?: string
+  code?: string
 }>({})
+
+/**
+ * Whether to draw the invitation-code field (features/0033).
+ *
+ * **It starts false and is only ever turned on**, which is what makes the
+ * failure of the request below harmless: if `GET /auth/registration` is
+ * unreachable the screen renders exactly as it does today and the server
+ * decides, answering 403 with a message this form surfaces. Blocking the form
+ * on a request that returned nothing would turn one flaky GET into an outage
+ * on the signup screen, which is not a trade the beta is worth.
+ */
+const showCodeField = ref(false)
+
+onMounted(async () => {
+  try {
+    showCodeField.value = (await authService.getRegistrationMode()) === 'invite_only'
+  } catch {
+    // Deliberately silent: see `showCodeField`. The form stays usable and the
+    // server remains the authority on whether registration is open.
+  }
+})
 
 const validateForm = () => {
   errors.value = {}
@@ -160,6 +210,14 @@ const validateForm = () => {
     valid = false
   }
 
+  // Only when the field is drawn. The server is the authority on whether a
+  // code is required — this check exists so an empty one is caught here
+  // instead of costing a round trip and a 403.
+  if (showCodeField.value && !code.value.trim()) {
+    errors.value.code = 'An invitation code is required'
+    valid = false
+  }
+
   return valid
 }
 
@@ -167,12 +225,17 @@ const handleSubmit = async () => {
   if (!validateForm()) return
 
   try {
-    await authStore.register(email.value, password.value, name.value || undefined)
+    await authStore.register(
+      email.value,
+      password.value,
+      name.value || undefined,
+      code.value.trim() || undefined
+    )
 
     toast.add({
       severity: 'success',
       summary: 'Account created!',
-      detail: 'Welcome to PDF Editor Pro',
+      detail: 'Welcome to VuePDF Forms',
       life: 3000
     })
 

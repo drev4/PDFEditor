@@ -223,4 +223,59 @@ describe('useTextPlacement', () => {
       expect(drawingStore.snapToGrid).toBe(true)
     })
   })
+
+  // Regression. The text tool drew into the in-memory PDF buffer and stopped
+  // there: nothing recorded that the document had changed, so the edit was
+  // lost on reload with nothing having warned the user.
+  //
+  // It is deliberately not uploaded here. An edit is not a decision until the
+  // user saves, and writing every placement straight to the server left
+  // someone experimenting with no way back.
+  describe('marking the document as edited', () => {
+    const placeText = async () => {
+      const { confirmTextPlacement } = useTextPlacement(canvasRef)
+      editorStore.setTextPreview({
+        text: 'Signed by Marta',
+        x: 100,
+        y: 100,
+        fontSize: 14,
+        color: '#000000',
+        isBold: false,
+        isItalic: false
+      })
+      await confirmTextPlacement()
+    }
+
+    it('marks the document as having unsaved edits', async () => {
+      expect(documentStore.hasUnsavedEdits).toBe(false)
+
+      await placeText()
+
+      expect(documentStore.hasUnsavedEdits).toBe(true)
+    })
+
+    it('does not mark anything when the text is blank', async () => {
+      const { confirmTextPlacement } = useTextPlacement(canvasRef)
+      editorStore.setTextPreview({
+        text: '   ',
+        x: 100,
+        y: 100,
+        fontSize: 14,
+        color: '#000000',
+        isBold: false,
+        isItalic: false
+      })
+
+      await confirmTextPlacement()
+
+      expect(documentStore.hasUnsavedEdits).toBe(false)
+    })
+
+    it('commits the text to the in-memory buffer', async () => {
+      await placeText()
+
+      // A cleared preview means the text was applied rather than left pending.
+      expect(editorStore.textPreview).toBeNull()
+    })
+  })
 })

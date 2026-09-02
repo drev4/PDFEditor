@@ -86,12 +86,46 @@ describe('Forms Service', () => {
 
   describe('getPublic', () => {
     it('should fetch public form by shareId', async () => {
-      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm, showBranding: false })
 
-      const form = await formsService.getPublic('share-123')
+      const published = await formsService.getPublic('share-123')
 
       expect(api.get).toHaveBeenCalledWith('/forms/public/share-123')
-      expect(form.shareId).toBe('share-123')
+      expect(published.form.shareId).toBe('share-123')
+      expect(published.showBranding).toBe(false)
+    })
+
+    it('keeps the mark when the server does not say (features/0014)', async () => {
+      // An older server, a proxy that drops the field, a shape change. The safe
+      // direction for a missing flag is to show the mark: the failure mode of
+      // guessing the other way is silently giving away the paid tier's benefit.
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+
+      const published = await formsService.getPublic('share-123')
+
+      expect(published.showBranding).toBe(true)
+    })
+
+    /**
+     * The two flags fail in opposite directions on purpose (features/0032).
+     * A missing `showBranding` keeps the mark, because under-claiming a paid
+     * entitlement gives it away; a missing `collectsMetadata` claims nothing is
+     * stored, because a privacy notice that over-claims is the wrong failure.
+     */
+    it('treats a missing collectsMetadata as not collecting', async () => {
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+
+      const published = await formsService.getPublic('share-123')
+
+      expect(published.collectsMetadata).toBe(false)
+    })
+
+    it('passes collectsMetadata through when the server sends it', async () => {
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm, collectsMetadata: true })
+
+      const published = await formsService.getPublic('share-123')
+
+      expect(published.collectsMetadata).toBe(true)
     })
   })
 })

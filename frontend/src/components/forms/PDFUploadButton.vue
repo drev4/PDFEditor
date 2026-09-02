@@ -131,7 +131,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   padding: 10px 20px;
-  background: #3b82f6;
+  background: #3554d1;
   color: white;
   border: none;
   border-radius: 6px;
@@ -142,16 +142,16 @@ defineExpose({
 }
 
 .upload-button:hover:not(:disabled) {
-  background: #2563eb;
+  background: #3554d1;
 }
 
 .upload-button:disabled {
-  background: #9ca3af;
+  background: #9ba1ac;
   cursor: not-allowed;
 }
 
 .upload-button.uploading {
-  background: #2563eb;
+  background: #3554d1;
 }
 
 .button-content {
@@ -181,8 +181,8 @@ defineExpose({
 .error-message {
   margin-top: 8px;
   padding: 8px 12px;
-  background: #fee2e2;
-  color: #991b1b;
+  background: #f7ecec;
+  color: #b02a30;
   border-radius: 4px;
   font-size: 13px;
 }

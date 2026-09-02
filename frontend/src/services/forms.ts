@@ -31,13 +31,19 @@ export interface Field {
 
 export interface Form {
   id: string
-  userId: string
+  // No owner id. Forms belong to an organization and the server decides who may
+  // reach one; the client is deliberately unaware that organizations exist.
   title: string
   description: string | null
   shareId: string
   status: FormStatus
   pdfUrl: string | null
   settings: Record<string, unknown> | null
+  /**
+   * Whether a submission to this form stores the respondent's IP address and
+   * user agent (features/0032). Off unless the author turned it on.
+   */
+  collectsRespondentMetadata: boolean
   viewCount: number
   createdAt: string
   updatedAt: string
@@ -56,6 +62,33 @@ interface FormResponse {
   form: Form
 }
 
+/**
+ * What the anonymous endpoint returns, which is a form **plus one boolean**.
+ *
+ * `showBranding` is the only thing about the owner's plan that crosses this
+ * boundary (features/0014). Anyone holding a share link receives this payload,
+ * so it deliberately carries no plan name, no limit, no usage and no
+ * organization id — the same reason the response limit answers `404` there
+ * instead of `402`.
+ */
+export interface PublicForm {
+  form: Form
+  showBranding: boolean
+  /**
+   * Whether this respondent's address and browser will be stored with their
+   * submission (features/0032). It is what the notice on the public form is
+   * rendered from, and it says nothing about the owner — unlike `showBranding`
+   * above, which is a plan entitlement, this is a fact about the reader.
+   */
+  collectsMetadata: boolean
+}
+
+interface PublicFormResponse {
+  form: Form
+  showBranding?: boolean
+  collectsMetadata?: boolean
+}
+
 export interface CreateFormData {
   title: string
   description?: string
@@ -68,6 +101,7 @@ export interface UpdateFormData {
   status?: FormStatus
   pdfUrl?: string
   settings?: Record<string, unknown>
+  collectsRespondentMetadata?: boolean
 }
 
 export const formsService = {
@@ -100,8 +134,20 @@ export const formsService = {
     await api.delete(`/forms/${id}`)
   },
 
-  async getPublic(shareId: string): Promise<Form> {
-    const response = await api.get<FormResponse>(`/forms/public/${shareId}`)
-    return response.form
+  async getPublic(shareId: string): Promise<PublicForm> {
+    const response = await api.get<PublicFormResponse>(`/forms/public/${shareId}`)
+    return {
+      form: response.form,
+      // Absent means shown. The safe direction for a missing flag is to keep
+      // the mark: an older server, a proxy that drops it, or a shape change
+      // must never silently give away the paid tier's benefit.
+      showBranding: response.showBranding ?? true,
+      // Absent means **not** collected, and that direction is deliberate and
+      // opposite to the one above. A missing flag must never make the notice
+      // claim an address is stored when it is not — the safe failure for a
+      // privacy statement is to under-claim, and the safe failure for a paid
+      // entitlement is to keep showing the mark.
+      collectsMetadata: response.collectsMetadata ?? false
+    }
   }
 }

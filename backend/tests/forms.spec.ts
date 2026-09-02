@@ -3,6 +3,8 @@ import request from 'supertest'
 import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
+import { mockCallerMembership } from './mock-caller.js'
+import { passThroughTransactionOnly } from './mock-transaction.js'
 import { PrismaClient } from '@prisma/client'
 
 // Mock Prisma
@@ -26,11 +28,17 @@ const prismaMock = prisma as unknown as DeepMockProxy<PrismaClient>
 describe('Forms Routes', () => {
   beforeEach(() => {
     mockReset(prismaMock)
+    mockCallerMembership(prismaMock)
+    // Publishing runs its limit check and its update in one transaction since
+    // features/0027. `mockReset` clears the pass-through, so it is reinstalled
+    // here rather than in each publishing test.
+    passThroughTransactionOnly(prismaMock)
   })
 
   const mockForm = {
     id: 'form-1',
-    userId: 'user-1',
+    organizationId: 'org-1',
+    createdByUserId: 'user-1',
     title: 'Test Form',
     description: 'Test description',
     shareId: 'share-123',
@@ -66,6 +74,9 @@ describe('Forms Routes', () => {
 
   describe('POST /api/forms', () => {
     it('should create a new form', async () => {
+      // Creating a form now resolves the caller's organization first — see
+      // requireOrganizationId in middleware/formOwnership.ts.
+      prismaMock.membership.findFirst.mockResolvedValue({ organizationId: 'org-1' } as any)
       prismaMock.form.create.mockResolvedValue(mockForm as any)
 
       const res = await request(app)
@@ -138,6 +149,10 @@ describe('Forms Routes', () => {
 
     it('should update form status', async () => {
       prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+      // Publishing checks the plan's published-form limit since features/0012.
+      // An organization with room, so this stays a test about the update.
+      prismaMock.organization.findUnique.mockResolvedValue({ planKey: 'free' } as any)
+      prismaMock.form.count.mockResolvedValue(0)
       prismaMock.form.update.mockResolvedValue({
         ...mockForm,
         status: 'published'
@@ -184,7 +199,10 @@ describe('Forms Routes', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.form).toHaveProperty('title')
-      expect(res.body.form).not.toHaveProperty('userId')
+      // Neither the creator nor the owning organization reaches an anonymous
+      // respondent.
+      expect(res.body.form).not.toHaveProperty('createdByUserId')
+      expect(res.body.form).not.toHaveProperty('organizationId')
     })
 
     it('should return 404 if form not published', async () => {

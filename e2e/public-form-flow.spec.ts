@@ -1,74 +1,68 @@
 import { test, expect } from '@playwright/test';
+import { createPublishedForm, type SeededForm } from './helpers';
 
+// This suite used to point at a hardcoded shareId ('53SGWRKS0N8E') that existed
+// on nobody's machine, so both tests failed everywhere. Each test now creates
+// its own published form over the API and submits to that.
 test.describe('Public Form Submission', () => {
-    // Note: This test relies on a form with shareId '53SGWRKS0N8E' being present in the DB
-    // and having at least one text field.
-    const shareId = '53SGWRKS0N8E';
+    let form: SeededForm;
+
+    test.beforeEach(async ({ request }) => {
+        form = await createPublishedForm(request);
+    });
 
     test('should allow a public user to fill and submit a form', async ({ page }) => {
-        // 1. Visit the public form URL
-        console.log(`Navigating to /form/${shareId}`);
-        const response = await page.goto(`/form/${shareId}`);
-
-        // Check if the page loaded
+        const response = await page.goto(`/form/${form.shareId}`);
         expect(response?.status()).toBe(200);
 
-        // 2. Wait for the PDF viewer and fields to load
-        console.log('Waiting for .pdf-viewer...');
-        await page.waitForSelector('.pdf-viewer', { timeout: 15000 });
+        // `.pdf-viewer-container` is the real class; `.pdf-viewer` never existed.
+        await page.waitForSelector('.pdf-viewer-container', { timeout: 30000 });
 
-        // 3. Verify fields are present
-        console.log('Waiting for .public-field-item...');
         const fields = page.locator('.public-field-item');
-        await expect(fields.first()).toBeVisible({ timeout: 15000 });
+        await expect(fields.first()).toBeVisible({ timeout: 30000 });
 
-        // 4. Fill the first text input found
+        // The respondent notice (features/0032). The form is created by the
+        // fixture without asking for metadata, so the default holds and the
+        // notice must **not** claim an address is recorded. A notice that
+        // over-claims is as wrong as one that under-claims, and this is the
+        // assertion that catches the flag being ignored end to end.
+        const notice = page.locator('[data-testid="respondent-notice"]');
+        await expect(notice).toBeVisible();
+        await expect(notice).toContainText('sent to the organization');
+        await expect(notice).not.toContainText('IP address');
+
         const textInput = page.locator('.text-input').first();
-        if (await textInput.count() > 0) {
-            console.log('Filling text input...');
-            await textInput.fill('E2E Test Submission');
-            await textInput.blur();
-        }
+        await expect(textInput).toBeVisible();
+        await textInput.fill('E2E Test Submission');
+        await textInput.blur();
 
-        // 5. Submit the form
-        const submitBtn = page.locator('button:has-text("Submit")');
-        await expect(submitBtn).toBeVisible();
-        console.log('Clicking Submit...');
-        await submitBtn.click();
+        await page.locator('[data-testid="public-submit-button"]').click();
 
-        // 6. Verify Preview Modal
-        console.log('Waiting for preview modal...');
-        await expect(page.locator('text=Preview your answers')).toBeVisible();
+        // The dialog is headed "Review Your Responses" and its confirm button
+        // reads "Confirm and Submit" - see SubmitPreviewModal.vue.
+        await expect(page.locator('text=Review Your Responses')).toBeVisible();
+        await page.locator('[data-testid="confirm-submit-button"]').click();
 
-        // 7. Confirm Submission
-        const confirmBtn = page.locator('button:has-text("Confirm Submission")');
-        console.log('Confirming submission...');
-        await confirmBtn.click();
-
-        // 8. Verify Success Navigation
-        console.log('Waiting for confirmation page...');
-        await page.waitForURL(/\/form\/confirm/, { timeout: 15000 });
-        await expect(page.locator('text=Response Submitted!')).toBeVisible();
+        // The route is /form/:shareId/confirmation - the old /form/confirm never matched.
+        await page.waitForURL(/\/form\/[^/]+\/confirmation/, { timeout: 30000 });
+        await expect(page.locator('text=Response Submitted')).toBeVisible();
     });
 
     test('should persist drafts in localStorage', async ({ page }) => {
-        await page.goto(`/form/${shareId}`);
-        await page.waitForSelector('.pdf-viewer');
+        await page.goto(`/form/${form.shareId}`);
+        await page.waitForSelector('.pdf-viewer-container', { timeout: 30000 });
 
         const textInput = page.locator('.text-input').first();
-        if (await textInput.count() > 0) {
-            await textInput.fill('Persistent Draft Test');
-            await textInput.blur();
+        await expect(textInput).toBeVisible({ timeout: 30000 });
+        await textInput.fill('Persistent Draft Test');
+        await textInput.blur();
 
-            // Wait a moment for debounced save
-            await page.waitForTimeout(1500);
+        // The draft save is debounced.
+        await page.waitForTimeout(1500);
 
-            // Reload page
-            await page.reload();
-            await page.waitForSelector('.pdf-viewer');
+        await page.reload();
+        await page.waitForSelector('.pdf-viewer-container', { timeout: 30000 });
 
-            // Check if value is still there
-            await expect(page.locator('.text-input').first()).toHaveValue('Persistent Draft Test');
-        }
+        await expect(page.locator('.text-input').first()).toHaveValue('Persistent Draft Test');
     });
 });

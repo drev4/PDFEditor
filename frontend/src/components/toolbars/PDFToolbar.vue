@@ -1,7 +1,7 @@
 <template>
-  <div class="viewer-toolbar bg-white/80 backdrop-blur-xl shadow-md px-6 py-2.5 flex items-center justify-between border-b border-white z-40">
+  <div class="viewer-toolbar bg-surface px-4 py-2 flex items-center justify-between border-b border-line z-40">
     <div class="flex items-center gap-3">
-      <div class="bg-slate-100/80 rounded-xl p-1 flex items-center gap-1 border border-slate-200/50">
+      <div class="rounded-control p-0.5 flex items-center gap-1 border border-line">
         <Button
           icon="pi pi-chevron-left"
           @click="$emit('previous-page')"
@@ -12,8 +12,8 @@
           rounded
           :severity="currentPage <= 1 ? 'secondary' : 'info'"
         />
-        <div class="px-4 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm min-w-[100px] text-center">
-          <span class="text-xs font-black text-slate-700 tracking-tighter">
+        <div class="px-4 py-1.5 bg-white rounded-lg border border-line shadow-sm min-w-[100px] text-center">
+          <span class="text-meta font-semibold text-ink tracking-tighter">
             PAGE {{ currentPage }} / {{ numPages }}
           </span>
         </div>
@@ -31,7 +31,7 @@
     </div>
 
     <div class="flex items-center gap-4">
-      <div class="bg-slate-100/80 rounded-xl p-1 flex items-center gap-1 border border-slate-200/50">
+      <div class="rounded-control p-0.5 flex items-center gap-1 border border-line">
         <Button
           icon="pi pi-minus"
           @click="$emit('zoom-out')"
@@ -41,8 +41,8 @@
           rounded
           severity="secondary"
         />
-        <div class="px-3 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm min-w-[65px] text-center">
-          <span class="text-[10px] font-black text-slate-700">{{ Math.round(scale * 100) }}%</span>
+        <div class="px-3 py-1.5 bg-white rounded-lg border border-line shadow-sm min-w-[65px] text-center">
+          <span class="text-[10px] font-semibold text-ink">{{ Math.round(scale * 100) }}%</span>
         </div>
         <Button
           icon="pi pi-plus"
@@ -55,7 +55,7 @@
         />
       </div>
       
-      <div class="h-8 w-px bg-slate-200 mx-1"></div>
+      <div class="h-8 w-px bg-surface-track mx-1"></div>
       
       <Button
         icon="pi pi-refresh"
@@ -65,7 +65,7 @@
         text
         rounded
         severity="info"
-        class="bg-blue-50/50 border border-blue-100"
+        class="bg-accent-soft border border-accent"
       />
     </div>
   </div>

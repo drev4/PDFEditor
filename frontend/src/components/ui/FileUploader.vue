@@ -20,12 +20,19 @@ import { useDocumentStore } from '@/stores/document.store'
 
 const documentStore = useDocumentStore()
 
+// Emitted once the document is in the store. The forms list uses it to move to
+// the editor; the editor itself is already there and ignores it.
+const emit = defineEmits<{ (e: 'loaded'): void; (e: 'before-select'): void }>()
+
 const handleFileSelect = async (event: any) => {
   const file = event.files[0]
   if (file && file.type === 'application/pdf') {
+    // Lets a caller clear the editor before this document lands in the store.
+    emit('before-select')
     try {
       await documentStore.loadPDF(file)
       // Los campos del formulario se cargarán automáticamente en PDFViewer
+      emit('loaded')
     } catch (error) {
       console.error('Error loading PDF:', error)
     }
@@ -43,8 +50,4 @@ const handleFileSelect = async (event: any) => {
   transition: all 0.2s ease;
 }
 
-.upload-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-}
 </style>

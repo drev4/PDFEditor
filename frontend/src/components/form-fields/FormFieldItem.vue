@@ -10,9 +10,16 @@
       'field-dropdown': field.type === 'dropdown'
     }"
     :style="fieldStyle"
+    :title="isRotated ? 'Rotate the page back to upright to move or resize this field' : undefined"
     @mousedown.stop="onMouseDown"
     @click.stop="onClick"
   >
+    <!-- The type tag. In the editor a field says what it is, because the author
+         is placing geometry and needs to tell a checkbox from a dropdown at a
+         glance. It is what replaces the old per-type colour coding: five hues
+         competing with the page defeats the rule that accent is rationed. -->
+    <div class="field-tag">{{ typeTag }}</div>
+
     <!-- Radio buttons options preview -->
     <div v-if="field.type === 'radio' && field.options" class="radio-options-preview">
       <div
@@ -30,15 +37,11 @@
     <template v-if="field.type !== 'radio'">
       <span v-if="field.position.width > 60" class="field-label">
         {{ field.label || field.name }}
-        <span v-if="field.required" class="required-indicator">*</span>
       </span>
-
-      <!-- Field Type Icon -->
-      <i :class="fieldIcon" class="field-type-icon"></i>
     </template>
 
-    <!-- Resize Handles (only when selected) -->
-    <template v-if="isSelected">
+    <!-- Resize Handles (only when selected, and only upright) -->
+    <template v-if="isSelected && !isRotated">
       <div class="resize-handle nw" @mousedown.stop="startResize($event, 'nw')"></div>
       <div class="resize-handle ne" @mousedown.stop="startResize($event, 'ne')"></div>
       <div class="resize-handle sw" @mousedown.stop="startResize($event, 'sw')"></div>
@@ -54,33 +57,63 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useFormFieldsStore, type FormField } from '@/stores/formFields.store'
-import { useToast } from 'primevue/usetoast'
+import { rotateFieldRect } from '@/utils/pdfCoordinates'
 
 const props = defineProps<{
   field: FormField
+  pageWidth: number
+  pageHeight: number
+  rotation: number
+  scaleFactor: number
 }>()
 
 const formFieldsStore = useFormFieldsStore()
-const toast = useToast()
 
 const isSelected = computed(() => formFieldsStore.selectedFieldId === props.field.id)
 
-const fieldStyle = computed(() => ({
-  left: `${props.field.position.x}px`,
-  top: `${props.field.position.y}px`,
-  width: `${props.field.position.width}px`,
-  height: `${props.field.position.height}px`
-}))
+// Where the field is *drawn*. What is stored never changes when the page is
+// turned — see rotateFieldRect in utils/pdfCoordinates.ts.
+const fieldStyle = computed(() => {
+  const rect = rotateFieldRect(
+    props.field.position,
+    props.pageWidth,
+    props.pageHeight,
+    props.rotation,
+    props.scaleFactor
+  )
 
-const fieldIcon = computed(() => {
-  const icons: Record<string, string> = {
-    text: 'pi pi-pencil',
-    textarea: 'pi pi-align-left',
-    checkbox: 'pi pi-check-square',
-    radio: 'pi pi-circle',
-    dropdown: 'pi pi-chevron-down'
+  return {
+    left: `${rect.x}px`,
+    top: `${rect.y}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`
   }
-  return icons[props.field.type] || 'pi pi-pencil'
+})
+
+/**
+ * Dragging and resizing are turned off while the page is rotated.
+ *
+ * Both work in screen deltas, and on a turned page a screen delta is not a
+ * stored delta — applying it unmapped writes a position that is wrong on the
+ * printed PDF, silently and permanently. Refusing to move a field is a
+ * nuisance; moving it somewhere the author did not point is data corruption.
+ * Mapping the deltas per handle is the real fix and is in docs/BACKLOG.md.
+ */
+const isRotated = computed(() => props.rotation % 360 !== 0)
+
+// What the tag above a placed field says. `Dropdown · required` is the shape
+// the Editor artboard draws: the type, and the one property an author needs to
+// see without opening the panel.
+const typeTag = computed(() => {
+  const names: Record<string, string> = {
+    text: 'Text',
+    textarea: 'Paragraph',
+    checkbox: 'Checkbox',
+    radio: 'Radio group',
+    dropdown: 'Dropdown'
+  }
+  const name = names[props.field.type] || props.field.type
+  return props.field.required ? `${name} · required` : name
 })
 
 // Drag state
@@ -99,6 +132,10 @@ const onClick = () => {
 
 const onMouseDown = (e: MouseEvent) => {
   if (isResizing.value) return
+  if (isRotated.value) {
+    formFieldsStore.selectField(props.field.id)
+    return
+  }
 
   formFieldsStore.selectField(props.field.id)
   isDragging.value = true
@@ -121,27 +158,18 @@ const onDrag = (e: MouseEvent) => {
   formFieldsStore.moveField(props.field.id, newX, newY)
 }
 
-const stopDrag = async () => {
+const stopDrag = () => {
   isDragging.value = false
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
 
-  // Save field position to server after drag
-  try {
-    await formFieldsStore.saveField(props.field.id)
-  } catch (error) {
-    console.error('Failed to save field position:', error)
-
-    toast.add({
-      severity: 'error',
-      summary: 'Error al guardar posición',
-      detail: 'No se pudo guardar la nueva posición del campo',
-      life: 3000
-    })
-  }
+  // Not saved here. `Save all` is what writes field positions, the same as it
+  // is for text and images — see formFields.store.ts.
+  formFieldsStore.markDirty()
 }
 
 const startResize = (e: MouseEvent, handle: string) => {
+  if (isRotated.value) return
   isResizing.value = true
   resizeHandle.value = handle
   resizeStart.value = {
@@ -192,138 +220,107 @@ const onResize = (e: MouseEvent) => {
   formFieldsStore.resizeField(props.field.id, newWidth, newHeight)
 }
 
-const stopResize = async () => {
+const stopResize = () => {
   isResizing.value = false
   resizeHandle.value = null
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
 
-  // Save field size to server after resize
-  try {
-    await formFieldsStore.saveField(props.field.id)
-  } catch (error) {
-    console.error('Failed to save field size:', error)
-
-    toast.add({
-      severity: 'error',
-      summary: 'Error al guardar tamaño',
-      detail: 'No se pudo guardar el nuevo tamaño del campo',
-      life: 3000
-    })
-  }
+  formFieldsStore.markDirty()
 }
 </script>
 
 <style scoped>
+/*
+ * A field in the editor.
+ *
+ * The System artboard draws this as a bordered rectangle with a type tag —
+ * the author is manipulating geometry here, so the field is allowed to look
+ * like an object. Its counterpart on the public form is a single underline
+ * (PublicFormFieldItem.vue), and the two are deliberately not the same.
+ *
+ * One field colour, not five. The previous version gave checkbox, radio and
+ * dropdown their own hue, which put three saturated colours on top of a
+ * document and left nothing for the selection to say with.
+ */
 .form-field-item {
   position: absolute;
-  border: 2px dashed #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
-  border-radius: 4px;
+  border: 1px solid theme('colors.field.idle');
+  background: rgba(53, 84, 209, 0.05);
+  border-radius: 3px;
   cursor: move;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: border-color 0.2s, background-color 0.2s;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
   user-select: none;
 }
 
 .form-field-item:hover {
-  border-color: #2563eb;
-  background: rgba(59, 130, 246, 0.15);
+  border-color: theme('colors.accent.DEFAULT');
 }
 
+/* Selection is one of the three things accent is spent on. */
 .form-field-item.selected {
-  border-style: solid;
-  border-color: #2563eb;
-  background: rgba(59, 130, 246, 0.2);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+  border: 1.5px solid theme('colors.accent.DEFAULT');
+  background: rgba(53, 84, 209, 0.08);
+  box-shadow: theme('boxShadow.focus-field');
+}
+
+.field-tag {
+  position: absolute;
+  left: -1px;
+  top: -18px;
+  height: 17px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  background: theme('colors.field.idle');
+  color: #ffffff;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.form-field-item.selected .field-tag {
+  left: -1.5px;
+  top: -19px;
+  background: theme('colors.accent.DEFAULT');
 }
 
 .field-label {
   font-size: 11px;
-  color: #1e40af;
+  color: theme('colors.muted');
   font-weight: 500;
-  max-width: 80%;
+  max-width: 88%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.required-indicator {
-  color: #dc2626;
-  margin-left: 2px;
-}
-
-.field-type-icon {
-  font-size: 14px;
-  color: #3b82f6;
-  opacity: 0.8;
-}
-
-/* Resize Handles */
+/* 7px squares with a white fill, as drawn on the artboard. */
 .resize-handle {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  background: #2563eb;
-  border: 2px solid white;
-  border-radius: 2px;
+  width: 7px;
+  height: 7px;
+  background: #ffffff;
+  border: 1.5px solid theme('colors.accent.DEFAULT');
+  border-radius: 1px;
   z-index: 10;
 }
 
-.resize-handle.nw { top: -5px; left: -5px; cursor: nw-resize; }
-.resize-handle.ne { top: -5px; right: -5px; cursor: ne-resize; }
-.resize-handle.sw { bottom: -5px; left: -5px; cursor: sw-resize; }
-.resize-handle.se { bottom: -5px; right: -5px; cursor: se-resize; }
-.resize-handle.n { top: -5px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
-.resize-handle.s { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
-.resize-handle.e { right: -5px; top: 50%; transform: translateY(-50%); cursor: e-resize; }
-.resize-handle.w { left: -5px; top: 50%; transform: translateY(-50%); cursor: w-resize; }
-
-/* Field Type Colors */
-.field-checkbox {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-}
-.field-checkbox:hover,
-.field-checkbox.selected {
-  border-color: #059669;
-  background: rgba(16, 185, 129, 0.2);
-}
-.field-checkbox .field-type-icon,
-.field-checkbox .field-label {
-  color: #059669;
-}
-
-.field-radio {
-  border-color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.1);
-}
-.field-radio:hover,
-.field-radio.selected {
-  border-color: #7c3aed;
-  background: rgba(139, 92, 246, 0.2);
-}
-.field-radio .field-type-icon,
-.field-radio .field-label {
-  color: #7c3aed;
-}
-
-.field-dropdown {
-  border-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
-}
-.field-dropdown:hover,
-.field-dropdown.selected {
-  border-color: #d97706;
-  background: rgba(245, 158, 11, 0.2);
-}
-.field-dropdown .field-type-icon,
-.field-dropdown .field-label {
-  color: #d97706;
-}
+.resize-handle.nw { top: -3.5px; left: -3.5px; cursor: nw-resize; }
+.resize-handle.ne { top: -3.5px; right: -3.5px; cursor: ne-resize; }
+.resize-handle.sw { bottom: -3.5px; left: -3.5px; cursor: sw-resize; }
+.resize-handle.se { bottom: -3.5px; right: -3.5px; cursor: se-resize; }
+.resize-handle.n { top: -3.5px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+.resize-handle.s { bottom: -3.5px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+.resize-handle.e { right: -3.5px; top: 50%; transform: translateY(-50%); cursor: e-resize; }
+.resize-handle.w { left: -3.5px; top: 50%; transform: translateY(-50%); cursor: w-resize; }
 
 /* Radio Options Preview */
 .radio-options-preview {
@@ -333,7 +330,7 @@ const stopResize = async () => {
   justify-content: flex-start;
   width: 100%;
   height: 100%;
-  padding: 8px;
+  padding: 6px 8px;
   gap: 5px;
   overflow: hidden;
 }
@@ -343,17 +340,17 @@ const stopResize = async () => {
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: #7c3aed;
+  color: theme('colors.muted');
   white-space: nowrap;
 }
 
 .radio-circle {
-  width: 12px;
-  height: 12px;
-  border: 2px solid #7c3aed;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid theme('colors.field.idle');
   border-radius: 50%;
   flex-shrink: 0;
-  background: rgba(139, 92, 246, 0.1);
+  background: #ffffff;
 }
 
 .radio-option-label {

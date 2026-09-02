@@ -28,16 +28,20 @@
 
     <!-- Separator -->
     <div class="toolbar-separator" v-show="!isCollapsed">
-      <span>Campos</span>
+      <span>Fields</span>
     </div>
     <div class="toolbar-separator collapsed-separator" v-show="isCollapsed"></div>
 
-    <!-- Form Field Tools -->
+    <!--
+      The same field types the editor rail offers, and the same store state
+      behind them: `fieldTypeToAdd` is what both read, so arming a type here
+      lights it up there and cancelling in either place cancels once.
+    -->
     <div class="toolbar-tools field-tools">
       <button
         v-for="tool in fieldTools"
         :key="tool.id"
-        :class="{ 'active': activeTool === tool.id }"
+        :class="{ 'active': formFieldsStore.fieldTypeToAdd === tool.fieldType }"
         :title="tool.label"
         @click="selectFieldTool(tool)"
       >
@@ -57,17 +61,18 @@ const formFieldsStore = useFormFieldsStore()
 
 // Tool definitions
 const tools = [
-  { id: 'search', label: 'Buscar', icon: 'pi pi-search', group: 'general' },
-  { id: 'text', label: 'Texto', icon: 'pi pi-pencil', group: 'general' },
-  { id: 'image', label: 'Imagen', icon: 'pi pi-image', group: 'general' }
+  { id: 'search', label: 'Search', icon: 'pi pi-search', group: 'general' },
+  { id: 'text', label: 'Text', icon: 'pi pi-pencil', group: 'general' },
+  { id: 'image', label: 'Image', icon: 'pi pi-image', group: 'general' }
 ]
 
-// Form field tools
+// The same five types as the editor rail, named the same way.
 const fieldTools = [
-  { id: 'field-text', label: 'Campo texto', icon: 'pi pi-pencil', fieldType: 'text' },
-  { id: 'field-checkbox', label: 'Casilla', icon: 'pi pi-check-square', fieldType: 'checkbox' },
-  { id: 'field-radio', label: 'Opción múltiple', icon: 'pi pi-circle', fieldType: 'radio' },
-  { id: 'field-dropdown', label: 'Desplegable', icon: 'pi pi-chevron-down', fieldType: 'dropdown' }
+  { id: 'field-text', label: 'Text field', icon: 'pi pi-pencil', fieldType: 'text' as FieldType },
+  { id: 'field-textarea', label: 'Paragraph', icon: 'pi pi-align-left', fieldType: 'textarea' as FieldType },
+  { id: 'field-checkbox', label: 'Checkbox', icon: 'pi pi-check-square', fieldType: 'checkbox' as FieldType },
+  { id: 'field-radio', label: 'Radio group', icon: 'pi pi-circle', fieldType: 'radio' as FieldType },
+  { id: 'field-dropdown', label: 'Dropdown', icon: 'pi pi-chevron-down', fieldType: 'dropdown' as FieldType }
 ]
 
 // State
@@ -101,18 +106,22 @@ const emit = defineEmits<{
   'select-tool': [toolId: string]
 }>()
 
+// Clicking an armed type again disarms it, matching the rail.
+const selectFieldTool = (tool: { id: string; fieldType: FieldType }) => {
+  activeTool.value = tool.id
+  if (formFieldsStore.fieldTypeToAdd === tool.fieldType) {
+    formFieldsStore.cancelAddingField()
+    return
+  }
+  formFieldsStore.startAddingField(tool.fieldType)
+  emit('select-tool', tool.id)
+}
+
 // Tool selection
 const selectTool = (toolId: string) => {
   activeTool.value = toolId
   formFieldsStore.cancelAddingField()
   emit('select-tool', toolId)
-}
-
-// Field tool selection
-const selectFieldTool = (tool: { id: string; fieldType: string }) => {
-  activeTool.value = tool.id
-  formFieldsStore.startAddingField(tool.fieldType as FieldType)
-  emit('select-tool', tool.id)
 }
 
 // Cleanup
@@ -152,15 +161,15 @@ onUnmounted(() => {
   justify-content: center;
   padding: 8px;
   cursor: move;
-  color: #6b7280;
-  border-bottom: 1px solid #e5e7eb;
+  color: #6a6f7b;
+  border-bottom: 1px solid #e7e8ec;
   margin-bottom: 4px;
   transition: all 0.2s ease;
 }
 
 .toolbar-handle:hover {
-  color: #3b82f6;
-  background: #f3f4f6;
+  color: #3554d1;
+  background: #f4f5f7;
   border-radius: 6px;
 }
 
@@ -179,7 +188,7 @@ onUnmounted(() => {
   background: transparent;
   border-radius: 8px;
   cursor: pointer;
-  color: #4b5563;
+  color: #6a6f7b;
   font-size: 14px;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -189,13 +198,13 @@ onUnmounted(() => {
 }
 
 .toolbar-tools button:hover {
-  background: #f3f4f6;
-  color: #3b82f6;
+  background: #f4f5f7;
+  color: #3554d1;
 }
 
 .toolbar-tools button.active {
-  background: #dbeafe;
-  color: #2563eb;
+  background: #eef1fd;
+  color: #3554d1;
   font-weight: 500;
 }
 
@@ -220,21 +229,21 @@ onUnmounted(() => {
   padding: 8px 10px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: #9ca3af;
+  color: #9ba1ac;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #e7e8ec;
   margin-top: 4px;
 }
 
 .collapsed-separator {
   padding: 4px;
   margin: 4px 8px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #e7e8ec;
 }
 
 .field-tools button.active {
-  background: #dbeafe;
-  color: #2563eb;
+  background: #eef1fd;
+  color: #3554d1;
 }
 </style>

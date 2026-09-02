@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { fieldsService, type CreateFieldData } from '../services/fields'
+import { fieldsService, type CreateFieldData, type BulkFieldData } from '../services/fields'
 import { ApiError } from '../services/api'
 import type { Field } from '../services/forms'
 import { useAsyncAction } from '../composables/useAsyncAction'
@@ -38,11 +38,26 @@ export interface FormField {
 export const useFormFieldsStore = defineStore('formFields', () => {
   const fields = ref<FormField[]>([])
   const selectedFieldId = ref<string | null>(null)
+  /**
+   * Field changes that are only in the browser.
+   *
+   * Placing, moving and resizing a field used to write to the server the moment
+   * the mouse came up. That is a different model from the one the rest of the
+   * editor uses — text and images wait for `Save all` — and two save models in
+   * one screen means the user cannot know what is stored without remembering
+   * which tool they used. Everything waits now.
+   */
+  const hasUnsavedChanges = ref(false)
+  const markDirty = () => { hasUnsavedChanges.value = true }
+
   const isAddingField = ref(false)
   const fieldTypeToAdd = ref<FieldType | null>(null)
   const currentFormId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  // Ids of fields the user removed in the editor that the server kept because
+  // they hold responses. Surfaced to the user after a save, then cleared.
+  const archivedFieldIds = ref<string[]>([])
 
   const selectedField = computed(() => {
     return fields.value.find(f => f.id === selectedFieldId.value) || null
@@ -140,6 +155,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     selectedFieldId.value = null
     isAddingField.value = false
     fieldTypeToAdd.value = null
+    hasUnsavedChanges.value = false
   }
 
   const getFieldsForPage = (page: number) => {
@@ -203,7 +219,11 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     }
 
     return useAsyncAction({ loading, error }, async () => {
-      const fieldsData: CreateFieldData[] = fields.value.map((field, index) => ({
+      const fieldsData: BulkFieldData[] = fields.value.map((field, index) => ({
+        // A server id identifies an existing row, so the save is a diff and the
+        // answers attached to it survive. Locally-created fields have no row
+        // yet, so their id is omitted and the server creates one.
+        ...(isLocalFieldId(field.id) ? {} : { id: field.id }),
         type: field.type,
         name: field.name || `field_${Date.now()}_${index}`,
         label: field.label || field.name || 'Untitled Field',
@@ -214,8 +234,10 @@ export const useFormFieldsStore = defineStore('formFields', () => {
         order: index
       }))
 
-      const savedFields = await fieldsService.bulkSave(formId, fieldsData)
+      const { fields: savedFields, archived } = await fieldsService.bulkSave(formId, fieldsData)
       loadFieldsFromForm(savedFields)
+      archivedFieldIds.value = archived
+      hasUnsavedChanges.value = false
       return savedFields
     }, { fallbackMessage: 'Failed to save fields' })
   }
@@ -283,14 +305,21 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     error.value = null
   }
 
+  const clearArchivedFieldIds = () => {
+    archivedFieldIds.value = []
+  }
+
   return {
     fields,
     selectedFieldId,
     isAddingField,
+    hasUnsavedChanges,
+    markDirty,
     fieldTypeToAdd,
     currentFormId,
     loading,
     error,
+    archivedFieldIds,
     selectedField,
     fieldsByPage,
     startAddingField,
@@ -311,6 +340,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     saveAllFields,
     saveField,
     deleteFieldFromServer,
-    clearError
+    clearError,
+    clearArchivedFieldIds
   }
 })
