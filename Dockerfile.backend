@@ -17,6 +17,13 @@ RUN npm run db:generate --workspace=backend \
 
 FROM build AS production-dependencies
 RUN npm prune --omit=dev
+# npm hoists what it can to the root, so whether the backend workspace keeps a
+# nested `node_modules` at all depends on which versions are installed — and
+# after the pruning in features/0038 it kept none, which broke the COPY below
+# with "/app/backend/node_modules: not found". The directory is guaranteed here
+# so that a dependency update can never break the image build by hoisting one
+# package more than the last one did.
+RUN mkdir -p /app/backend/node_modules
 
 # Release job: intentionally retains the Prisma CLI, but is never a serving image.
 # It appears before runtime so platforms that build the Dockerfile without an
