@@ -277,8 +277,12 @@ function handleFieldChange(payload: { fieldId: string, value: any }) {
       clearTimeout(validationTimeouts.get(fieldId))
     }
 
-    const timeout = window.setTimeout(() => {
-      validateField(field, value)
+    const timeout = window.setTimeout(async () => {
+      // Awaited: the pattern check now runs in a worker (features/0035). The
+      // return value is unused here — the composable writes `errors` — but
+      // awaiting keeps the error-clearing below ordered after the verdict
+      // rather than racing it.
+      await validateField(field, value)
       
       // Clear server error only if client validation passes or if we want to reset it on input
       if (submitValidationErrors.value && submitValidationErrors.value[field.name]) {
@@ -298,8 +302,12 @@ async function handleSubmit() {
 
   const answers = responsesStore.getAllResponses()
 
-  // Client validation
-  if (!validate(fields.value, answers)) {
+  // Client validation. **The `await` is load-bearing** (features/0035):
+  // `validate` returns a promise now, and a promise is always truthy, so
+  // dropping it would let every submission through with no error and no
+  // console line — the server would still refuse the values, making it look
+  // like the check had merely gone quiet.
+  if (!(await validate(fields.value, answers))) {
     // Optional: Scroll to first error or show toast
     return
   }

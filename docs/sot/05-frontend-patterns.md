@@ -82,6 +82,18 @@ Note that it **re-throws**. The caller still decides whether a failure is fatal 
 
 **A component must never call `fetch` or `api` directly.** If a view needs data, the path is view → store or composable → service.
 
+## 3a. `new RegExp` lives in one module, and runs on another thread
+
+The mirror of the backend's rule (`services/pattern-validator.ts`), with a different remedy — [`features/0035`](../../features/0035-bounded-pattern-validation-in-the-browser.md).
+
+A field `pattern` is written by a form author and evaluated against a respondent's input. `frontend/src/services/pattern-worker.ts` is **the only place in the SPA that may construct a `RegExp`**, and it runs in a Worker; `services/pattern-check.ts` owns the clock and kills the worker when a pattern runs past the deadline. `useFormValidation` asks for a verdict and never compiles anything itself.
+
+Three things follow for anyone adding validation here:
+
+- **`checkField`, `validateField` and `validate` are `async`.** They were synchronous, and `validate` is the submit gate in `PublicFormView.vue` — `if (!(await validate(...)))`. Dropping that `await` makes the condition a promise, which is always truthy, so **every** submission passes with no error and no console line. It looks like the check merely went quiet, because the server still refuses the values.
+- **There are three verdicts, not two.** `no-verdict` means the browser could not judge — the pattern did not compile here, it ran too long, or there is no `Worker`. It produces **no error message**: what failed is our ability to read the rule, not the respondent's value.
+- **jsdom has no `Worker`.** `services/pattern-check.spec.ts` installs a fake one and tests the supervision; the composable's spec mocks `runPattern`. Real-browser evidence comes from Chromium, and the numbers are in [07-security](./07-security-and-privacy.md).
+
 ## 4. Canvas coordinates versus PDF coordinates
 
 Fields are positioned and persisted in **canvas** coordinates. The backend's `pdf-processor.ts` writes AcroForm widgets in **PDF page** coordinates (origin bottom-left, in points). The bridge is a scale factor that is hard-coded in two places at once: `DEFAULT_SCALE = 1.5` in the backend service, and the render scale in `composables/usePDFRendering.ts`.
