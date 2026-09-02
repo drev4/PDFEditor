@@ -16,11 +16,43 @@ interface MeResponse {
   user: User
 }
 
+/**
+ * Whether this deployment accepts new accounts from anybody, or only from
+ * someone holding the private beta's signup code (features/0033).
+ */
+export type RegistrationMode = 'open' | 'invite_only'
+
+interface RegistrationResponse {
+  mode: RegistrationMode
+}
+
 export const authService = {
-  async register(email: string, password: string, name?: string): Promise<AuthResponse> {
-    const response = await api.post<AuthResponse>('/auth/register', { email, password, name })
+  async register(
+    email: string,
+    password: string,
+    name?: string,
+    code?: string
+  ): Promise<AuthResponse> {
+    const response = await api.post<AuthResponse>('/auth/register', {
+      email,
+      password,
+      name,
+      code
+    })
     setAccessToken(response.token)
     return response
+  },
+
+  /**
+   * Reads the registration mode so the signup screen can draw the code field —
+   * or not — before anybody has typed anything.
+   *
+   * Unauthenticated, and it returns the mode alone: never the code, its length,
+   * or whether one is configured.
+   */
+  async getRegistrationMode(): Promise<RegistrationMode> {
+    const response = await api.get<RegistrationResponse>('/auth/registration')
+    return response.mode
   },
 
   async login(email: string, password: string): Promise<AuthResponse> {

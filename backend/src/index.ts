@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { assertEnv } from './config/validate-env.js'
 import { installProcessGuards } from './process-guards.js'
+import { initErrorTracking } from './services/error-tracking.js'
 import { logger } from './services/logger.js'
 import { closeEmbedQueue, isEmbedQueueEnabled } from './services/embed-queue.js'
 
@@ -18,6 +19,11 @@ dotenv.config()
 assertEnv('api')
 
 const { app } = await import('./app.js')
+
+// Before the guards, so the handlers they install have somewhere to report
+// (features/0034). A no-op unless SENTRY_DSN is set and NODE_ENV is neither
+// development nor test.
+initErrorTracking('api')
 
 installProcessGuards('api')
 

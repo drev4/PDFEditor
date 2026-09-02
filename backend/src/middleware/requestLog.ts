@@ -48,6 +48,23 @@ export function requestLog(req: Request, res: Response, next: NextFunction): voi
   req.requestId = requestId
   req.log = logger.child({ requestId })
 
+  // The id has to leave the process to be worth anything (features/0034).
+  //
+  // Until then it existed only in the log, so a browser-side error report and
+  // the server line that explains it could not be joined — which is the entire
+  // stated value of tracking errors on both sides. `app.ts` names this header
+  // in the CORS `exposedHeaders`, without which the SPA (a different origin)
+  // cannot read it.
+  //
+  // **Always the id generated above, never the inbound `x-request-id`.** That
+  // value is the caller's and is only ever recorded as `upstreamRequestId`
+  // below; echoing it back would reflect an attacker-chosen string and make the
+  // header useless as a correlation key.
+  //
+  // Set before the early return, so a path that is not logged is still
+  // traceable.
+  res.setHeader('X-Request-Id', requestId)
+
   // The load balancer calls this every few seconds, for ever. It is the one
   // request whose success says nothing.
   if (IGNORED.has(req.path)) return next()

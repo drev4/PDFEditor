@@ -82,6 +82,31 @@ Note that it **re-throws**. The caller still decides whether a failure is fatal 
 
 **A component must never call `fetch` or `api` directly.** If a view needs data, the path is view → store or composable → service.
 
+## 3a. `new RegExp` lives in one module, and runs on another thread
+
+The mirror of the backend's rule (`services/pattern-validator.ts`), with a different remedy — [`features/0035`](../../features/0035-bounded-pattern-validation-in-the-browser.md).
+
+A field `pattern` is written by a form author and evaluated against a respondent's input. `frontend/src/services/pattern-worker.ts` is **the only place in the SPA that may construct a `RegExp`**, and it runs in a Worker; `services/pattern-check.ts` owns the clock and kills the worker when a pattern runs past the deadline. `useFormValidation` asks for a verdict and never compiles anything itself.
+
+Three things follow for anyone adding validation here:
+
+- **`checkField`, `validateField` and `validate` are `async`.** They were synchronous, and `validate` is the submit gate in `PublicFormView.vue` — `if (!(await validate(...)))`. Dropping that `await` makes the condition a promise, which is always truthy, so **every** submission passes with no error and no console line. It looks like the check merely went quiet, because the server still refuses the values.
+- **There are three verdicts, not two.** `no-verdict` means the browser could not judge — the pattern did not compile here, it ran too long, or there is no `Worker`. It produces **no error message**: what failed is our ability to read the rule, not the respondent's value.
+- **jsdom has no `Worker`.** `services/pattern-check.spec.ts` installs a fake one and tests the supervision; the composable's spec mocks `runPattern`. Real-browser evidence comes from Chromium, and the numbers are in [07-security](./07-security-and-privacy.md).
+
+## 3b. Authoring a pattern asks two different questions
+
+`composables/usePatternAuthoring.ts` ([`features/0036`](../../features/0036-pattern-authoring-with-a-slowness-warning.md)) is the orchestration behind the editor's pattern box, and it exists because **one answer cannot come from one place**:
+
+- *May this be stored?* — `fieldsService.checkPattern`, a server round trip. RE2's rules are not JavaScript's, so answering it locally would mean a second copy of the engine's grammar.
+- *Will a respondent's browser manage to run it?* — `describePattern` from `services/pattern-check.ts`. RE2 is linear, so the server cannot see this at all.
+
+Three rules for anyone touching it:
+
+- **Invalid blocks, slow warns.** An invalid pattern must not reach the store, because `pattern` is validated inside `createFieldSchema` and one bad pattern fails the entire bulk save. Slow is a probe result and a probe can never prove safety, so it warns and the author decides.
+- **Only `reason === 'timeout'` means slow.** `describePattern` also returns `uncompilable` and `unavailable`; treating either as slow flags every RE2-only construct and trains people to ignore the warning.
+- **The panel's `watch` on `selectedField` keys its reset on the field *id*.** `store.updateField` replaces the field object, so the computed hands back a new reference and the watcher fires on every edit — resetting on that would clear the warning the write had just produced. A test covers it.
+
 ## 4. Canvas coordinates versus PDF coordinates
 
 Fields are positioned and persisted in **canvas** coordinates. The backend's `pdf-processor.ts` writes AcroForm widgets in **PDF page** coordinates (origin bottom-left, in points). The bridge is a scale factor that is hard-coded in two places at once: `DEFAULT_SCALE = 1.5` in the backend service, and the render scale in `composables/usePDFRendering.ts`.
@@ -324,4 +349,4 @@ The **landing page** is designed and unbuilt, and is a [parallel track](./10-saa
 3. **Shared types generated from the backend Zod schemas**, so `CreateFieldData` cannot drift from the server's validator.
 4. **i18n.** The UI is English except for a handful of Spanish placeholders (`"Escribe aquí..."`, `"Buscar en el documento..."`). That is drift, not a decision. Fix it with an i18n layer rather than string-by-string, because it will need one anyway.
 5. **VueUse** for the hand-rolled `useDragAndDrop`, `useGridOverlay` and `useToolbarDrag`. Evaluate individually — some of these encode editor-specific behaviour that a generic helper will not cover.
-6. **Error reporting from the browser.** When a B2B customer reports "the editor froze", there is currently no way to see what happened on their machine.
+6. ~~**Error reporting from the browser.**~~ **Built** ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). `services/error-tracking.ts` is the only module importing the SDK; `main.ts` wires `app.config.errorHandler` plus `unhandledrejection` and `error` listeners, because Vue's handler sees only what throws inside a component. Two things about it that shape frontend work rather than operations. **`ApiError` now carries `requestId`**, read from the `X-Request-Id` response header, so a browser report names the server request that failed — attach it when reporting from a new call site. And **nothing is reported from a route whose `meta.public` is true**, so an error on the public form or the invitation page still goes nowhere; that is a privacy decision, not an oversight, and it is filed in [`docs/BACKLOG.md`](../BACKLOG.md).

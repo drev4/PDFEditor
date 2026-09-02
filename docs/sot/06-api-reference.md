@@ -39,7 +39,8 @@ The health routes are public, bounded machine probes. Readiness returns `200 {st
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/auth/register` | — | `{email, password (min 6), name?}` | `201 {user, token}` + `Set-Cookie: refresh_token` · `400` if the email exists or validation fails · `429` when rate limited |
+| GET | `/auth/registration` | — | — | `200 {mode: "open" \| "invite_only"}` |
+| POST | `/auth/register` | — | `{email, password (min 6), name?, code?}` | `201 {user, token}` + `Set-Cookie: refresh_token` · `400` if the email exists or validation fails · `403` when registration is invitation-only and `code` is missing or wrong · `429` when rate limited |
 | POST | `/auth/login` | — | `{email, password}` | `200 {user, token}` + `Set-Cookie: refresh_token` · `401 Invalid credentials` · `429` when rate limited |
 | POST | `/auth/refresh` | refresh cookie | — | `200 {token}` + a rotated `Set-Cookie` · `401` · `403` cross-site · `429` when rate limited |
 | POST | `/auth/logout` | refresh cookie | — | `204` · `403` cross-site |
@@ -52,6 +53,15 @@ The health routes are public, bounded machine probes. Readiness returns `200 {st
 **`POST /auth/logout` is not behind `authenticate`.** Logging out has to work when the access token has already expired, which is exactly when a user reaches for it. The cookie is the credential.
 
 Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "Cross-site request rejected"}` to a cross-site `Origin` or `Sec-Fetch-Site: cross-site`. No other route needs it — see [04-backend-patterns §11](./04-backend-patterns.md).
+
+**Registration can be closed** ([`features/0033`](../../features/0033-close-public-registration.md)). `REGISTRATION_MODE=invite_only` makes `POST /auth/register` require `code` to equal `REGISTRATION_CODE`, and it answers `403` otherwise. Four things a consumer needs to know:
+
+- **The refusal comes before the email lookup**, so a closed deployment answers `403` for a registered address and an unregistered one alike. Documented here because it is the opposite of the usual ordering, and deliberate: refusing afterwards would let an unadmitted caller tell the two apart by comparing this `403` against the `400`.
+- **A missing `code` and a wrong one are the same response.** Nothing distinguishes them.
+- **`403`, not `402`.** `402` means a plan limit everywhere else in this API ([10-saas-roadmap](./10-saas-roadmap.md#entitlements-where-plan-limits-get-checked)); this is the platform refusing, which is not one.
+- **`POST /organizations/invitations/accept` is unaffected in every mode.** It also creates accounts, and it must: the person redeeming a single-use, expiring, address-bound token was already admitted by a customer. An integration test asserts this.
+
+`GET /auth/registration` is what the SPA's signup screen reads before it draws, so it can show the code field rather than let a visitor discover the beta from a `403`. It is unauthenticated, carries **no rate limiter** — it reads no database, takes no input and returns one enum — and returns the mode alone: never the code, its length, or whether one is configured.
 
 `/auth/register`, `/auth/login` and `/auth/refresh` are rate limited per IP (`middleware/rateLimit.ts`). Login counts **failed attempts only**, so a person signing in normally cannot exhaust their own budget; the others count every request. See [the 429 response](#the-429-response) and [08-operations](./08-operations.md#configuration) for the limits.
 
@@ -169,6 +179,18 @@ Ownership is `verifyFormOwnership` (`middleware/formOwnership.ts`): **404, not 4
 
 **Publishing is metered, creating is not.** The plan limits how many forms are published *at once*, so unpublishing frees a slot immediately, and the form being published is excluded from its own count — re-saving an already-published form is never refused. Both write paths that can set `status` carry the check; see [04-backend-patterns §10](./04-backend-patterns.md).
 
+### The public form payload, and what a respondent is told
+
+`GET /forms/public/:shareId` returns `{ form, showBranding, collectsMetadata }`. Both booleans are derived on the server and both are deliberately single values rather than objects.
+
+`collectsMetadata` ([`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md)) says whether **this respondent's** IP address and user agent will be stored with their submission, and the public form renders its privacy notice from it — mentioning an address only when it is true. It sits beside `showBranding` rather than being read off the form object, which does carry the column through `toApiForm`'s spread: the notice is a contract of its own, so the column can be renamed without silently changing what a stranger is told.
+
+It is safe under the rule `showBranding` established and worth checking against it rather than assuming: it says nothing about the owner's plan, limits, usage or identity. It says what happens to the person reading it. `backend/tests/integration/respondent-metadata.spec.ts` asserts both halves.
+
+The client treats the two flags' absence in **opposite** directions, and that is deliberate: a missing `showBranding` keeps the mark (under-claiming a paid entitlement gives it away), while a missing `collectsMetadata` claims nothing is stored (a privacy notice that over-claims is the worse failure).
+
+The form endpoints accept and return `collectsRespondentMetadata` as an explicit field — never a key inside `settings`, which is `z.record(z.unknown())` and validated in no way.
+
 ## Fields — `routes/form-fields.ts`
 
 Mounted under `/api/forms`, so every path here is nested under a form. **There is no list endpoint** — fields come embedded in `GET /forms/:id`.
@@ -208,6 +230,23 @@ Updates, creates, deletes and archives all run inside one `prisma.$transaction`,
 ```
 
 The frontend must send back the ids the server gave it. `saveAllFields` in `frontend/src/stores/formFields.store.ts` includes `id` for server ids and omits it for locally-created fields, which it distinguishes by the `field-` prefix it mints them with. Dropping the ids is what made an ordinary save destroy every collected answer.
+
+### `POST /forms/fields/check-pattern`
+
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| POST | `/forms/fields/check-pattern` | Bearer | `{pattern}` | `200 {ok: true}` · `200 {ok: false, reason}` · `400` if the body is malformed |
+
+Whether a pattern may be **stored**, asked before anything is saved ([`features/0036`](../../features/0036-pattern-authoring-with-a-slowness-warning.md)). It calls `checkPattern` and touches no database, no form and no field, so it carries `authenticate` and no ownership middleware.
+
+Four things about it:
+
+- **`200` for a rejected pattern.** "This may not be stored" is the answer to the question, not a failure to answer it; a `400` there would be indistinguishable from a malformed request. `400` is reserved for a body without a `pattern`.
+- **`reason` is RE2's own message**, which names the construct (`invalid perl operator: (?=`) — that is what an author needs, and it is why the message is passed through rather than replaced.
+- **It exists because the alternative is worse than it sounds.** `pattern` is validated inside `createFieldSchema`, so an invalid one fails the **whole** bulk save and takes every other unsaved edit on the form with it — and a pattern is invalid for most of the time somebody is typing one.
+- **It cannot tell you a pattern is fast enough.** RE2 is linear, so `^(a+)+$` is perfectly acceptable to it and catastrophic in a browser. That half is the SPA's, via `services/pattern-check.ts` ([07-security](./07-security-and-privacy.md)).
+
+It is declared **above** the `/:formId` routes in `routes/form-fields.ts`, because both that router and `formsRouter` mount on `/api/forms` and a static path under a family of parameterised ones is where shadowing happens. `backend/tests/fields.spec.ts` asserts it is still reached.
 
 ### `validation.pattern`
 
@@ -393,6 +432,17 @@ X-VuePDF-Event-Type: response.created
 **Delivery is at-least-once and unordered.** Retries mean the same event id arrives more than once; deduplicate on `X-VuePDF-Event-Id`. A 2xx is success and everything else — including a 3xx, because redirects are not followed — is a failure that will be retried with exponential backoff. After ten consecutive failures the endpoint is **disabled**, and `disabledAt` and `lastError` on the endpoint are the only way its owner learns that: this product has no email.
 
 **What is deliberately absent.** No payload bodies in the delivery log (they would be a second copy of respondent answers, outliving the form). No replay endpoint. No event types other than `response.created`. No customer-facing screen — endpoints are configured through this API only ([`docs/BACKLOG.md`](../BACKLOG.md)).
+
+## `X-Request-Id`, on every response
+
+Every response carries `X-Request-Id`, set by `middleware/requestLog.ts` ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). It is the id every log line for that request was written under, so a client that reports a failure can name the request and the server log for it can be found.
+
+Four things about it:
+
+- **It is always the id this API generated**, never the inbound `x-request-id`. That value is the caller's, is treated as untrusted, and is only ever *recorded* as `upstreamRequestId` on the completion line ([08-operations](./08-operations.md#observability)). Echoing it back would reflect an attacker-chosen string and make the header useless as a key.
+- **It is set before the `/health` early return**, so a health check is traceable too even though it is not logged.
+- **`app.ts` names it in the CORS `exposedHeaders`.** The SPA is a different origin, and without that a cross-origin response exposes only a handful of headers to script — the header would be on the wire, visible in devtools, and unreadable by `fetch`.
+- `frontend/src/services/api.ts` reads it and puts it on `ApiError.requestId`, which is what lets a browser-side error report be joined to the server line that explains it.
 
 ## Error format — `middleware/errorHandler.ts`
 

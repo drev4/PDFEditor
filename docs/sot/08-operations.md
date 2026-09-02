@@ -56,6 +56,9 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `LOG_LEVEL` | no | `info` (`silent` under `NODE_ENV=test`) | `pino`'s level ([`features/0025`](../../features/0025-structured-logging.md)). `NODE_ENV=development` also switches the output to human-readable; anything else is one JSON object per line — see [Observability](#observability) |
 | `NODE_ENV` | no | — | Sets Prisma's query logging (`services/db.ts`), and **gates `DEV_PLAN_KEY` below**. That gate is an allowlist, so an unset or unexpected value is the safe case |
 | `FRONTEND_URL` | no | `http://localhost:5173` | The single allowed CORS origin |
+| `REGISTRATION_MODE` | **in strict environments** | `open` | `open` or `invite_only`. Whether `POST /api/auth/register` accepts new accounts from anybody. [Validated at boot](#what-refuses-to-boot-and-what-only-warns), and see [closing and reopening sign-ups](#closing-and-reopening-sign-ups) |
+| `REGISTRATION_CODE` | only when `invite_only` | — | The shared signup code, at least 16 characters. Never logged |
+| `SENTRY_DSN` | no | — | Error tracking ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). Unset means off. A malformed value [refuses to boot](#what-refuses-to-boot-and-what-only-warns), because the SDK would disable itself silently. See [Error tracking](#error-tracking) |
 | `BASE_URL` | no | `http://localhost:3000` | Prefix of returned PDF URLs. A wrong value produces PDF URLs that 404 in every environment except localhost |
 | `UPLOAD_URL_TTL_SECONDS` | no | `900` (15 min), min `60` | How long a signed PDF URL stays valid. The link is a bearer capability, so longer is not free — see [07](./07-security-and-privacy.md) |
 | `PDF_STORAGE_DRIVER` | no | `local` | Where PDF bytes live: `local` (this process's disk) or `s3` (any S3-compatible store). **An unrecognised value refuses to boot** — see below |
@@ -277,12 +280,39 @@ Three things about it are worth knowing before changing a variable or a rule.
 | `REDIS_URL` | Present but not a `redis:`/`rediss:` URL |
 | `TRUST_PROXY_HOPS` | **API only.** Present but not a non-negative integer |
 | `STRIPE_SECRET_KEY` | **API only.** Set without `STRIPE_WEBHOOK_SECRET`, or with neither price id |
+| `REGISTRATION_MODE` | Missing (strict only), or not `open`/`invite_only` |
+| `REGISTRATION_CODE` | Missing, or shorter than 16 characters, when `REGISTRATION_MODE=invite_only` |
+| `SENTRY_DSN` | Present but not an `http(s)` URL. Optional — absence is fine and means tracking is off |
+
+`REGISTRATION_MODE` is the newest entry and the only one whose *required* rule exists to protect a **default** rather than to catch a missing value ([`features/0033`](../../features/0033-close-public-registration.md)). `config/registration.ts` treats an unset mode as `open`, which is the right behaviour for a developer and the wrong one for a deployment running a private beta — so the two halves are a pair, and removing either leaves the other unsafe. Like `JWT_SECRET`, it is asked of the worker too, although the worker registers nobody: same image, same environment, same argument as the paragraph below.
 
 `BASE_URL`, `FRONTEND_URL`, `TRUST_PROXY_HOPS` and the Stripe group are **not** asked of the worker, and that is deliberate rather than an omission: the worker mints no URLs (`services/pdf-embed.ts` parses `form.pdfUrl` with `pdfFilenameFrom`, it never builds one), serves no HTTP and never calls Stripe, so requiring them would fail a correct deployment. `JWT_SECRET` and `DATABASE_URL` *are* asked of both, even though nothing on the worker's path signs a token today — the two processes are one image reading one environment, and a rule that holds for one and not the other produces the worst outcome available: an environment that boots the worker and then fails the API, one deploy later.
 
 **Everything else still warns and falls back**, and that contract has not changed. `config/env.ts` is the narrow version of this for tunables: an unparseable `EMBED_WORKER_CONCURRENCY` is logged and the safe default is used, never a permissive one, because a typo in a tunable must not take the service down. `validate-env.ts` lists every one of those in `KNOWN_VARIABLES` with a one-line reason for leaving it unchecked, and `backend/tests/config-coverage.spec.ts` fails when a variable is read anywhere in `src/` and named nowhere in that list — the same lint-rule-shaped spec as `tests/async-handler-coverage.spec.ts`, for the same reason: `npm run lint` lints nothing.
 
 The worker's own `REDIS_URL` refusal stays where it was, in `worker.ts`, and the validator deliberately does not duplicate it. Two different messages for one condition is worse than one.
+
+## Closing and reopening sign-ups
+
+The private beta is invitation-only and public registration opens a week later ([`features/0033`](../../features/0033-close-public-registration.md)). **Both directions are one operator action, on purpose** — opening on the day was never going to be a code change, a PR and a deploy.
+
+**To close sign-ups:**
+
+```bash
+REGISTRATION_MODE=invite_only
+REGISTRATION_CODE=<at least 16 characters>   # generate: openssl rand -base64 24
+```
+
+Restart the API. **The worker needs no restart** — it registers nobody — but it *does* validate both variables at boot, so a worker restarted later with a half-finished environment refuses to start. Set them for both processes.
+
+**To reopen:** set `REGISTRATION_MODE=open` and restart the API. `REGISTRATION_CODE` can be left in place; it is ignored in `open` mode, and a wrong code is not an error there.
+
+Four things to know before you touch it:
+
+- **The code is shared, not per person.** Anyone it is forwarded to can register. That was weighed and accepted because the beta is free — a forwarded code costs an unpaid account, not revenue. If a cohort ever needs per-person revocable admission, that is the org-less-invitation item in [`docs/BACKLOG.md`](../BACKLOG.md).
+- **There is no way to rotate it without a restart**, and no screen that shows it. It lives only in the environment.
+- **Existing members are unaffected in both directions.** Closing sign-ups does not touch anybody who already has an account, and `POST /api/organizations/invitations/accept` keeps working — a customer can still add colleagues while the front door is shut.
+- **`REGISTRATION_MODE=invite_only` with no `REGISTRATION_CODE` refuses to boot**, rather than starting with a door nothing can open.
 
 ## Telling a complete export from a truncated one
 
@@ -387,22 +417,68 @@ What CI still does not do:
 
 **What the error handler logs.** `middleware/errorHandler.ts` logs 5xx and any non-`AppError` at `error` with the stack, and a 4xx at `info` with its status and message — no stack, because it is not a fault. A 4xx is the API answering correctly — the client asked for something it may not have — and it is already reported in the response. This is not fastidiousness: opening the login page with no session calls `POST /api/auth/refresh`, which correctly answers `401 Not authenticated`, and that printed a stack trace on every anonymous page load. A log that cries fault when nothing is wrong is a log people stop reading, which is where the real fault will be. That is what [`features/0025`](../../features/0025-structured-logging.md) settled: a 4xx is no longer dropped, it is one `info` line carrying the same request id as everything else that request did.
 
-There is no log aggregation, no metrics, no error tracking and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone.
+There is no log aggregation, no metrics and no alerting. The practical consequence is that the two best-effort PDF operations described in [04-backend-patterns.md](./04-backend-patterns.md) can fail permanently and silently, and nobody finds out until a customer opens a PDF and the fields are gone — **error tracking now reports the exception, but nothing wakes anybody up**.
 
 Minimum viable observability, in order:
 
 1. ~~**`pino` with a request id** on every log line, and redaction configured for `authorization`, `password` and answer values.~~ **Done** ([`features/0025`](../../features/0025-structured-logging.md)).
-2. **Error tracking** (Sentry or equivalent) on both the API and the SPA, so browser-side editor failures are visible at all.
+
 3. ~~**Real health checks**~~ — done in [`features/0031`](../../features/0031-production-deployment.md). `/health` and `/health/live` are dependency-free liveness; `/health/ready` checks PostgreSQL and, when Redis is configured, requires a registered PDF worker and returns queue counts. Dependency errors are logged but never returned to the caller.
+
+2. ~~**Error tracking** (Sentry or equivalent) on both the API and the SPA, so browser-side editor failures are visible at all.~~ **Done** ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)) — see [Error tracking](#error-tracking) below.
+
 4. **Business metrics** — forms published, responses received, PDF embed failures. These are also the numbers that plan metering will need.
 
 Two of these are now sharper than they were, because a second process exists. Readiness should answer for the queue as well as the database, and the "dead worker" case above has no signal at all today beyond reading logs — a queue depth that only grows is the metric to export first.
 
+### Error tracking
+
+Sentry, on both sides, and **off unless configured** ([`features/0034`](../../features/0034-error-tracking-on-api-and-spa.md)). `backend/src/services/error-tracking.ts` and `frontend/src/services/error-tracking.ts` are the only modules that import the SDK, the same boundary `services/stripe.ts` draws.
+
+| | |
+|---|---|
+| `SENTRY_DSN` | Backend. Unset means error tracking is off — no init, no network, no throw. A **present but malformed** value refuses to boot (see below) |
+| `VITE_SENTRY_DSN` | SPA. **Compile time**: it is baked into the bundle by `npm run build` and cannot be changed by restarting anything. It is also **public by design**, because it ships in that bundle — it is not a secret and must not be handled as one |
+
+**What is sent is an allowlist, not a redaction list.** The message, the stack, the request id, the matched route, the status and the process — and nothing else. The mechanism is `defaultIntegrations: false` on both sides, so the SDK collects nothing on its own; `beforeSend` deletes `request`, `user`, `breadcrumbs`, `extra` and `contexts` as a **backstop against a future change that forgets**, exactly as pino's `redact` is a backstop rather than the mechanism. `extra` and `contexts` are on that list because of a gap found in review: when `captureException` is handed a value that is **not an `Error`** — which is what both `unhandledRejection` handlers pass straight through — Sentry's *core* serialises that value's own properties into `event.extra.__serialized__`, and core is not an integration, so `defaultIntegrations: false` does nothing about it. The reason a denylist cannot work here is the one this document already gives for the log: answer values arrive keyed by **field id**, so their paths are the customer's data and there is no fixed set of names to strip.
+
+**No Session Replay, anywhere.** It is off because it is never switched on.
+
+**The public respondent surface reports nothing at all.** The three routes marked `meta: { public: true }` in the SPA router — `/form/:shareId`, its confirmation page and `/invitations/:token` — are excluded, at the call site and again in `beforeSend`. That is a decision rather than an oversight: [`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md) had just stopped storing a respondent's IP by default because collecting it for an unimplemented purpose was indefensible, and sending the same person's browser session to a third-party processor without touching the notice that feature wrote would walk it back silently. **The cost is real: a bug that only happens on the public form is still invisible.** Filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+**Nothing is sent from development or test**, decided by `isStrict` rather than by `NODE_ENV !== 'production'` — so an unset, misspelled or dropped `NODE_ENV` falls into the reporting branch rather than the silent one. Same allowlist, and the same constant, as `DEV_PLAN_KEY` and `REGISTRATION_MODE`.
+
+**A 4xx is never reported.** `middleware/errorHandler.ts` reports on exactly the branch that logs at `error` — 5xx and non-`AppError` throws — for the reason that file already argues: a 4xx is the API answering correctly, and reporting it buries the real fault and spends the quota that would have caught it.
+
+Two failure modes worth knowing, because both are silent by nature and both were closed deliberately:
+
+- **A malformed `SENTRY_DSN` does not make the SDK complain.** It disables itself quietly, so the process boots, serves, and reports nothing. That was observed, not assumed. `validate-env.ts` now refuses to boot on it, the same treatment `WEBHOOK_SIGNING_KEY` gets.
+- **The SPA's CSP is an allowlist**, so an ingest origin missing from `connect-src` means the browser refuses every event while the SDK reports success. The origin is therefore *derived from the DSN* in `frontend/src/services/sentry-dsn.ts` rather than configured separately, and a DSN that is not a URL **fails the build** rather than emitting a policy without it.
+
 ## Backups and recovery
 
-There are no backups, and nothing has been restored, so recovery time is unknown. Before the first paying customer: automated daily PostgreSQL backups with a tested restore, and versioned object storage for PDFs. An untested backup is an assumption, not a backup.
+**The tooling and the drill are built** ([`features/0037`](../../features/0037-backups-with-a-tested-restore.md)). The procedure, the secret inventory and the drill log are in [`docs/runbooks/backup-and-restore.md`](../runbooks/backup-and-restore.md); this section records what the design settled.
 
-Note also that `DELETE /api/forms/:id` cascades to every response with no soft delete and no undo. A misclick is unrecoverable today even with backups in place, because nobody would know to restore.
+| | |
+|---|---|
+| `npm run backup:db --workspace=backend` | `pg_dump --format=custom` plus a `<dump>.manifest.json` beside it. **Both are the backup** — the manifest carries the checksum, the applied migration, a row count per table and the document keys the dumped rows point at, and without it nothing can be verified |
+| `npm run backup:objects --workspace=backend` | The PDF documents, with the work list read **from the manifest** rather than from the live database, so the two artifacts refer to the same moment |
+| `npm run restore:verify --workspace=backend` | The drill. Restores into a scratch database and then checks the result |
+| `backend/src/services/backup.ts` | Every decision the three make, with no shelling out, so `tests/backup.spec.ts` can exercise them without a PostgreSQL binary, a bucket or a network |
+
+**Four things about it are easy to get wrong.**
+
+**There are two stores and they must be restored together.** `Form.pdfUrl` points out of PostgreSQL and into object storage, and since [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) deleting a form deletes its document too — so a database at one moment against a bucket at another gives forms that open and fail at the document, with nothing logged. **The restore order is bytes first, rows second**, which is the *mirror* of the deletion order rather than a copy of it: deletion removes rows first because the reversible failure is bytes left behind, and on restore that flips.
+
+**`pg_restore` exiting `0` is not a verified restore**, which is why the drill is the deliverable and the backup script is not. It checks the migration against `prisma/migrations/`, the row counts against the manifest, foreign keys (via `--exit-on-error`, which validates constraints as it creates them — the flag is not optional), and **whether each restored `pdfUrl` resolves to bytes that are actually there**. That last check exists nowhere else in the codebase and is the one that catches a database backup taken without its objects.
+
+**A dump is not enough to restore the product.** `WEBHOOK_SIGNING_KEY` encrypts `webhook_endpoints.secret` (`services/webhooks.ts`), so a restore under a fresh key leaves every customer's webhook secret unopenable with no rotation path. The runbook carries the full secret inventory.
+
+**Redis is deliberately not backed up, and that does lose something.** The queues are reconstructible, so there is nothing to keep — but a restore drops the embed jobs in flight, and the failure is silent in the way [the queue section](#observability) describes: no errors, just forms whose PDF stops matching their fields. The runbook's post-restore step exists for that and must not be skipped.
+
+**What is still open.** There is **no schedule** — nothing here runs on a clock, so the backup is a platform cron job and the RPO is whatever that is set to — and **nothing alerts** when a backup fails; both scripts exit non-zero into a void. Recovery time was measured on 2026-09-02 against a development dataset and the procedure passed, but **the production figure is unknown until there is a production database to measure**, and the runbook says to re-run the drill within a week of the first deploy.
+
+Note also that `DELETE /api/forms/:id` cascades to every response with no soft delete and no undo. A misclick is unrecoverable even with backups in place, because nobody would know to restore.
 
 ## Deployment, when it is built
 

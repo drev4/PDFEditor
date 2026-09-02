@@ -50,7 +50,27 @@ export interface BulkSaveResult {
   archived: string[]
 }
 
+/** The server's answer to "may this pattern be stored". */
+export type PatternCheckResult = { ok: true } | { ok: false; reason: string }
+
 export const fieldsService = {
+  /**
+   * Asks whether a pattern is storable, before anything is saved
+   * (features/0036).
+   *
+   * **Only the server can answer this.** RE2 and JavaScript disagree in both
+   * directions — RE2 rejects lookahead and backreferences that JavaScript
+   * accepts, and accepts `(?P<n>a)` that JavaScript rejects — so checking it
+   * here would be a second source of truth that drifts from the engine.
+   *
+   * Note what it does **not** tell you: whether the pattern is fast enough to
+   * run in a respondent's browser. RE2 is linear, so `^(a+)+$` is perfectly
+   * acceptable to it; that half is `describePattern` in `pattern-check.ts`.
+   */
+  async checkPattern(pattern: string): Promise<PatternCheckResult> {
+    return api.post<PatternCheckResult>('/forms/fields/check-pattern', { pattern })
+  },
+
   async create(formId: string, data: CreateFieldData): Promise<Field> {
     const response = await api.post<FieldResponse>(`/forms/${formId}/fields`, data)
     return response.field

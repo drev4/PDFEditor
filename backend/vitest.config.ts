@@ -53,6 +53,15 @@ export default defineConfig({
             // the Pro price: without it a Team subscription resolves to free and
             // every seat assertion below would be measuring the free plan.
             STRIPE_PRICE_TEAM: 'price_test_team_0015',
+            // Registration is OPEN in every suite, whatever the developer's
+            // `.env` says (features/0033). Same reason as `DEV_PLAN_KEY` above:
+            // `src/app.ts` calls `dotenv.config()`, so a developer running the
+            // beta configuration locally would close registration for the four
+            // register tests in `tests/auth.spec.ts` and the ones in
+            // `tests/rate-limit.spec.ts` that drive the limiter through it. The
+            // closed path has its own tests, which set this per case and delete
+            // it afterwards.
+            REGISTRATION_MODE: 'open',
         },
         setupFiles: ['./tests/setup.ts'],
         coverage: {

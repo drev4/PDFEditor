@@ -56,6 +56,13 @@ export default defineConfig({
             // the Pro price: without it a Team subscription resolves to free and
             // every seat assertion below would be measuring the free plan.
             STRIPE_PRICE_TEAM: 'price_test_team_0015',
+            // Registration is OPEN in every suite, whatever the developer's
+            // `.env` says (features/0033). Same reason as `DEV_PLAN_KEY` above:
+            // `src/app.ts` calls `dotenv.config()`, so a developer running the
+            // beta configuration locally would close the registration these
+            // specs use to create their fixtures. The closed path has its own
+            // tests, which set this per case and delete it afterwards.
+            REGISTRATION_MODE: 'open',
             DATABASE_URL: process.env.DATABASE_URL
                 ?? 'postgresql://postgres:postgres@localhost:5432/vuepdf_test?schema=public'
         },

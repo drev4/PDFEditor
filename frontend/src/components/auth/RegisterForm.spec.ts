@@ -5,6 +5,15 @@ import RegisterForm from './RegisterForm.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import PrimeVue from 'primevue/config'
 import { flushPromises } from '@/test/helpers/test-utils'
+import { authService } from '@/services/auth'
+
+// The form asks the server whether registration is open before it draws
+// (features/0033). Mocked here so no spec depends on the network, and defaulted
+// to `open` in `beforeEach` so the cases written before this feature keep
+// rendering the form they were written against.
+vi.mock('@/services/auth', () => ({
+  authService: { getRegistrationMode: vi.fn() }
+}))
 
 // Mock router
 const mockPush = vi.fn()
@@ -22,6 +31,7 @@ describe('RegisterForm', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.mocked(authService.getRegistrationMode).mockResolvedValue('open')
   })
 
   const mountComponent = () => {
@@ -101,7 +111,7 @@ describe('RegisterForm', () => {
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(authStore.register).toHaveBeenCalledWith('test@example.com', 'password123', 'Test User')
+    expect(authStore.register).toHaveBeenCalledWith('test@example.com', 'password123', 'Test User', undefined)
   })
 
   it('should redirect after successful registration', async () => {
@@ -135,6 +145,104 @@ describe('RegisterForm', () => {
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(authStore.register).toHaveBeenCalledWith('test@example.com', 'password123', undefined)
+    expect(authStore.register).toHaveBeenCalledWith('test@example.com', 'password123', undefined, undefined)
+  })
+
+  /**
+   * The private beta's signup code (features/0033).
+   *
+   * The server is the authority on whether a code is required — everything
+   * here is about what the screen draws before anybody has typed anything, so
+   * a visitor is not asked to fill in a whole form and then told from a 403.
+   */
+  describe('registration mode', () => {
+    async function mountWithMode(mode: 'open' | 'invite_only') {
+      vi.mocked(authService.getRegistrationMode).mockResolvedValue(mode)
+      const wrapper = mountComponent()
+      await flushPromises()
+      return wrapper
+    }
+
+    it('draws no code field when registration is open', async () => {
+      const wrapper = await mountWithMode('open')
+
+      expect(wrapper.find('[data-testid="register-code-input"]').exists()).toBe(false)
+      expect(wrapper.findAll('input')).toHaveLength(4)
+    })
+
+    it('draws the code field and explains the beta when invite_only', async () => {
+      const wrapper = await mountWithMode('invite_only')
+
+      expect(wrapper.find('[data-testid="register-code-input"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('invitation-only')
+    })
+
+    it('sends the code with the registration', async () => {
+      const authStore = useAuthStore()
+      authStore.register = vi.fn().mockResolvedValue({})
+
+      const wrapper = await mountWithMode('invite_only')
+      // The code field is drawn directly under the heading, so the inputs are
+      // code, name, email, password, confirm.
+      const inputs = wrapper.findAll('input')
+
+      await inputs[0].setValue('the-beta-code')
+      await inputs[2].setValue('test@example.com')
+      await inputs[3].setValue('password123')
+      await inputs[4].setValue('password123')
+      await wrapper.find('form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(authStore.register).toHaveBeenCalledWith(
+        'test@example.com',
+        'password123',
+        undefined,
+        'the-beta-code'
+      )
+    })
+
+    it('refuses to submit an empty code rather than spending a round trip', async () => {
+      const authStore = useAuthStore()
+      authStore.register = vi.fn().mockResolvedValue({})
+
+      const wrapper = await mountWithMode('invite_only')
+      // Everything filled in except the code: code, name, email, password,
+      // confirm.
+      const inputs = wrapper.findAll('input')
+
+      await inputs[2].setValue('test@example.com')
+      await inputs[3].setValue('password123')
+      await inputs[4].setValue('password123')
+      await wrapper.find('form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(authStore.register).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('An invitation code is required')
+    })
+
+    /**
+     * The property that makes the fetch safe to do at all: a failed GET must
+     * not become an outage on the signup screen. The form stays usable and the
+     * server still refuses with a 403 the form surfaces.
+     */
+    it('stays usable when the mode cannot be read', async () => {
+      const authStore = useAuthStore()
+      authStore.register = vi.fn().mockResolvedValue({})
+      vi.mocked(authService.getRegistrationMode).mockRejectedValue(new Error('offline'))
+
+      const wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="register-code-input"]').exists()).toBe(false)
+
+      const inputs = wrapper.findAll('input')
+      await inputs[1].setValue('test@example.com')
+      await inputs[2].setValue('password123')
+      await inputs[3].setValue('password123')
+      await wrapper.find('form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(authStore.register).toHaveBeenCalled()
+    })
   })
 })
