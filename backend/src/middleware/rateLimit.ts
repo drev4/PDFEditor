@@ -4,6 +4,7 @@ import { RedisStore } from 'rate-limit-redis'
 import { envInt } from '../config/env.js'
 import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from '../services/redis.js'
 import type { ApiKeyRequest } from './apiKeyAuth.js'
+import type { AuthRequest } from './auth.js'
 import { logger } from '../services/logger.js'
 
 // Rate limiters for the unauthenticated write paths. These are the whole of the
@@ -52,7 +53,7 @@ function rateLimitClient(): Promise<Redis> {
  * limiter counts separately, so a burst of form submissions cannot consume
  * somebody's login budget (features/0018).
  */
-export type LimiterName = 'login' | 'register' | 'refresh' | 'invitation' | 'responses' | 'api'
+export type LimiterName = 'login' | 'register' | 'refresh' | 'invitation' | 'responses' | 'api' | 'export'
 
 interface LimiterConfig {
   /** Environment variable holding the window length, in milliseconds. */
@@ -158,6 +159,33 @@ const LIMITERS: Record<LimiterName, LimiterConfig> = {
       return keyId ? `key:${keyId}` : `ip:${ipKeyGenerator(req.ip ?? '')}`
     },
     message: 'Too many API requests. Slow down and try again shortly.'
+  },
+
+  /**
+   * `GET /api/organizations/export` - the whole tenant in one request
+   * (features/0030).
+   *
+   * Counted **per user, not per address**, for the same reason `api` counts per
+   * key: this route is behind `authenticate`, so the caller has a real identity
+   * and the address is the wrong one to spend. Two colleagues on one office
+   * connection must not share an export budget.
+   *
+   * The limit is small and the window is long because the legitimate use is
+   * rare — somebody leaving, or taking a backup — while the illegitimate one is
+   * expensive for the database and produces a file containing every respondent's
+   * answers. `req.userId` is set by `authenticate`, which runs before this on
+   * the same route.
+   */
+  export: {
+    windowEnv: 'RATE_LIMIT_EXPORT_WINDOW_MS',
+    windowDefault: 1 * HOUR,
+    limitEnv: 'RATE_LIMIT_EXPORT_MAX',
+    limitDefault: 5,
+    keyBy: (req: Request) => {
+      const userId = (req as AuthRequest).userId
+      return userId ? `user:${userId}` : `ip:${ipKeyGenerator(req.ip ?? '')}`
+    },
+    message: 'Too many export requests. An export covers everything at once, so please wait before asking for another.'
   },
 
   /** `POST /api/responses` - garbage submissions into a published form. */
@@ -304,6 +332,7 @@ export const refreshRateLimit = buildRateLimiter('refresh')
 export const invitationRateLimit = buildRateLimiter('invitation')
 export const responseRateLimit = buildRateLimiter('responses')
 export const apiRateLimit = buildRateLimiter('api')
+export const exportRateLimit = buildRateLimiter('export')
 
 /**
  * Clears every limiter's hit counts. For tests only — the suites share one

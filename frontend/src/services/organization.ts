@@ -116,5 +116,22 @@ export const organizationService = {
   /** Unauthenticated when the invited person has no account yet. */
   async acceptInvitation(token: string, password?: string, name?: string): Promise<AcceptResponse> {
     return api.post<AcceptResponse>('/organizations/invitations/accept', { token, password, name })
+  },
+
+  /**
+   * Everything the active organization holds, as one JSON file (features/0030).
+   *
+   * Owner or admin only; a member gets a `403`. The response is streamed by the
+   * server and buffered here by `api.download`, which is acceptable because the
+   * browser has to hold the whole file to save it anyway — the streaming matters
+   * on the server, where the alternative was holding every organization's export
+   * in the API process.
+   *
+   * **A complete file ends with `"complete": true`.** Its absence means the
+   * export was cut short; the screen says so, because a truncated file that
+   * still parses is the failure this format exists to make visible.
+   */
+  async exportData(): Promise<Blob> {
+    return api.download('/organizations/export')
   }
 }
