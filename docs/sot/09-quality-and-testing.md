@@ -11,7 +11,7 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
-| Frontend unit / component | 53 specs, 436 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
+| Frontend unit / component | 54 specs, 450 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
 | Backend route (mocked Prisma) | 26 specs, 330 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
 | **Backend database-backed** | 28 specs, 260 tests — 3 specs (10 tests) skip themselves without `TEST_REDIS_URL`, see below | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 53 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
