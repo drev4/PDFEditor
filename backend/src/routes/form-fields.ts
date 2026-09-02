@@ -51,6 +51,50 @@ const bulkFieldSchema = createFieldSchema.extend({
   id: z.string().uuid().optional()
 })
 
+const checkPatternSchema = z.object({
+  pattern: z.string()
+})
+
+// POST /api/forms/fields/check-pattern
+//
+// Whether a pattern may be stored, asked before anything is saved
+// (features/0036). The editor needs an answer while an author is typing, and
+// **only this side can give it**: RE2 rejects lookahead, lookbehind and
+// backreferences that JavaScript accepts, and accepts `(?P<n>a)` that
+// JavaScript rejects, so reimplementing the rules in the browser would be a
+// second source of truth about which patterns are legal — the thing
+// `services/pattern-validator.ts` exists to prevent.
+//
+// It earns its own route rather than letting the author find out on save,
+// because `pattern` is validated inside `createFieldSchema` below: an invalid
+// one fails the **whole** bulk save and takes every other unsaved edit on the
+// form with it. A pattern is invalid for most of the time somebody is typing
+// one, so that is not an edge case.
+//
+// **Declared above the `/:formId` routes on purpose.** Both this router and
+// `formsRouter` mount on `/api/forms`, and a static path underneath a family of
+// parameterised ones is exactly where shadowing happens; `tests/fields.spec.ts`
+// asserts it is still reached.
+//
+// `authenticate` and nothing else — every neighbouring route also resolves a
+// membership, and this one has no form and no row to own. It reads no database
+// and **compiles** a pattern without ever executing it against input, so its
+// cost is bounded by `MAX_PATTERN_LENGTH` and it needs no rate limiter of its
+// own beyond being authenticated at all.
+formFieldsRouter.post('/fields/check-pattern', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
+  const validation = checkPatternSchema.safeParse(req.body)
+  if (!validation.success) {
+    return res.status(400).json({ error: 'Validation error', details: validation.error.errors })
+  }
+
+  const check = checkPattern(validation.data.pattern)
+
+  // 200 either way: "this pattern is not storable" is the answer to the
+  // question, not a failure to answer it. A 400 here would be indistinguishable
+  // from a malformed request.
+  return res.json(check.ok ? { ok: true } : { ok: false, reason: check.reason })
+}))
+
 // POST /api/forms/:formId/fields - Create field
 formFieldsRouter.post('/:formId/fields', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
   const formId = req.params.formId as string

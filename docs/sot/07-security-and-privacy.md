@@ -226,7 +226,14 @@ The first row is the finding. `^(a+)+$` passes `checkPattern` because RE2 has no
 
 **So the two engines still disagree, and the browser now declines to judge what it cannot read.** A pattern that does not compile there, or does not finish in time, produces **no client-side verdict and no error message** — never a failure invented against the respondent, because what failed is our ability to read the rule, not the value they typed. The server checks the same rule with an engine that can always read it, and remains authoritative.
 
-**Warning the author is still the better fix and is not built.** Nothing tells someone writing `^(a+)+$` that they have written a trap; 0035 only protects the respondent from a pattern that got stored anyway. Filed with the field-`pattern` authoring UI in [`docs/BACKLOG.md`](../BACKLOG.md).
+**The author is warned now** ([`features/0036`](../../features/0036-pattern-authoring-with-a-slowness-warning.md)), which is the half 0035 could only contain. The editor's pattern box runs **two checks, in two places, and neither is sufficient**:
+
+- **`POST /api/forms/fields/check-pattern` says whether it may be stored.** Only the server can: RE2's rules are not JavaScript's, so deciding it in the browser would mean keeping a second copy of the engine's grammar. An invalid pattern is shown with RE2's own message and **never reaches the store** — `pattern` is validated inside `createFieldSchema`, so an invalid one fails the whole bulk save and would take every other unsaved edit on the form with it.
+- **The browser says whether it will be usable**, by probing the pattern through the same killable Worker with `describePattern`. RE2 is linear, so it has nothing to say about `^(a+)+$`; only a backtracking engine reveals it.
+
+Two properties of that warning are deliberate. **Slow warns, it never refuses** — a probe can show a pattern *is* slow and never that it is safe, because the input that triggers backtracking depends on the pattern, so refusing on it would block legitimate patterns on a guess. And **only a timeout counts as slow**: `describePattern` also reports "this engine cannot compile it" and "there was no worker to ask", and reporting `(?P<n>a)` as slow would be a false alarm of the kind that teaches people to ignore warnings.
+
+Measured in real Chromium against the probe inputs the editor actually uses: `^(a+)+$`, `^(\d+)*$` and `^([0-9]+)*$` are all flagged, while `^[0-9]+$`, a postcode pattern and an email pattern are not.
 
 ## Uploaded PDFs leave this origin's disk, and the headers do not go with them
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { runPattern, resetPatternWorker } from './pattern-check'
+import { runPattern, describePattern, resetPatternWorker } from './pattern-check'
 
 /**
  * The bound on an author's pattern (features/0035).
@@ -205,6 +205,65 @@ describe('runPattern', () => {
 
     expect(first).toBe('matched')
     expect(second).toBe('no-match')
+  })
+
+  /**
+   * `runPattern` collapses every failure into `no-verdict`, which is right for
+   * `useFormValidation` — it only needs to know whether to show an error.
+   *
+   * The pattern **author** needs more (features/0036). "This ran too long to
+   * check" is a warning worth showing; "this engine cannot compile it" is not a
+   * speed problem at all, and reporting `(?P<n>a)` as slow would be both wrong
+   * and the kind of false alarm that teaches people to ignore warnings.
+   *
+   * So `describePattern` reports the reason. `runPattern` is untouched — every
+   * test above it still passes unmodified, which is the point.
+   */
+  describe('describePattern', () => {
+    it('says a hanging pattern timed out', async () => {
+      behaviour = { kind: 'hang' }
+
+      await expect(describePattern('^(a+)+$', 'aaaa')).resolves.toEqual({
+        verdict: 'no-verdict',
+        reason: 'timeout'
+      })
+    })
+
+    it('distinguishes a pattern this engine cannot compile from a slow one', async () => {
+      behaviour = { kind: 'reply', reply: { ok: false } }
+
+      await expect(describePattern('(?P<n>a)', 'anything')).resolves.toEqual({
+        verdict: 'no-verdict',
+        reason: 'uncompilable'
+      })
+    })
+
+    it('reports an ordinary answer with no reason', async () => {
+      behaviour = { kind: 'reply', reply: { ok: true, matched: false } }
+
+      await expect(describePattern('^[0-9]+$', 'abc')).resolves.toEqual({
+        verdict: 'no-match'
+      })
+    })
+
+    it('says so when there is no worker to ask', async () => {
+      vi.stubGlobal('Worker', undefined)
+      resetPatternWorker()
+
+      await expect(describePattern('^a$', 'a')).resolves.toEqual({
+        verdict: 'no-verdict',
+        reason: 'unavailable'
+      })
+    })
+
+    it('says so when the thread never starts', async () => {
+      announcesReady = false
+
+      await expect(describePattern('^a$', 'a')).resolves.toEqual({
+        verdict: 'no-verdict',
+        reason: 'unavailable'
+      })
+    }, 10000)
   })
 
   it('builds a fresh worker after killing one', async () => {
