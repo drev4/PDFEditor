@@ -105,5 +105,27 @@ describe('Forms Service', () => {
 
       expect(published.showBranding).toBe(true)
     })
+
+    /**
+     * The two flags fail in opposite directions on purpose (features/0032).
+     * A missing `showBranding` keeps the mark, because under-claiming a paid
+     * entitlement gives it away; a missing `collectsMetadata` claims nothing is
+     * stored, because a privacy notice that over-claims is the wrong failure.
+     */
+    it('treats a missing collectsMetadata as not collecting', async () => {
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+
+      const published = await formsService.getPublic('share-123')
+
+      expect(published.collectsMetadata).toBe(false)
+    })
+
+    it('passes collectsMetadata through when the server sends it', async () => {
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm, collectsMetadata: true })
+
+      const published = await formsService.getPublic('share-123')
+
+      expect(published.collectsMetadata).toBe(true)
+    })
   })
 })

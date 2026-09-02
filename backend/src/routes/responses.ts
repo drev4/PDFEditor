@@ -133,9 +133,23 @@ responsesRouter.post('/', responseRateLimit, asyncHandler(async (req: Request, r
     })
   }
 
-  // Get client IP and User-Agent
-  const ipAddress = req.ip || req.socket.remoteAddress || null
-  const userAgent = req.headers['user-agent'] || null
+  // What is stored about the respondent, which is nothing unless this form's
+  // author asked for it (features/0032).
+  //
+  // **This has nothing to do with rate limiting, and the next person to touch it
+  // will assume it does.** `middleware/rateLimit.ts` counts against `req.ip` on
+  // the request in flight, transiently, and never reads `responses.ip_address`.
+  // So a form with collection off is exactly as protected from a flood as one
+  // with it on — routing the limiter through this flag would hand every author a
+  // switch that turns off their own abuse protection.
+  //
+  // The values are still read here rather than behind the condition, so that the
+  // condition is visibly about *storing* them and not about knowing them.
+  const clientIp = req.ip || req.socket.remoteAddress || null
+  const clientUserAgent = req.headers['user-agent'] || null
+
+  const ipAddress = form.collectsRespondentMetadata ? clientIp : null
+  const userAgent = form.collectsRespondentMetadata ? clientUserAgent : null
 
   // Create response with answers
   // Filter answers to only include fields that belong to this form

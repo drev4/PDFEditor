@@ -28,7 +28,13 @@ const updateFormSchema = z.object({
   description: z.string().optional(),
   status: z.enum(['draft', 'published', 'closed']).optional(),
   pdfUrl: z.string().optional(),
-  settings: z.record(z.unknown()).optional()
+  settings: z.record(z.unknown()).optional(),
+  // An explicit field, deliberately not a key inside `settings` (features/0032).
+  // `settings` is `z.record(z.unknown())` — an untyped blob this API accepts
+  // from the client and validates in no way — and the flag deciding whether
+  // personal data is stored must not be a key nobody checks, absent on every
+  // existing row and impossible to query.
+  collectsRespondentMetadata: z.boolean().optional()
 })
 
 /**
@@ -324,7 +330,18 @@ formsRouter.get('/public/:shareId', asyncHandler(async (req, res, next) => {
   // It reveals no plan name, no limit, no usage and no organization.
   res.json({
     form: toApiForm(form),
-    showBranding: await mustShowBranding(form.organizationId)
+    showBranding: await mustShowBranding(form.organizationId),
+    // What this respondent is about to have stored about them
+    // (features/0032). It sits beside `showBranding` rather than being read off
+    // the form object — which does carry the column, through the spread in
+    // `toApiForm` — because the notice on the public form is a contract of its
+    // own: one named boolean the client renders from, so the column can be
+    // renamed or replaced without silently changing what a stranger is told.
+    //
+    // It is safe under the rule the comment above states, and worth checking
+    // against it rather than assuming: this says nothing about the owner's plan,
+    // limits, usage or identity. It says what happens to the person reading it.
+    collectsMetadata: form.collectsRespondentMetadata
   })
 }))
 

@@ -73,6 +73,18 @@ Present and appropriate: `Form.organizationId`, `Field.formId`, `Response.formId
 
 Nothing is currently missing that a known workload needs.
 
+### What a submission stores about the respondent
+
+`Form.collectsRespondentMetadata` decides whether a submission writes `Response.ipAddress` and `Response.userAgent` ([`features/0032`](../../features/0032-respondent-notice-and-ip-collection.md)). **It defaults to `false`**, and that default is the decision rather than caution: both columns used to be written on every submission with no notice to the person filling the form in, for an anti-abuse purpose nothing in this codebase implements — `ipAddress` is read only by the responses screen, the CSV exporter and the organization export, all of which are ways *out* of the building.
+
+Three properties of it are easy to get wrong.
+
+**It governs what is stored, never who may read anything.** No authorization check reads it, and turning it on grants nobody anything.
+
+**It has nothing to do with rate limiting.** `middleware/rateLimit.ts` counts against `req.ip` on the request in flight and never touches the stored column, so a form with collection off is exactly as protected from a flood as one with it on. Routing the limiter through this flag would hand every author a switch that disables their own abuse protection — asserted by `backend/tests/integration/respondent-metadata.spec.ts`.
+
+**The migration touched no existing row.** `20260902112033_add_collects_respondent_metadata` is a single additive `ALTER TABLE ... ADD COLUMN ... DEFAULT false`. Addresses already collected are still there, deliberately: nobody asked for them to be destroyed, and an author relying on them should not lose them to a schema change. Erasing them is a separate act, filed in [`docs/BACKLOG.md`](../BACKLOG.md). What existing forms do change is their behaviour from now on — they stop collecting, which is the direction that collects less.
+
 ## Cascade map
 
 `onDelete` behaviour, read out of the schema. This table is the most important thing in this document, because two of these rows are how the product loses customer data.

@@ -17,6 +17,17 @@ export function usePublicForm() {
    */
   const showBranding = ref(true)
 
+  /**
+   * Whether this respondent's address and browser are stored with their
+   * submission (features/0032), which is what the privacy notice says.
+   *
+   * Starts `false` — the opposite direction to `showBranding` above, and
+   * deliberately so. A form that has not loaded, or a payload missing the flag,
+   * must not tell a stranger their address is being recorded when it may not
+   * be: the safe failure for a privacy statement is to claim less.
+   */
+  const collectsMetadata = ref(false)
+
   const fields = computed(() => form.value?.fields || [])
   const pdfUrl = computed(() => form.value?.pdfUrl || null)
   const title = computed(() => form.value?.title || '')
@@ -30,6 +41,7 @@ export function usePublicForm() {
       const published = await formsService.getPublic(shareId)
       form.value = published.form
       showBranding.value = published.showBranding
+      collectsMetadata.value = published.collectsMetadata
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 404) {
         error.value = 'Form not found or not published'
@@ -49,11 +61,13 @@ export function usePublicForm() {
     error.value = null
     isLoading.value = false
     showBranding.value = true
+    collectsMetadata.value = false
   }
 
   return {
     form,
     showBranding,
+    collectsMetadata,
     fields,
     pdfUrl,
     title,
