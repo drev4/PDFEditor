@@ -95,6 +95,13 @@ export function initErrorTracking(app: App, router: Router): void {
         delete event.request
         delete event.user
         delete event.breadcrumbs
+        // Sentry's core — not an integration, so `defaultIntegrations: false`
+        // does not cover it — serialises a non-`Error` capture's own properties
+        // into `event.extra.__serialized__`. `main.ts` hands the raw
+        // `event.reason` of an unhandled rejection to `captureAppError`, and a
+        // rejection reason is often a plain object.
+        delete event.extra
+        delete event.contexts
         return event
       },
       beforeBreadcrumb: () => null
