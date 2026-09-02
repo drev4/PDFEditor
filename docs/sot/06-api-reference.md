@@ -21,6 +21,7 @@ Nothing gets added to this file without opening the route file first — see the
 /api/auth       -> authRouter
 /api/forms      -> formsRouter
 /api/forms      -> formFieldsRouter    (same prefix as formsRouter — field paths are nested)
+/api/account    -> accountRouter
 /api/upload     -> uploadRouter
 /api/responses  -> responsesRouter
 /uploads/pdfs/:token/:filename  -> signed PDF download (no auth; the signature IS the capability)
@@ -83,6 +84,22 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 - **`402` is not `403`, and the order matters.** `403` comes first, from `requireRole` and from an admin trying to hand out `owner`; `402` is checked last, after "already a member" too. Re-inviting somebody who is already here must not be refused for money, and a member who may not invite at all must not be told to go and buy seats they cannot buy.
 - **Seats count total people, not people beyond the owner.** The organization's own owner is a `Membership`, so Free's one seat means *you, alone* — a Free or Pro account inviting a colleague gets `402`, and that is the product working. Team is the plan that adds people. A pending invitation holds a seat too, or an organization on its limit could hand out any number of working keys.
 - **The limit is what was bought.** On Team it is `max(catalogue floor, Subscription.quantity)`, so raising the quantity in Stripe's portal lifts the refusal with no deploy. Lowering it removes nobody — it refuses the next invitation ([04-backend-patterns §10](./04-backend-patterns.md)).
+
+## Account — `routes/account.ts`
+
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| DELETE | `/account` | Bearer | `{password}` | `200 {message}` + a cleared refresh cookie · `400` no password · `401` wrong password · `409` last owner of an organization that still has members or pending invitations · `502` the payment provider refused to cancel · `404` the user no longer exists |
+
+**The password is re-authentication, not authorization.** The Bearer token proves the session; a borrowed laptop has one. This is the only endpoint in the product that destroys collected responses with no undo, so it asks who is at the keyboard.
+
+**What a success destroys**, in words: the `User` row, cascading its memberships and refresh tokens; every organization where the caller is the **only** member, cascading that organization's forms, fields, responses, answers, usage counters, API keys, webhook endpoints and subscription row; and the stored PDF of every deleted form that no surviving form still references ([03-domain-model](./03-domain-model.md#what-no-cascade-can-reach-the-stored-document)).
+
+**The `409` is the interesting status.** An organization with other people in it is not the account holder's to destroy, and simply deleting the `User` row would strand it with no members. Neither guess is acceptable, so the request is refused and the message names the organizations. It is *not* a `403`: nothing is forbidden about the caller, the account is simply not in a state that can be deleted yet.
+
+**The `502` means nothing was deleted.** Subscriptions are cancelled at Stripe *before* the transaction, because no cascade can reach Stripe; if that call fails the deletion is abandoned with the account and the subscription both intact, which is recoverable by trying again.
+
+There is **no grace period**. The deletion is immediate and complete — see [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) for why a thirty-day marker would be a claim rather than a feature in a codebase with no scheduler.
 
 ## Billing — `routes/billing.ts`
 

@@ -274,6 +274,18 @@ Three things about it are worth knowing before changing a variable or a rule.
 
 The worker's own `REDIS_URL` refusal stays where it was, in `worker.ts`, and the validator deliberately does not duplicate it. Two different messages for one condition is worse than one.
 
+## Orphaned PDFs
+
+Deleting a form or an account removes its stored document ([`features/0029`](../../features/0029-account-deletion-and-real-erasure.md)), and `services/pdf-gc.ts` is the only module that may do it. **Removal happens after the database transaction commits and never throws**, so the failure mode is a document left behind rather than a deletion that half-happened. The line to look for is:
+
+```
+Could not remove stored PDF; it is now orphaned
+```
+
+It carries the `key`. What to do: confirm no form still references it — `SELECT id FROM forms WHERE pdf_url LIKE '%<key>%'` should return nothing — then delete the object from the bucket (or `uploads/pdfs/` under the `local` driver), together with its `<key>-backup.pdf` sibling if one exists. The ordering is deliberate and worth keeping when doing it by hand: the reversible failure is bytes left behind, and the unrecoverable one is bytes removed while a live form still points at them.
+
+Note that this only covers documents whose form was deleted. Two other sources of orphans exist and are filed in [`docs/BACKLOG.md`](../BACKLOG.md): the editor's save path, which repoints a form at a new document without removing the old one, and any object written before this feature existed.
+
 ## Database migrations
 
 **A migration history exists**, baselined as step 0 of [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md). `backend/prisma/migrations/` holds:

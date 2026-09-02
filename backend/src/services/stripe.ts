@@ -380,6 +380,50 @@ export async function subscriptionFor(organizationId: string) {
 }
 
 /**
+ * Cancels, at Stripe, every subscription belonging to organizations that are
+ * about to be deleted (features/0029).
+ *
+ * **A cascade cannot reach Stripe.** `Subscription.organization` is `onDelete:
+ * Cascade`, so deleting an organization deletes the row that records the
+ * relationship — and nothing else. The subscription itself goes on renewing and
+ * the customer goes on paying for an account that no longer exists, which is the
+ * single worst outcome this feature could produce. [03-domain-model](../../docs/sot/03-domain-model.md)
+ * has said so since features/0013; this is the first code path that can act on it.
+ *
+ * **It throws, and the caller must let it.** The ordering is cancel-then-delete:
+ * if Stripe is unreachable the deletion is abandoned and the customer keeps both
+ * their account and their subscription, which is recoverable by trying again.
+ * The reverse order is not — the rows naming the subscription would be gone, and
+ * with them any way for this application to know what to cancel.
+ *
+ * A missing `stripeSubscriptionId` and an unconfigured deployment are both no-ops
+ * rather than errors: an organization that never subscribed has nothing to cancel,
+ * and a deployment with billing off has nowhere to ask.
+ */
+export async function cancelSubscriptionsForOrganizations(organizationIds: string[]): Promise<void> {
+  if (organizationIds.length === 0 || !billingConfigured()) return
+
+  const subscriptions = await prisma.subscription.findMany({
+    where: { organizationId: { in: organizationIds } },
+    select: { organizationId: true, stripeSubscriptionId: true }
+  })
+
+  for (const subscription of subscriptions) {
+    if (!subscription.stripeSubscriptionId) continue
+
+    // Immediately, not at the period end. The account is being erased now, and
+    // `cancel_at_period_end` would leave a live subscription attached to a
+    // customer nothing in this database points at any more.
+    await stripeClient().subscriptions.cancel(subscription.stripeSubscriptionId)
+
+    logger.info(
+      { organizationId: subscription.organizationId, subscriptionId: subscription.stripeSubscriptionId },
+      'Cancelled subscription at Stripe before deleting the organization'
+    )
+  }
+}
+
+/**
  * Claims a Stripe event id, returning `false` if it has already been processed.
  *
  * Insert-and-catch rather than read-then-insert: two concurrent deliveries of

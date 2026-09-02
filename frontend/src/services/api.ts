@@ -130,7 +130,13 @@ export const api = {
   post: <T>(endpoint: string, body: unknown) => request<T>(endpoint, { method: 'POST', body }),
   put: <T>(endpoint: string, body: unknown) => request<T>(endpoint, { method: 'PUT', body }),
   patch: <T>(endpoint: string, body: unknown) => request<T>(endpoint, { method: 'PATCH', body }),
-  delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
+  /**
+   * The body is optional and almost never used. `DELETE /api/account` is the
+   * one caller that sends one, because deleting an account re-verifies the
+   * password and that is a credential, not something to put in a URL.
+   */
+  delete: <T>(endpoint: string, body?: unknown) =>
+    request<T>(endpoint, body === undefined ? { method: 'DELETE' } : { method: 'DELETE', body }),
 
   /**
    * Binary responses cannot go through `request()`, which parses JSON — so the

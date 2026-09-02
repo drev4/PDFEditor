@@ -11,6 +11,7 @@ import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
 import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
 import { pdfStorage } from '../services/pdf-storage.js'
+import { collectOrphanDocuments, keysReferencedBy } from '../services/pdf-gc.js'
 import { logger } from '../services/logger.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 
@@ -262,9 +263,19 @@ formsRouter.patch('/:id/status', authenticate, asyncHandler(async (req: AuthRequ
 formsRouter.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
   const id = req.params.id as string
 
-  await verifyFormOwnership(req, id)
+  const form = await verifyFormOwnership(req, id)
+
+  // Read the key **before** the row goes; afterwards there is nothing left to
+  // read it from. Removing the bytes happens after the delete, and only when no
+  // surviving form still references the key — `Form.pdfUrl` is an unconstrained
+  // client-supplied string, so two forms can point at one document and an
+  // unconditional remove here would destroy another form's, possibly another
+  // organization's (features/0029, services/pdf-gc.ts).
+  const keys = keysReferencedBy([form])
 
   await prisma.form.delete({ where: { id } })
+
+  await collectOrphanDocuments(keys)
 
   res.json({ message: 'Form deleted' })
 }))
