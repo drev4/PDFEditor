@@ -6,7 +6,7 @@ import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
 import { requireMembership, requireRole, assertNotLastOwner } from '../middleware/membership.js'
-import { invitationRateLimit } from '../middleware/rateLimit.js'
+import { invitationRateLimit, exportRateLimit } from '../middleware/rateLimit.js'
 import { issueRefreshToken } from '../services/refresh-token.js'
 import { setRefreshCookie } from '../services/session-cookie.js'
 import { assertCanInvite, assertHasApiAccess, getEntitlements } from '../services/entitlements.js'
@@ -15,6 +15,7 @@ import { mintWebhookSecret, isWebhookSigningConfigured } from '../services/webho
 import { assertDeliverableUrl } from '../services/webhook-egress.js'
 import { isRedisConfigured } from '../services/redis.js'
 import { subscriptionFor } from '../services/stripe.js'
+import { exportFilename, writeOrganizationExport } from '../services/organization-export.js'
 import {
   createInvitation,
   findRedeemable,
@@ -138,6 +139,68 @@ organizationsRouter.post('/active', authenticate, asyncHandler(async (req: AuthR
  * the next column added to `Response` would otherwise reach this screen without
  * anybody deciding it should.
  */
+/**
+ * GET /api/organizations/export — everything this organization holds, as one
+ * streamed JSON document (features/0030, finding S8).
+ *
+ * The portability half of S8. Erasure shipped first ([`features/0029`]), which
+ * left the product in the state this closes: the only way out was to lose
+ * everything.
+ *
+ * **Owner or admin, and that is not a confidentiality boundary.** Be clear about
+ * what the role check buys, because the next reader will assume more: a plain
+ * member can already assemble the same data by hand, one form at a time, through
+ * `GET /api/forms/:id/responses/export` — whose CSV includes the IP column and
+ * is behind `callerCanReachForm`. What this adds is that the *whole-tenant
+ * artifact* is a deliberate act by somebody accountable for it. The inconsistency
+ * is filed rather than fixed here.
+ *
+ * **The active organization only.** `requireRole` resolves it the way every
+ * other read does. Merging every organization the caller belongs to is the bug
+ * features/0023 fixed, not a convenience: it would put two tenants' respondent
+ * data in one file.
+ *
+ * ## The status code is committed at the first byte
+ *
+ * This streams, so by the time anything can go wrong the client already has a
+ * `200`. Two consequences are handled here and neither is optional.
+ *
+ * The **headers are set before the writer runs**, but everything that can fail
+ * cheaply — membership, role, the organization row — has already run by then,
+ * so the ordinary rejections (`404`, `403`, `429`) are still real status codes.
+ *
+ * A failure **after** the first byte cannot be reported as an error, so the
+ * response is destroyed rather than ended: a client sees a broken connection
+ * instead of a file that ends politely half way through. The document's own
+ * `"complete": true` marker is the durable half of that answer — a saved file
+ * without it is short, however it arrived.
+ */
+organizationsRouter.get('/export', authenticate, exportRateLimit, asyncHandler(async (req: AuthRequest, res, next) => {
+  const { organizationId } = await requireRole(req, ['owner', 'admin'])
+
+  const organization = await prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: { slug: true }
+  })
+
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename(organization.slug)}"`)
+  // The length is unknown until the last page is written, so say so rather than
+  // letting a proxy buffer the whole document to compute one.
+  res.setHeader('Cache-Control', 'no-store')
+
+  try {
+    await writeOrganizationExport(res, { organizationId, userId: req.userId! })
+    res.end()
+  } catch (error) {
+    req.log?.error({ err: error, organizationId }, 'Export failed after the response had started')
+    // Not `next(error)`: the error handler would try to send JSON into a
+    // response that is already a partly-written file. Destroying the socket is
+    // the only honest signal left.
+    res.destroy()
+  }
+}))
+
 const RESPONSES_DEFAULT_LIMIT = 20
 const RESPONSES_MAX_LIMIT = 100
 

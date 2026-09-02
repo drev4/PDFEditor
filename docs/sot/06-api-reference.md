@@ -101,6 +101,22 @@ Both cookie-authenticated routes carry the CSRF guard and answer `403 {error: "C
 
 There is **no grace period**. The deletion is immediate and complete — see [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) for why a thirty-day marker would be a claim rather than a feature in a codebase with no scheduler.
 
+## Organization export — `routes/organizations.ts`
+
+| Method | Path | Auth | Response |
+|---|---|---|---|
+| GET | `/organizations/export` | Bearer, **owner or admin** | `200` a streamed `application/json` attachment · `403` wrong role · `404` not a member · `429` when rate limited |
+
+Everything the **active** organization holds, as one document ([`features/0030`](../../features/0030-account-data-export.md)): the organization, the caller's own user record, members, forms with **all** their fields including archived ones, every response with its answers, `ipAddress` and `userAgent`, and the usage counters. `services/organization-export.ts` is the only module that knows the format, and `version` (currently `1`) is bumped when a reader would notice a change.
+
+**The last key in the document is `"complete": true`, and that is load-bearing.** The response streams, so the status is committed at the first byte: a database failure on page forty cannot become a `500` and would otherwise hand the customer a file that is truncated — or worse, one that still parses and is quietly missing half their responses. The marker is the reader's proof that the writer reached the end. After the first byte the route destroys the socket rather than calling `next(error)`, so a live client sees a broken connection; a saved file is judged by the marker.
+
+**The role check is not a confidentiality boundary and must not be described as one.** A plain member can already assemble the same data by hand through `GET /forms/:id/responses/export`, whose CSV includes the IP column and is open to any member. What owner-or-admin buys is that the whole-tenant artifact is a deliberate act by somebody accountable for it. The inconsistency is filed in [`docs/BACKLOG.md`](../BACKLOG.md).
+
+**Active organization only**, resolved by `requireRole` like every other read. Merging every organization the caller belongs to would put a second tenant's respondent data in this customer's file ([`features/0023`](../../features/0023-active-organization.md)).
+
+Rate limited **per user, not per address** (`RATE_LIMIT_EXPORT_MAX`, default 5 per hour): the route is authenticated, so the address is the wrong identity to spend, and two colleagues on one office connection must not share a budget. The uploaded PDFs are **not** in the file — each form carries its canonical `pdfUrl` — which is filed.
+
 ## Billing — `routes/billing.ts`
 
 | Method | Path | Auth | Body | Response |

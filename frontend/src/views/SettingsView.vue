@@ -215,6 +215,13 @@
       </NotBuiltYet>
 
       <!--
+        Directly above the Danger zone, and that ordering is the point: erasure
+        shipped before portability did, and the way out of the product belongs
+        immediately above the way to destroy it (features/0030).
+      -->
+      <DataExport />
+
+      <!--
         Last on the tab, deliberately. It is the one control here that destroys
         data, so it sits below everything a person came to Settings to read
         rather than beside it (features/0029).
@@ -238,6 +245,7 @@ import NotBuiltYet from '@/components/ui/NotBuiltYet.vue'
 import UsageMeter from '@/components/plan/UsageMeter.vue'
 import ApiKeysPanel from '@/components/settings/ApiKeysPanel.vue'
 import WebhooksPanel from '@/components/settings/WebhooksPanel.vue'
+import DataExport from '@/components/settings/DataExport.vue'
 import DangerZone from '@/components/settings/DangerZone.vue'
 import { useAuthStore } from '@/stores/auth.store'
 import { usePlanStore } from '@/stores/plan.store'

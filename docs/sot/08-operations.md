@@ -41,6 +41,8 @@ Both workspaces ship a committed `.env.example`; the real `.env` files are gitig
 | `REFRESH_TOKEN_TTL_DAYS` | no | `7`, min `1` | How long a user stays signed in. Revocable, unlike the access token |
 | `COOKIE_SECURE` | no | `true` | `Secure` on the refresh cookie. Browsers treat `localhost` as trustworthy, so the safe default also works in development. Set `false` only for a non-localhost deployment on plain HTTP, which should not exist |
 | `RATE_LIMIT_REFRESH_MAX` | no | `60` | Session refreshes per window per IP |
+| `RATE_LIMIT_EXPORT_MAX` | no | `5` | Organization exports per window, counted **per user** rather than per address — the route is authenticated, so the address is the wrong identity to spend |
+| `RATE_LIMIT_EXPORT_WINDOW_MS` | no | `3600000` (1 hour) | |
 | `RATE_LIMIT_REFRESH_WINDOW_MS` | no | `900000` (15 min) | |
 | `PORT` | no | `3000` | |
 | `LOG_LEVEL` | no | `info` (`silent` under `NODE_ENV=test`) | `pino`'s level ([`features/0025`](../../features/0025-structured-logging.md)). `NODE_ENV=development` also switches the output to human-readable; anything else is one JSON object per line — see [Observability](#observability) |
@@ -273,6 +275,23 @@ Three things about it are worth knowing before changing a variable or a rule.
 **Everything else still warns and falls back**, and that contract has not changed. `config/env.ts` is the narrow version of this for tunables: an unparseable `EMBED_WORKER_CONCURRENCY` is logged and the safe default is used, never a permissive one, because a typo in a tunable must not take the service down. `validate-env.ts` lists every one of those in `KNOWN_VARIABLES` with a one-line reason for leaving it unchecked, and `backend/tests/config-coverage.spec.ts` fails when a variable is read anywhere in `src/` and named nowhere in that list — the same lint-rule-shaped spec as `tests/async-handler-coverage.spec.ts`, for the same reason: `npm run lint` lints nothing.
 
 The worker's own `REDIS_URL` refusal stays where it was, in `worker.ts`, and the validator deliberately does not duplicate it. Two different messages for one condition is worse than one.
+
+## Telling a complete export from a truncated one
+
+`GET /api/organizations/export` streams, so its status code is committed at the first byte ([`features/0030`](../../features/0030-account-data-export.md)). A failure part way through cannot be reported as an error — the route destroys the socket, and what the customer is left holding is a partial file.
+
+**The check is the last key in the document:**
+
+```bash
+tail -c 40 vuepdf-export-acme-2026-09-02.json
+#   ],
+#   "complete": true
+# }
+```
+
+A file without `"complete": true` is short, however it arrived, and the answer is always to repeat the export — there is no way to resume one. A file *with* it reached the end of the writer, which is the only guarantee the format offers.
+
+Two things this does not tell you. It says nothing about whether the export was rate limited (that is a `429` before any bytes, so there is no file at all), and it says nothing about a proxy truncating a response after the API finished writing — which the marker would also catch, and which is the reason it is checked on the saved file rather than trusted from the API's own logs.
 
 ## Orphaned PDFs
 

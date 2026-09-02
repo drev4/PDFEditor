@@ -159,6 +159,8 @@ export const KNOWN_VARIABLES: readonly string[] = [
   'RATE_LIMIT_API_MAX',                // envInt tunable
   'RATE_LIMIT_RESPONSES_WINDOW_MS',    // envInt tunable
   'RATE_LIMIT_RESPONSES_MAX',          // envInt tunable
+  'RATE_LIMIT_EXPORT_WINDOW_MS',       // envInt tunable
+  'RATE_LIMIT_EXPORT_MAX',             // envInt tunable
   'TEST_REDIS_URL',                    // read by a spec, never by src
   'TEST_DATABASE_URL'                  // read by the integration harness, never by src
 ]
