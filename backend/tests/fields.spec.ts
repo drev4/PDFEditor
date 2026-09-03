@@ -4,6 +4,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { mockCallerMembership } from './mock-caller.js'
+import { passThroughTransactionOnly } from './mock-transaction.js'
 import { PrismaClient } from '@prisma/client'
 
 // Mock Prisma
@@ -110,21 +111,49 @@ describe('Fields Routes', () => {
     })
   })
 
+  // Mocked level: the two status codes and the shape of the answer. **Whether
+  // anything is destroyed is a database question** — `Answer.field` is
+  // `onDelete: Cascade`, and a mock cannot express a cascade or the
+  // `SELECT … FOR UPDATE` that decides the race. Both are asserted in
+  // tests/integration/field-delete-archives.spec.ts against a real PostgreSQL
+  // (features/0044).
   describe('DELETE /api/forms/:formId/fields/:fieldId', () => {
-    it('should delete a field', async () => {
+    beforeEach(() => {
+      passThroughTransactionOnly(prismaMock)
       prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
       prismaMock.field.findFirst.mockResolvedValue({
         id: 'field-1',
         formId: 'form-1',
         ...mockFieldData
       } as any)
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 'field-1' }] as any)
+    })
+
+    it('deletes a field that holds no answers', async () => {
+      prismaMock.answer.count.mockResolvedValue(0)
       prismaMock.field.delete.mockResolvedValue({} as any)
 
       const res = await request(app)
         .delete('/api/forms/form-1/fields/field-1')
 
       expect(res.status).toBe(200)
-      expect(res.body.message).toBe('Field deleted')
+      expect(res.body).toMatchObject({ message: 'Field deleted', archived: false, answerCount: 0 })
+      expect(prismaMock.field.delete).toHaveBeenCalledWith({ where: { id: 'field-1' } })
+    })
+
+    it('archives a field that holds answers, and reports how many', async () => {
+      prismaMock.answer.count.mockResolvedValue(4)
+      prismaMock.field.update.mockResolvedValue({} as any)
+
+      const res = await request(app)
+        .delete('/api/forms/form-1/fields/field-1')
+
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ message: 'Field archived', archived: true, answerCount: 4 })
+      expect(prismaMock.field.delete).not.toHaveBeenCalled()
+      expect(prismaMock.field.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'field-1' } })
+      )
     })
   })
 

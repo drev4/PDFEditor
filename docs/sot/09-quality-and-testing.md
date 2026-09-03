@@ -11,9 +11,9 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
-| Frontend unit / component | 56 specs, 479 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 30 specs, 383 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 28 specs, 260 tests — 3 specs (10 tests) skip themselves without `TEST_REDIS_URL`, see below | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| Frontend unit / component | 56 specs, 481 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
+| Backend route (mocked Prisma) | 32 specs, 397 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| **Backend database-backed** | 30 specs, 274 tests — 3 specs (10 tests) skip themselves without `TEST_REDIS_URL`, see below | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
 | End to end | 8 specs, 53 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **Two specs guard a shape rather than a behaviour**, and both are the closest thing this repository has to a lint rule while `npm run lint` lints nothing. `backend/tests/async-handler-coverage.spec.ts` reads the route sources and fails when an `async` handler is not wrapped in `asyncHandler` ([`features/0026`](../../features/0026-async-handler.md)) — because a wrapper somebody has to remember fails exactly like the `try`/`catch` it replaced. It carries a **negative control**: a fixture the scan must flag, asserted in the same file, so a regex that quietly stopped matching cannot report a clean codebase for ever. That control earned itself immediately — the first draft matched the literal `asyncHandler(` and missed `asyncHandler<ApiKeyRequest>(`.

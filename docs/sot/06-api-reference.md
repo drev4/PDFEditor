@@ -199,7 +199,7 @@ Mounted under `/api/forms`, so every path here is nested under a form. **There i
 |---|---|---|---|
 | POST | `/forms/:formId/fields` | Bearer + form ownership | Creates one field. Body validated by `createFieldSchema`. The client cannot supply an `id`. `400` if `validation.pattern` is not a usable regex — see below |
 | PUT | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | Partial body (`createFieldSchema.partial()`) |
-| DELETE | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | ⚠️ Cascades: deletes every `Answer` given to this field in past responses. The bulk save does **not** do this |
+| DELETE | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | Removes one field, by the same rule as the bulk save since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md): **archived** (`deletedAt`) when it holds answers, deleted when it holds none. Answers are never destroyed. Answers `{ message, archived, answerCount }` — the caller cannot know which happened beforehand |
 | POST | `/forms/:formId/fields/bulk` | Bearer + form ownership | Body `{fields: BulkFieldData[]}`. A **diff**, not a replacement — see below. Re-embeds the AcroForm in the PDF on disk from the resulting live set |
 
 `PUT` and `DELETE` resolve the field through `verifyFieldOwnership`, which only matches live fields: an archived field is `404` to both.

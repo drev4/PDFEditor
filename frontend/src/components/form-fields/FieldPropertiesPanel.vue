@@ -164,12 +164,56 @@
 
       <!-- Danger Zone -->
       <div class="pt-10">
-        <button @click="deleteField" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-semibold text-meta border border-danger group">
+        <button @click="deleteField" data-testid="remove-field" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-semibold text-meta border border-danger group">
           <i class="pi pi-trash group-hover:scale-110 transition-transform"></i>
-          ARCHIVE FIELD
+          REMOVE FIELD
         </button>
       </div>
     </div>
+
+  <!--
+    Removing a field is the one control here that can touch collected data, so
+    it asks (features/0044). It deliberately does **not** show a count: the
+    number would have to be fetched before this opens, and the form is published
+    - a submission can land while the author reads. The server counts inside the
+    transaction that removes, and the toast afterwards reports what it found.
+  -->
+  <Dialog
+    :visible="showRemoveConfirm"
+    modal
+    :closable="false"
+    :draggable="false"
+    :style="{ width: '420px' }"
+    :pt="{ header: { class: 'hidden' } }"
+    @update:visible="showRemoveConfirm = false"
+  >
+    <div class="pt-1" data-testid="remove-field-confirm">
+      <div class="flex items-center justify-center w-8 h-8 rounded-input bg-danger-soft text-danger mb-3.5">
+        <i class="pi pi-trash text-[15px]" />
+      </div>
+
+      <h2 class="text-section">Remove &ldquo;{{ pendingFieldName }}&rdquo;?</h2>
+
+      <p class="mt-2 text-body text-muted">
+        It stops appearing on the form straight away. Responses already collected
+        through this field are kept: the field is archived rather than deleted, so
+        its column stays in the responses table and in the CSV.
+      </p>
+    </div>
+
+    <template #footer>
+      <div class="flex items-center justify-end gap-2">
+        <Button label="Cancel" text severity="secondary" @click="showRemoveConfirm = false" />
+        <Button
+          label="Remove field"
+          severity="danger"
+          data-testid="remove-field-confirmed"
+          :loading="removing"
+          @click="confirmRemoveField"
+        />
+      </div>
+    </template>
+  </Dialog>
   </div>
 
   <!-- Empty State / Selection Hint -->
@@ -205,6 +249,7 @@
       </div>
     </div>
   </div>
+
 </template>
 
 <script setup lang="ts">
@@ -212,6 +257,8 @@ import { ref, watch, computed } from 'vue'
 import { usePatternAuthoring } from '@/composables/usePatternAuthoring'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
 import { useToast } from 'primevue/usetoast'
+import Dialog from 'primevue/dialog'
+import Button from 'primevue/button'
 
 const formFieldsStore = useFormFieldsStore()
 const toast = useToast()
@@ -462,33 +509,55 @@ const removeOption = (index: number) => {
   updateField()
 }
 
-const deleteField = async () => {
-  if (!formFieldsStore.selectedField) return
+const showRemoveConfirm = ref(false)
+const removing = ref(false)
 
-  // Confirm deletion
-  const fieldName = formFieldsStore.selectedField.label || formFieldsStore.selectedField.name
-  if (!confirm(`¿Eliminar el campo "${fieldName}"?`)) {
-    return
-  }
+const pendingFieldName = computed(() => {
+  const field = formFieldsStore.selectedField
+  return field ? (field.label || field.name) : ''
+})
+
+const deleteField = () => {
+  if (!formFieldsStore.selectedField) return
+  showRemoveConfirm.value = true
+}
+
+const confirmRemoveField = async () => {
+  const field = formFieldsStore.selectedField
+  if (!field) return
+
+  const fieldName = field.label || field.name
+  removing.value = true
 
   try {
-    await formFieldsStore.deleteFieldFromServer(formFieldsStore.selectedField.id)
+    // Which of the two happened is the server's answer, not a guess: a field
+    // holding responses is archived and one holding none is deleted
+    // (features/0044). A field that was never saved has no server row at all,
+    // and the store returns nothing for it.
+    const result = await formFieldsStore.deleteFieldFromServer(field.id)
+    showRemoveConfirm.value = false
+
+    const kept = result?.answerCount ?? 0
 
     toast.add({
       severity: 'success',
-      summary: 'Campo eliminado',
-      detail: `El campo "${fieldName}" ha sido eliminado`,
-      life: 3000
+      summary: result?.archived ? 'Field archived' : 'Field removed',
+      detail: result?.archived
+        ? `“${fieldName}” no longer appears on the form. ${kept} ${kept === 1 ? 'response is' : 'responses are'} kept.`
+        : `“${fieldName}” was removed. It had collected no responses.`,
+      life: 4000
     })
   } catch (error) {
-    console.error('Failed to delete field:', error)
+    console.error('Failed to remove field:', error)
 
     toast.add({
       severity: 'error',
-      summary: 'Error al eliminar',
-      detail: 'No se pudo eliminar el campo. Intenta de nuevo.',
-      life: 3000
+      summary: 'Could not remove the field',
+      detail: 'Nothing was changed. Please try again.',
+      life: 4000
     })
+  } finally {
+    removing.value = false
   }
 }
 </script>

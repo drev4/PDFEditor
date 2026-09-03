@@ -24,6 +24,15 @@ export interface CreateFieldData {
 
 export interface UpdateFieldData extends Partial<CreateFieldData> {}
 
+/** What `DELETE /forms/:formId/fields/:fieldId` reports (features/0044). */
+export interface DeleteFieldResult {
+  message: string
+  /** `true` when the field held answers and was archived instead of deleted. */
+  archived: boolean
+  /** How many answers it held, and therefore how many were kept. */
+  answerCount: number
+}
+
 /**
  * The bulk save is the only endpoint that accepts an `id`. Sending back the id
  * the server gave us is what makes a save a diff instead of a delete-and-
@@ -81,8 +90,17 @@ export const fieldsService = {
     return response.field
   },
 
-  async delete(formId: string, fieldId: string): Promise<void> {
-    await api.delete(`/forms/${formId}/fields/${fieldId}`)
+  /**
+   * Removing one field.
+   *
+   * The result is returned rather than discarded because only the server knows
+   * which of the two things happened: a field holding answers is archived and a
+   * field holding none is deleted (features/0044), and the caller cannot know
+   * the count beforehand — the form is published and can take a submission
+   * while the author reads the confirmation.
+   */
+  async delete(formId: string, fieldId: string): Promise<DeleteFieldResult> {
+    return api.delete<DeleteFieldResult>(`/forms/${formId}/fields/${fieldId}`)
   },
 
   async bulkSave(formId: string, fields: BulkFieldData[]): Promise<BulkSaveResult> {

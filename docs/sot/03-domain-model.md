@@ -116,7 +116,7 @@ Three properties of it are easy to get wrong.
 | `RefreshToken.user` → `User` | `Cascade` | Deleting a user deletes their sessions. Correct and uncontroversial: this table holds no customer-produced data, only credentials that are worthless once the account is gone. |
 | `Subscription.organization` → `Organization` | `Cascade` | Deleting an organization deletes its billing record. **This does not cancel anything at Stripe** — Stripe is a separate system and no cascade here can reach it. That is still true of the cascade, so [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) does the cancelling **above** it: `cancelSubscriptionsForOrganizations` in `services/stripe.ts` runs *before* the transaction, and a failure there abandons the deletion with a `502`. The ordering is the point — cancelling after the delete would leave a live subscription that no row in this database can name. Deleting an `organizations` row directly in the database still bills for ever. |
 | `StripeEvent` → *(nothing)* | — | **Has no relation at all, deliberately.** Tying it to an organization would mean deleting an organization deletes the record that its events were already processed, and a redelivery after that would be reprocessed as new. |
-| **`Answer.field` → `Field`** | **`Cascade`** | Deleting a field destroys every answer ever given to it, across all past responses. Only two write paths can fire it, and one of them refuses to — see below. |
+| **`Answer.field` → `Field`** | **`Cascade`** | Deleting a field destroys every answer ever given to it, across all past responses. Two write paths can fire it and **neither does any more** — since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md) both archive a field that holds answers, and both really delete one that holds none. See below. |
 
 ### What no cascade can reach: the stored document
 
@@ -130,12 +130,20 @@ A cascade deletes rows, and an uploaded PDF is not a row. Until [`features/0029`
 
 **Rows first, bytes second.** Removal runs after the deleting transaction commits, never inside it. A rollback after the bytes are gone destroys a living form's document and is unrecoverable; a commit followed by a failed removal leaves an orphan, which is logged and fixable. Only one of the two failures can be undone, so the code is arranged so that it is the one that can happen.
 
-That last row is not wrong on its own; it is only ever as safe as the write paths that can trigger it. There are exactly two:
+That last row is not wrong on its own; it is only ever as safe as the write paths that can trigger it. There are exactly two, and **they now agree**:
 
 | Write path | Behaviour | Answers |
 |---|---|---|
 | `POST /forms/:formId/fields/bulk` — the editor's save | A diff keyed on `Field.id`. A removed field that has answers is **soft-deleted**, never deleted. | Never destroyed |
-| `DELETE /forms/:formId/fields/:fieldId` — the individual delete | Hard `delete`, cascading to answers | **Destroyed.** Deliberate for now: an explicit act by the user aimed at that field, not a side effect of saving. Tracked in [`docs/BACKLOG.md`](../BACKLOG.md) to move to soft delete too. |
+| `DELETE /forms/:formId/fields/:fieldId` — the individual delete | Same rule since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md): archived when it holds answers, deleted when it holds none. | Never destroyed |
+
+Three things about that agreement are worth keeping, because each of them is a way to get it wrong.
+
+**The lock comes before the count, in both.** A count taken before `SELECT … FOR UPDATE` restores the race in full: inserting an `Answer` takes `FOR KEY SHARE` on the field it references, so a submission arriving between the count and the delete is accepted with a `201` and has its answer cascaded away a moment later. The integration test for the individual path fires both requests through one `Promise.all`, and **it was run against the unfixed handler and seen to reproduce exactly that** — a `201` with no answer behind it.
+
+**Archiving unconditionally would be the wrong fix.** A field holding no answers is really deleted, or every field placed and discarded while designing a form leaves a permanent row and the responses table grows columns nobody ever filled.
+
+**The old behaviour was defended by an argument about the user, and the interface did not support it.** [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) left the cascade in place as "an explicit act by the user rather than a side effect of saving", and said to revisit it once soft delete existed. By then the editor's whole confirmation was a `window.confirm` that named the field and never mentioned responses, so nothing about the act was informed. The dialog that replaced it says what happens to collected responses, and the toast afterwards reports what the server actually did — which is the only place the count can honestly come from, since the form is published and can take a submission while the author reads.
 
 ### The `deletedAt` lifecycle
 

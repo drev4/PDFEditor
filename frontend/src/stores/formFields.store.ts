@@ -295,9 +295,14 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       return
     }
 
+    // The server's answer is returned rather than swallowed: it is the only
+    // thing that knows whether the field was archived and how many responses
+    // that kept (features/0044). The field leaves the local list either way —
+    // an archived field is not visible in the editor.
     return useAsyncAction({ loading, error }, async () => {
-      await fieldsService.delete(formId, fieldId)
+      const result = await fieldsService.delete(formId, fieldId)
       deleteField(fieldId)
+      return result
     }, { fallbackMessage: 'Failed to delete field' })
   }
 

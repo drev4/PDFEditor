@@ -19,7 +19,7 @@ import { flushPromises } from '@/test/helpers/test-utils'
  * every other unsaved edit on the form with it.
  */
 vi.mock('@/services/fields', () => ({
-  fieldsService: { checkPattern: vi.fn() }
+  fieldsService: { checkPattern: vi.fn(), delete: vi.fn() }
 }))
 vi.mock('@/services/pattern-check', () => ({
   describePattern: vi.fn()
@@ -50,7 +50,23 @@ function selectField(type: 'text' | 'checkbox' = 'text') {
 
 function mountPanel() {
   return mount(FieldPropertiesPanel, {
-    global: { stubs: { Message: { template: '<div><slot /></div>' } } }
+    global: {
+      stubs: {
+        Message: { template: '<div><slot /></div>' },
+        // PrimeVue's Dialog and Button read `$primevue.config`, which only
+        // exists once the plugin is installed app-wide. Stubbing them keeps
+        // this spec about the panel: the dialog renders its slots in place, so
+        // what is asserted is what the author can click.
+        Dialog: {
+          props: ['visible'],
+          template: '<div v-if="visible"><slot /><slot name="footer" /></div>'
+        },
+        Button: {
+          props: ['label'],
+          template: `<button type="button" @click="$emit('click')">{{ label }}</button>`
+        }
+      }
+    }
   })
 }
 
@@ -209,4 +225,55 @@ describe('FieldPropertiesPanel — pattern', () => {
       pattern: '^[0-9]+$'
     })
   })
+
+/**
+ * Removing a field (features/0044).
+ *
+ * The panel used to call `window.confirm`, which cannot say anything about the
+ * responses the field holds — and jsdom's `confirm` returns undefined, so the
+ * old flow could not be tested at this level at all. What matters here is that
+ * the click **asks** rather than acting, and that what the author is told
+ * afterwards comes from the server rather than from a guess in the browser.
+ */
+describe('removing a field', () => {
+  function removeButton(wrapper: ReturnType<typeof mountPanel>) {
+    return wrapper.find('[data-testid="remove-field"]')
+  }
+
+  it('asks before touching anything', async () => {
+    selectField('text')
+    const wrapper = mountPanel()
+
+    await removeButton(wrapper).trigger('click')
+
+    expect(fieldsService.delete).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="remove-field-confirm"]').exists()).toBe(true)
+  })
+
+  it('removes the field once confirmed, and keeps the store in step', async () => {
+    const store = selectField('text')
+    store.setCurrentForm('form-1')
+    // A field the server knows about: an id starting with `field-` is one the
+    // editor invented locally, and the store deletes those without a request.
+    const serverFieldId = '550e8400-e29b-41d4-a716-446655440000'
+    store.fields[0]!.id = serverFieldId
+    store.selectedFieldId = serverFieldId
+    vi.mocked(fieldsService.delete).mockResolvedValue({
+      message: 'Field archived',
+      archived: true,
+      answerCount: 2
+    })
+
+    const wrapper = mountPanel()
+    await removeButton(wrapper).trigger('click')
+
+    const confirmButton = wrapper.find('[data-testid="remove-field-confirmed"]')
+    expect(confirmButton.exists()).toBe(true)
+    await confirmButton.trigger('click')
+    await flushPromises()
+
+    expect(fieldsService.delete).toHaveBeenCalledWith('form-1', serverFieldId)
+    expect(store.fields).toHaveLength(0)
+  })
+})
 })
