@@ -19,7 +19,7 @@
 # compiled application code and needs `pg_dump`, so it builds the backend and
 # installs the PostgreSQL client — neither of which belongs in an image whose
 # job is to apply a migration.
-FROM node:22-bookworm
+FROM node:26-bookworm
 
 WORKDIR /app
 
