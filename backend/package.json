@@ -23,6 +23,7 @@
     "migrate:dry-run": "npm run build && node dist/scripts/migrate-existing-forms.js --dry-run",
     "migrate:run": "npm run build && node dist/scripts/migrate-existing-forms.js",
     "storage:migrate": "npm run build && node dist/scripts/migrate-pdfs-to-storage.js",
+    "backup": "npm run build && node dist/scripts/backup-run.js",
     "backup:db": "npm run build && node dist/scripts/backup-db.js",
     "backup:objects": "npm run build && node dist/scripts/backup-objects.js",
     "restore:verify": "npm run build && node dist/scripts/restore-verify.js"
