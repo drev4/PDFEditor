@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { soleManifest, NO_BACKUP_DIR, main } from '../src/scripts/backup-run'
+import { soleManifest, runsToPrune, NO_BACKUP_DIR, main } from '../src/scripts/backup-run'
 
 /**
  * The backup as one scheduled command (features/0042).
@@ -99,5 +99,54 @@ describe('the manifest of a run is unambiguous by construction', () => {
     fs.writeFileSync(path.join(dir, 'b.dump.manifest.json'), '{}')
 
     expect(soleManifest(dir)).toBeNull()
+  })
+})
+
+describe('retention deletes the oldest runs and nothing else', () => {
+  const runs = [
+    '2026-09-01T03-00-00-000Z',
+    '2026-09-02T03-00-00-000Z',
+    '2026-09-03T03-00-00-000Z',
+    '2026-09-04T03-00-00-000Z'
+  ]
+
+  it('keeps the newest and names the rest', () => {
+    // The directory names are the ISO stamps this script writes, so sorting
+    // them lexicographically *is* sorting them chronologically. No date parsing.
+    expect(runsToPrune(runs, 2)).toEqual([
+      '2026-09-02T03-00-00-000Z',
+      '2026-09-01T03-00-00-000Z'
+    ])
+  })
+
+  it('prunes nothing when there are fewer runs than the limit', () => {
+    expect(runsToPrune(runs, 10)).toEqual([])
+  })
+
+  /**
+   * **The assertion that matters most in a function that deletes things.**
+   * Anything the script did not create is left alone: a stray file, a lost
+   * `+found`, an operator's own copy. Recognising the name is the permission to
+   * remove it.
+   */
+  it('ignores every name it did not create', () => {
+    const strangers = ['lost+found', 'README.md', 'manual-copy', '.snapshot', '2026-09-05']
+
+    expect(runsToPrune([...strangers, ...runs], 1)).toEqual([
+      '2026-09-03T03-00-00-000Z',
+      '2026-09-02T03-00-00-000Z',
+      '2026-09-01T03-00-00-000Z'
+    ])
+  })
+
+  /**
+   * Pruning to zero would delete the backup just taken. A variable typed as `0`
+   * — or as anything that is not a whole number above zero — must not be able
+   * to ask for that.
+   */
+  it('refuses to prune everything, however the limit is written', () => {
+    for (const keep of [0, -1, 1.5, Number.NaN]) {
+      expect(runsToPrune(runs, keep)).toEqual([])
+    }
   })
 })

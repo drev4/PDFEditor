@@ -82,7 +82,9 @@ It takes the dump, finds the manifest that dump produced, and copies the documen
 
 Uploading the trio to a separate backup bucket was considered and **deliberately not built**. The argument against remains the one this runbook has always made: a copy living with the provider that holds the database is not an off-site copy, and an automatic upload would make that box look ticked. The accepted cost is concrete and worth naming, because it is paid at the worst moment: **getting files out of a platform volume is awkward**, so both the off-site copy and running `restore:verify` against a production backup begin with extracting the directory by hand. If that friction ever stops the drill from happening, revisit this — a drill that does not run is not a control.
 
-**Retention is your decision and nothing prunes.** One directory per run, so deleting the oldest is a directory removal. Decide the number and write it down here.
+**Retention is opt-in.** `BACKUP_KEEP=N` keeps the N most recent runs and deletes the rest; unset keeps everything, which is what a tool that deletes backups should do by default. Decide the number and write it down here: <strong>still undecided</strong>.
+
+Three properties worth knowing, because they are what makes it safe to hand a deletion to a cron job. It prunes **only after a successful run**, so a failing backup never deletes good ones to make room for itself. It touches **only directories it recognises** as its own run stamps — a stray file or your own copy in the same volume is left alone. And a pruning failure is logged but does **not** fail the job: the backup is already taken, and a full volume makes the *next* run fail, which is the signal that deserves the alert.
 
 Turn on the platform's own PostgreSQL snapshots and the bucket's versioning. They are a better answer than these scripts for the common cases — one deleted object, a mistake ten minutes ago — because they are continuous and need no host to run on.
 

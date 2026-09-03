@@ -69,6 +69,31 @@ export function soleManifest(dir: string): string | null {
 }
 
 /**
+ * Which run directories to delete to leave `keep` of them, newest first.
+ *
+ * The names are the ISO timestamps this script writes, so lexicographic order
+ * *is* chronological order and no date parsing is needed. Anything that is not
+ * one of our directories is ignored rather than deleted: this function removes
+ * things, so it must never act on a name it does not recognise.
+ *
+ * `keep < 1` returns nothing. Pruning to zero would delete the backup that has
+ * just been taken, and a variable typed as `0` should not be able to ask for
+ * that.
+ */
+export function runsToPrune(names: string[], keep: number): string[] {
+  if (!Number.isInteger(keep) || keep < 1) return []
+
+  return names
+    .filter((name) => RUN_DIRECTORY.test(name))
+    .sort()
+    .reverse()
+    .slice(keep)
+}
+
+/** The shape this script gives a run directory: an ISO stamp with `:` and `.` flattened. */
+const RUN_DIRECTORY = /^\d{4}-\d{2}-\d{2}T[\d-]+Z$/
+
+/**
  * What a missing `BACKUP_DIR` says, as a constant so a test can assert that it
  * explains the ephemeral-container trap rather than merely naming the variable.
  * A message that only says "not set" teaches nobody why the default was removed.
@@ -126,6 +151,61 @@ export async function main() {
   }
 
   console.log(`\n✅ Backup complete: ${outDir}`)
+
+  prune(root)
+}
+
+/**
+ * Deletes the oldest run directories, leaving `BACKUP_KEEP` of them.
+ *
+ * **Opt-in.** Unset keeps everything, which is what this did before and is the
+ * right default for something that deletes backups: a retention policy is the
+ * operator's decision and must not arrive as a default nobody chose. What this
+ * removes is the *chore*, not the decision — one directory per run means
+ * pruning was always "delete the oldest directory", and a chore nobody
+ * automated is a volume that fills up.
+ *
+ * **Called only after a successful run, and that ordering is the point.**
+ * Pruning before or during would delete good backups to make room for one that
+ * may be about to fail, which is the opposite of what a retention policy is
+ * for.
+ *
+ * **A failure here does not fail the job.** The backup is already taken and
+ * verified; reporting non-zero would fire the platform's failure alert for a run
+ * that succeeded, and an alert that cries wolf is an alert people mute. It is
+ * logged, and the eventual consequence is loud on its own: a volume that fills
+ * up makes the *next* backup fail, which is the signal that does deserve the
+ * alert.
+ */
+function prune(root: string): void {
+  const raw = process.env.BACKUP_KEEP?.trim()
+  if (!raw) return
+
+  const keep = Number(raw)
+  if (!Number.isInteger(keep) || keep < 1) {
+    console.error(
+      `BACKUP_KEEP="${raw}" is not a whole number of runs to keep, so nothing ` +
+      'was pruned. Leave it unset to keep every backup.'
+    )
+    return
+  }
+
+  try {
+    const doomed = runsToPrune(fs.readdirSync(root), keep)
+    if (doomed.length === 0) return
+
+    for (const name of doomed) {
+      fs.rmSync(path.join(root, name), { recursive: true, force: true })
+      console.log(`   pruned ${name}`)
+    }
+    console.log(`Kept the ${keep} most recent backups, removed ${doomed.length}.`)
+  } catch (error) {
+    console.error(
+      `⚠️  Could not prune old backups: ${error instanceof Error ? error.message : String(error)}\n` +
+      'The backup itself succeeded. If this keeps happening the volume will ' +
+      'fill up and the next backup will be the one that fails.'
+    )
+  }
 }
 
 // Only when run as a command. The spec imports this file to assert the guards
