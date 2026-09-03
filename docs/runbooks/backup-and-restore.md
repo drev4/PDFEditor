@@ -60,6 +60,24 @@ Both scripts exit non-zero on failure. A scheduler that only checks exit codes i
 
 ### Provider backups as well, not instead
 
+## Running it on a schedule
+
+**One command, and it needs three things the manual run did not.**
+
+```bash
+BACKUP_DIR=/backups npm run backup --workspace=backend
+```
+
+It takes the dump, finds the manifest that dump produced, and copies the documents that manifest lists — in that order, stopping if the first half fails. Each run gets its own timestamped directory, so the manifest inside it is unambiguous and pruning is `rm -rf` on a directory rather than a filename pattern.
+
+**`BACKUP_DIR` has no default, deliberately.** `backup:db` on its own writes to `./backups`, and a scheduled job normally runs in a container that is discarded when it exits — so that default produces a job which succeeds every night and keeps nothing. **A green job is worse than a missing one**, because it removes the pressure to fix it. Point it at a mounted volume.
+
+**Run it from the `backup` image, not the serving one.** `docker build -f Dockerfile.backend --target backup` produces the same build plus `postgresql-client-16` from PGDG. None of the other images has `pg_dump` at all, and the Debian package is 15, which will not read a 16 server. The image runs `pg_dump --version` at build time so a missing client fails then rather than at 03:00 on the first night.
+
+**Alerting is the platform's job and it is not optional.** Both halves exit non-zero on failure, into a void. Configure the scheduled job to notify on a non-zero exit; without that, a backup that stops working is discovered at the restore, which is the worst possible moment.
+
+**Retention is your decision and nothing prunes.** One directory per run, so deleting the oldest is a directory removal. Decide the number and write it down here.
+
 Turn on the platform's own PostgreSQL snapshots and the bucket's versioning. They are a better answer than these scripts for the common cases — one deleted object, a mistake ten minutes ago — because they are continuous and need no host to run on.
 
 They are not sufficient on their own, for two reasons. A managed snapshot **restores into that provider** and does not survive losing the account. And versioning protects against overwrite and deletion *inside* a bucket; it does nothing when the bucket, the account or the region is what is lost. The portable pair above is the off-site copy; keep at least one somewhere neither provider controls.
