@@ -42,7 +42,7 @@ ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
 
 RUN npm run build --workspace=frontend
 
-FROM nginx:1.30.4-alpine AS runtime
+FROM nginx:1.31.0-alpine AS runtime
 # Alpine maps `.js` but not `.mjs` by default. Extend the inherited global
 # MIME table instead of declaring a server-level `types` block, which would
 # discard the mappings for HTML, CSS, fonts and images and make browsers
