@@ -83,7 +83,15 @@ function announceOnce(message: string): void {
  */
 export function initErrorTracking(role: 'api' | 'worker'): void {
   const dsn = process.env.SENTRY_DSN?.trim()
-  if (!dsn) return
+  if (!dsn) {
+    // Said out loud rather than left as silence (features/0041). "Not
+    // configured", "configured but off" and "reporting" are three different
+    // states, and telling them apart from outside the process is impossible —
+    // which is how the SPA went a day reporting nothing while its variable sat
+    // correctly in the platform.
+    logger.info({ role }, 'error tracking: not configured (SENTRY_DSN is empty)')
+    return
+  }
 
   if (!isStrict(process.env)) {
     logger.info(
@@ -131,9 +139,49 @@ export function initErrorTracking(role: 'api' | 'worker'): void {
 
     Sentry.setTag('role', role)
     enabled = true
+    logger.info({ role, environment: process.env.NODE_ENV?.trim() || 'unknown' },
+      'error tracking: reporting')
+
+    verifyOnBoot(role)
   } catch (err) {
     // A tracker that cannot start must not stop the service it watches.
     logger.error({ err }, 'error tracking failed to initialise; continuing without it')
+  }
+}
+
+/**
+ * One deliberate event per process, to prove the whole path works.
+ *
+ * **Opt-in, and meant to be turned off again.** Emitting on every boot is the
+ * obvious version and it is wrong twice over: the platform restarts services on
+ * its own, Sentry charges per event, and a project full of boot messages is a
+ * project where nobody sees the real failure. So this is a switch you turn on,
+ * confirm both processes in Sentry, and turn off.
+ *
+ * It exists because the alternative is worse. The SPA's configuration can be
+ * checked from outside — the bundle either contains the DSN or it does not, and
+ * the CSP either carries the ingest origin or it does not. **The API and the
+ * worker offer no equivalent**, and the worker is the one that matters most:
+ * nothing is waiting on its responses, so an unhandled rejection there is the
+ * only signal it ever produces.
+ *
+ * Exposing the state on `/health/ready` was rejected. That endpoint is public by
+ * design and its contract is states and queue counts, never configuration.
+ */
+function verifyOnBoot(role: 'api' | 'worker'): void {
+  if (!enabled) return
+  if (process.env.SENTRY_VERIFY_ON_BOOT?.trim().toLowerCase() !== 'true') return
+
+  try {
+    Sentry.withScope(scope => {
+      scope.setTag('source', 'boot-verification')
+      scope.setLevel('info')
+      Sentry.captureMessage(`error tracking verification from ${role}`)
+    })
+    logger.info({ role },
+      'error tracking: sent a boot verification event. Unset SENTRY_VERIFY_ON_BOOT once you have seen it.')
+  } catch (err) {
+    logger.error({ err, role }, 'error tracking: boot verification could not be sent')
   }
 }
 

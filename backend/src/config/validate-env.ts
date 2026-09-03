@@ -138,6 +138,7 @@ export const KNOWN_VARIABLES: readonly string[] = [
   'LOG_LEVEL',                         // pino falls back to `info` on a name it does not know
   'JWT_ACCESS_TTL',                    // a bad span throws in `jsonwebtoken` on the first login, visibly
   'DEV_PLAN_KEY',                      // already ignored-and-logged outside development/test (services/plans.ts)
+  'SENTRY_VERIFY_ON_BOOT',             // one-shot switch; anything but 'true' is off, and it logs what it did (features/0041)
   'COOKIE_SECURE',                     // envBool: warns and falls back to the safe direction
   'ENABLE_HSTS',                       // envBool: warns and falls back to off
   'UPLOAD_URL_TTL_SECONDS',            // envInt tunable

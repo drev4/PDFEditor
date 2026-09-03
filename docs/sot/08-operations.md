@@ -468,6 +468,32 @@ Two failure modes worth knowing, because both are silent by nature and both were
 - **A malformed `SENTRY_DSN` does not make the SDK complain.** It disables itself quietly, so the process boots, serves, and reports nothing. That was observed, not assumed. `validate-env.ts` now refuses to boot on it, the same treatment `WEBHOOK_SIGNING_KEY` gets.
 - **The SPA's CSP is an allowlist**, so an ingest origin missing from `connect-src` means the browser refuses every event while the SDK reports success. The origin is therefore *derived from the DSN* in `frontend/src/services/sentry-dsn.ts` rather than configured separately, and a DSN that is not a URL **fails the build** rather than emitting a policy without it.
 
+## `VITE_SENTRY_DSN` is a build argument, not a runtime variable
+
+Setting it on the platform and restarting the SPA **does nothing**, and nothing says so. Vite bakes `VITE_*` into the bundle at build time, and a Docker build sees none of the service environment unless the value is declared as an `ARG` — which `Dockerfile.frontend` did not do for this variable until [`features/0041`](../../features/0041-sentry-reaches-the-spa.md). It was configured correctly in Railway on 2026-09-03 and the SPA reported nothing for a day.
+
+**Two signals check it from outside, and both must move.** Neither needs access to the platform:
+
+| Signal | Wrong | Right |
+|---|---|---|
+| Bundle hash in `app.docaiflow.com`s HTML | unchanged after setting the variable | different |
+| `grep` for `ingest.*.sentry.io` in that bundle | 0 | 1 or more |
+| `connect-src` in the CSP meta tag | `'self' <api> blob:` | the same plus `https://o….ingest.<region>.sentry.io` |
+
+The `connect-src` one is the decisive check: the origin is **derived from the DSN at build time**, so a CSP without it means the build never saw the value — and even if the SDK had started, the browser would block every report with nothing logged anywhere.
+
+A malformed value now fails the image build with a message. Absent is still valid and builds without error tracking, deliberately: no DSN means less visibility, not a broken deployment.
+
+### Proving it works without waiting for a failure
+
+Only 5xx are ever sent, so a correctly configured deployment is silent until something genuinely breaks. `SENTRY_VERIFY_ON_BOOT=true` makes each backend process send **one** event at boot, tagged with its role, and log that it did.
+
+**Turn it off again.** The platform restarts services on its own, Sentry charges per event, and a project full of boot messages is one where nobody sees the real failure. Set it, redeploy, confirm both `api` and `worker` appear, unset it.
+
+It exists because the SPA can be checked from outside and the backend cannot — and the worker is the one that matters most: nothing waits on its responses, so an unhandled rejection there is the only signal it ever produces. Exposing the state on `/health/ready` was rejected; that endpoint is public and its contract is states and queue counts, never configuration.
+
+Each process also logs which of three states it is in at boot — not configured, configured but off, or reporting. `Configured` and `reporting` are different, and the difference is what fails silently.
+
 ## Free is on beta limits, and they have to be reverted
 
 `PLANS.free` currently reads `maxPublishedForms: 10`, `maxResponsesPerMonth: 1000`, `seats: 5`. **The design canvas says 1 / 50 / 1**, and those are the numbers to restore ([`features/0040`](../../features/0040-beta-plan-limits.md)).
