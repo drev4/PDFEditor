@@ -29,7 +29,7 @@ Railway manages database credentials. Use reference variables exactly as shown i
 | Worker | `Dockerfile.backend` | `node dist/worker.js` | no | none |
 | Web | `Dockerfile.frontend` | image default | yes | `/healthz`, 30 s |
 | Migration | `Dockerfile.migrations` | image default | no, one-shot | none |
-| Backup | `Dockerfile.backend`, **target `backup`** | image default (`npm run backup`) | no, scheduled | none |
+| Backup | `Dockerfile.backup` | image default | no, scheduled | none |
 
 Set `RAILWAY_DOCKERFILE_PATH` per service. **Railway exposes service variables at Docker build time only when the Dockerfile declares an `ARG`**, and that sentence has already cost a day: `VITE_SENTRY_DSN` was set correctly on the web service and the SPA reported nothing, because `Dockerfile.frontend` declared no `ARG` for it (fixed in [`features/0041`](../../features/0041-sentry-reaches-the-spa.md)). The web service has **two** build variables, not one:
 
@@ -60,7 +60,9 @@ Run it manually before a release. Do not configure it as an always-on service, a
 
 ## The scheduled backup
 
-Its own service, for the same reason the migration job is: `Dockerfile.backend`'s `backup` target carries `postgresql-client-16`, and the image that serves customer traffic must not. Build it with the target set explicitly, or Railway gives you the serving image, which has no `pg_dump`.
+Its own service **and its own Dockerfile**, for the same reason the migration job has one. Railway builds a Dockerfile **without selecting a stage**, so it always gets the final one — a `backup` target inside `Dockerfile.backend` is unreachable from here, which the first attempt proved: Railway ignored the stages, fell back to its own builder and ran a bare `tsc` at the repository root, where there is no `tsconfig.json`, so it printed its usage and built nothing.
+
+Set `RAILWAY_DOCKERFILE_PATH=Dockerfile.backup`. It carries `postgresql-client-16`, which the image serving customer traffic must not, and it compiles the backend at build time so the scheduled run has no compiler on its critical path.
 
 **A mounted volume is not optional.** A scheduled job runs in a container that is discarded when it exits, so without one the job succeeds every night and keeps nothing. `npm run backup` refuses to start without `BACKUP_DIR` for exactly this reason.
 

@@ -32,44 +32,6 @@ FROM build AS migrations
 WORKDIR /app
 CMD ["npm", "run", "db:migrate:deploy", "--workspace=backend"]
 
-# Backup job: the same build plus the PostgreSQL client, and never a serving
-# image either (features/0042).
-#
-# **It needs its own target because `pg_dump` is not in any of the others**, and
-# the backup cannot run without it. Putting it in `runtime` was the alternative
-# and is worse: the image that serves customer traffic would carry a database
-# client and a third-party apt repository it never uses.
-#
-# **The version is not incidental.** `pg_dump` refuses to run against a server
-# newer than itself, and Debian bookworm ships 15 while the server is 16 — so
-# the stock package silently is not enough, which is why this pulls 16 from
-# PGDG. The runbook says the same thing; this is the image that satisfies it.
-#
-# Placed after `migrations` and before `runtime` for the reason given above: a
-# platform that builds this file with no explicit target gets the serving image.
-FROM build AS backup
-WORKDIR /app
-RUN apt-get update     && apt-get install -y --no-install-recommends ca-certificates curl gnupg     && install -d /usr/share/postgresql-common/pgdg     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main"         > /etc/apt/sources.list.d/pgdg.list     && apt-get update     && apt-get install -y --no-install-recommends postgresql-client-16     && apt-get purge -y --auto-remove curl gnupg     && rm -rf /var/lib/apt/lists/*
-# Fails fast if the client is missing or older than the server, rather than at
-# 03:00 on the first scheduled night.
-RUN pg_dump --version
-# **Runs the compiled script, and deliberately does not build.**
-#
-# `npm run backup` exists for a developer and starts with `npm run build`, which
-# is right at a terminal and wrong here: the `build` stage above already
-# compiled `backend/dist`, so building again on every scheduled run is slower and
-# makes the backup depend on a compiler working at 03:00.
-#
-# It also removes a real failure. There is no `tsconfig.json` at `/app`, so a
-# `tsc` invoked with the repository root as its working directory finds no
-# inputs and prints its usage instead of compiling — which is what a scheduled
-# run produced before this line changed. A job that takes backups should not
-# have a TypeScript compiler on its critical path at all.
-#
-# `backup-run.js` locates its two siblings relative to its own file, so the
-# working directory does not matter to it.
-CMD ["node", "backend/dist/scripts/backup-run.js"]
-
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app/backend

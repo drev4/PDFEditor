@@ -74,7 +74,7 @@ It takes the dump, finds the manifest that dump produced, and copies the documen
 
 **The image runs the compiled script and does not build.** `npm run backup` starts with `npm run build`, which is right at a terminal and wrong in a scheduled job: the image compiled `backend/dist` when it was built. It is also a removed failure — there is no `tsconfig.json` at the repository root, so a `tsc` whose working directory ends up there prints its usage instead of compiling, and a backup should not have a compiler on its critical path.
 
-**Run it from the `backup` image, not the serving one.** `docker build -f Dockerfile.backend --target backup` produces the same build plus `postgresql-client-16` from PGDG. None of the other images has `pg_dump` at all, and the Debian package is 15, which will not read a 16 server. The image runs `pg_dump --version` at build time so a missing client fails then rather than at 03:00 on the first night.
+**Run it from `Dockerfile.backup`, not the serving image.** It is its own file rather than a stage because a platform that builds a Dockerfile without selecting a stage always gets the final one — `Dockerfile.migrations` exists for the same reason. It carries `postgresql-client-16` from PGDG. None of the other images has `pg_dump` at all, and the Debian package is 15, which will not read a 16 server. The image runs `pg_dump --version` at build time so a missing client fails then rather than at 03:00 on the first night.
 
 **Alerting is the platform's job and it is not optional.** Both halves exit non-zero on failure, into a void. Configure the scheduled job to notify on a non-zero exit; without that, a backup that stops working is discovered at the restore, which is the worst possible moment.
 
