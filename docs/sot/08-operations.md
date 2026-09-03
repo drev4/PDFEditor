@@ -194,7 +194,7 @@ An endpoint disabled with *"The endpoint URL is no longer deliverable"* is not a
 
 ### `DEV_PLAN_KEY`, and the allowlist that makes it safe
 
-Plan limits are real from [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) onward, which makes the product harder to *build* — one published form on the free plan is not a workable development environment. `DEV_PLAN_KEY` is the escape hatch, and it is **meant to be deleted** once there are separate environments to run in. Removing it is a block at the bottom of `backend/src/services/plans.ts`, two call sites in `entitlements.ts`, and a line in `.env.example`.
+Plan limits are real from [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) onward, which makes the product harder to *build* — a one-form free plan is not a workable development environment. `DEV_PLAN_KEY` is the escape hatch, and it is **meant to be deleted** once there are separate environments to run in. Removing it is a block at the bottom of `backend/src/services/plans.ts`, two call sites in `entitlements.ts`, and a line in `.env.example`.
 
 The dangerous version of this feature is the one that reads `NODE_ENV !== 'production'`. That honours the override whenever `NODE_ENV` is unset, misspelled, or dropped by a process manager — every one of which is an ordinary way a real deployment ends up giving the product away with **no error anywhere**. So the check is an **allowlist**: the override applies when `NODE_ENV` is exactly `development` or `test`, and in every other case it is ignored and a `console.error` says so. The failure mode of a missing `NODE_ENV` is that limits are enforced.
 
@@ -467,6 +467,23 @@ Two failure modes worth knowing, because both are silent by nature and both were
 
 - **A malformed `SENTRY_DSN` does not make the SDK complain.** It disables itself quietly, so the process boots, serves, and reports nothing. That was observed, not assumed. `validate-env.ts` now refuses to boot on it, the same treatment `WEBHOOK_SIGNING_KEY` gets.
 - **The SPA's CSP is an allowlist**, so an ingest origin missing from `connect-src` means the browser refuses every event while the SDK reports success. The origin is therefore *derived from the DSN* in `frontend/src/services/sentry-dsn.ts` rather than configured separately, and a DSN that is not a URL **fails the build** rather than emitting a policy without it.
+
+## Free is on beta limits, and they have to be reverted
+
+`PLANS.free` currently reads `maxPublishedForms: 10`, `maxResponsesPerMonth: 1000`, `seats: 5`. **The design canvas says 1 / 50 / 1**, and those are the numbers to restore ([`features/0040`](../../features/0040-beta-plan-limits.md)).
+
+Why they moved is an operational fact rather than a product decision. The private beta runs with **Stripe unconfigured**, and `services/stripe.ts` is the only writer of `Organization.planKey` — so every organization stays on `free` for ever, and the catalogue numbers are not one plan among three, they are *the whole product*. On 1 / 50 / 1 a beta customer publishes one form, takes fifty responses and invites nobody.
+
+`DEV_PLAN_KEY` is not the escape hatch here and must not be made into one. It is honoured only when `NODE_ENV` is exactly `development` or `test`, so that a missing or misspelled value **enforces** limits rather than lifting them; widening that allowlist to production would make a deliberately silent failure into the normal way to operate, and would then win over a real subscription the day Stripe is configured.
+
+**The revert is a single constant, and that is now true rather than aspirational.** Before 0040 the limit lived in `plans.ts` *and* in eight tests that wrote it as a literal — "the second published form is refused", "the first invitation is refused" — so changing it put the suite in the red. Every one of those now reads `PLANS.free`, and `tests/entitlements.spec.ts` carries the reminder that Free deviates from the canvas.
+
+| When | What to do |
+|---|---|
+| Stripe is configured and public registration opens | Restore `maxPublishedForms: 1`, `maxResponsesPerMonth: 50`, `seats: 1` in `services/plans.ts`, and the matching expectations in `tests/entitlements.spec.ts` |
+| Before that | Nothing. The numbers are correct for a beta where Free is the only plan anybody can be on |
+
+Note what was deliberately **not** changed: `hasBranding` stays `false`, so the product mark shows on every beta form, and `hasApiAccess` stays `false`, so the API remains a Team feature. Neither is a limit a beta customer runs into by working normally.
 
 ## Backups and recovery
 

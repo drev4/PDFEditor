@@ -15,14 +15,46 @@ import { PLANS } from '../../src/services/plans.js'
  * refusal is a transaction rollback, and the reason the meter is not just a
  * `count(*)` is a cascade. All three are database behaviour.
  *
- * The free plan's real numbers are used throughout — 1 published form, 50
- * responses a month — rather than a fixture with convenient limits. A test that
- * loosens the limit it is testing proves nothing about the limit.
+ * The free plan's **real** numbers are used throughout, read from the catalogue
+ * rather than written here, and never a fixture with convenient limits. A test
+ * that loosens the limit it is testing proves nothing about the limit.
+ *
+ * Reading them rather than writing them is deliberate and was not always so
+ * (features/0040). The response limit always derived from `FREE`; the published
+ * form and seat limits were written as the literal "the second one is refused",
+ * which meant the promise that every limit lives in one constant was false —
+ * they lived in the constant *and* in four tests, and changing the constant put
+ * the suite in the red. Everything below measures the boundary wherever the
+ * catalogue puts it.
  */
 describe('plan limits', () => {
   const FREE = PLANS.free
 
-  /** Seeds the meter, so the boundary can be reached without 50 HTTP requests. */
+  /**
+   * Publishes exactly as many forms as the plan allows, through the real
+   * endpoint, and returns one more left as a draft — the one that must be
+   * refused.
+   *
+   * The count comes from the catalogue, so this keeps measuring the boundary if
+   * the limit ever moves.
+   */
+  async function fillPublishedForms(author: { user: { id: string }; authHeader: string }) {
+    for (let i = 0; i < FREE.maxPublishedForms!; i++) {
+      const form = await createForm(author.user.id, { status: 'draft' })
+      const res = await request(app)
+        .patch(`/api/forms/${form.id}/status`)
+        .set('Authorization', author.authHeader)
+        .send({ status: 'published' })
+
+      // Inside the limit, so any refusal here is the limit being wrong rather
+      // than the test arranging badly.
+      expect(res.status).toBe(200)
+    }
+
+    return createForm(author.user.id, { status: 'draft' })
+  }
+
+  /** Seeds the meter, so the boundary can be reached without one HTTP request per response. */
   async function setResponseUsage(organizationId: string, responses: number) {
     await prisma.usageCounter.upsert({
       where: { organizationId_period: { organizationId, period: currentPeriod() } },
@@ -51,13 +83,26 @@ describe('plan limits', () => {
       expect(res.body.form.status).toBe('published')
     })
 
-    it('refuses the second published form with 402, and leaves it a draft', async () => {
+    it('publishes exactly as many forms as the plan allows', async () => {
+      // The other half of the boundary, and the reason this test exists rather
+      // than being implied: a limit that refuses one too early would pass every
+      // refusal test below and be wrong in the direction the customer notices.
       const author = await createUser()
-      await createForm(author.user.id, { status: 'published' })
-      const second = await createForm(author.user.id, { status: 'draft' })
+
+      await fillPublishedForms(author)
+
+      const published = await prisma.form.count({
+        where: { organizationId: author.organization.id, status: 'published' }
+      })
+      expect(published).toBe(FREE.maxPublishedForms)
+    })
+
+    it('refuses the form past the limit with 402, and leaves it a draft', async () => {
+      const author = await createUser()
+      const oneTooMany = await fillPublishedForms(author)
 
       const res = await request(app)
-        .patch(`/api/forms/${second.id}/status`)
+        .patch(`/api/forms/${oneTooMany.id}/status`)
         .set('Authorization', author.authHeader)
         .send({ status: 'published' })
 
@@ -66,13 +111,13 @@ describe('plan limits', () => {
       expect(res.status).toBe(402)
       expect(res.body.error).toContain('Free')
 
-      const stored = await prisma.form.findUniqueOrThrow({ where: { id: second.id } })
+      const stored = await prisma.form.findUniqueOrThrow({ where: { id: oneTooMany.id } })
       expect(stored.status).toBe('draft')
     })
 
     it('never refuses creating a form, however many exist', async () => {
       const author = await createUser()
-      await createForm(author.user.id, { status: 'published' })
+      await fillPublishedForms(author)
 
       const res = await request(app)
         .post('/api/forms')
@@ -84,11 +129,10 @@ describe('plan limits', () => {
 
     it('closes the back door: PUT /:id cannot publish past the limit either', async () => {
       const author = await createUser()
-      await createForm(author.user.id, { status: 'published' })
-      const second = await createForm(author.user.id, { status: 'draft' })
+      const oneTooMany = await fillPublishedForms(author)
 
       const res = await request(app)
-        .put(`/api/forms/${second.id}`)
+        .put(`/api/forms/${oneTooMany.id}`)
         .set('Authorization', author.authHeader)
         .send({ status: 'published' })
 
@@ -379,18 +423,24 @@ describe('plan limits', () => {
   describe('assertCanInvite (wired since features/0015)', () => {
     it('counts a pending invitation as a seat in use', async () => {
       const author = await createUser()
-      await prisma.invitation.create({
-        data: {
-          organizationId: author.organization.id,
-          email: 'pending@example.com',
-          tokenHash: `hash-${Math.random()}`,
-          expiresAt: new Date(Date.now() + 60_000)
-        }
-      })
 
-      // One member plus one outstanding invitation is already two seats on a
-      // one-seat plan. Counting memberships alone would let an organization at
+      // Fill the plan with the owner plus outstanding invitations, taken from
+      // the catalogue rather than assuming Free is one seat (features/0040).
+      // The point being asserted is that an **unaccepted** invitation still
+      // holds a seat: counting memberships alone would let an organization at
       // its limit hand out any number of working keys.
+      for (let i = 0; i < FREE.seats! - 1; i++) {
+        await prisma.invitation.create({
+          data: {
+            organizationId: author.organization.id,
+            email: `pending-${i}@example.com`,
+            tokenHash: `hash-${Math.random()}`,
+            expiresAt: new Date(Date.now() + 60_000)
+          }
+        })
+      }
+
+      // Every seat is now spoken for, and none of the invitations was accepted.
       await expect(
         prisma.$transaction((tx) => assertCanInvite(tx, author.organization.id))
       ).rejects.toMatchObject({ statusCode: 402 })
@@ -420,10 +470,19 @@ describe('plan limits', () => {
     it('is enforced by the invitation endpoint, with 402', async () => {
       const author = await createUser()
 
-      // Free covers one person and the owner is that person, so this is the
-      // limit doing its job. It sat unwired from features/0012 until Team
+      // The owner already occupies a seat, so the invitations that fit are one
+      // fewer than the plan's number — read from the catalogue, never written
+      // here (features/0040). It sat unwired from features/0012 until Team
       // existed to make it meaningful; the plan-by-plan behaviour and the
       // purchased-seat cases are in `seats.spec.ts`.
+      for (let i = 0; i < FREE.seats! - 1; i++) {
+        await request(app)
+          .post('/api/organizations/invitations')
+          .set('Authorization', author.authHeader)
+          .send({ email: `fits-${i}@example.com`, role: 'member' })
+          .expect(201)
+      }
+
       const res = await request(app)
         .post('/api/organizations/invitations')
         .set('Authorization', author.authHeader)
@@ -432,7 +491,8 @@ describe('plan limits', () => {
       // 402, not 403: this person is allowed to invite, the plan is not paying
       // for it. `403` is what `requireRole` throws and the two are never merged.
       expect(res.status).toBe(402)
-      expect(await prisma.invitation.count()).toBe(0)
+      // The refused one left no row; the ones that fit are still there.
+      expect(await prisma.invitation.count()).toBe(FREE.seats! - 1)
     })
   })
 })

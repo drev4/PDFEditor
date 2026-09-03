@@ -104,18 +104,35 @@ describe('team seats', () => {
     // product working. The alternative reading — seats *beyond* the owner —
     // would make every number here one less than the number the customer counts
     // on the Members screen.
-    it('refuses a fresh Free account its first invitation, with 402', async () => {
-      const response = await invite(owner.token, 'colleague@example.com')
+    it('counts the owner against Free seats, so the last one is refused', async () => {
+      // The seat count comes from the catalogue, never written here
+      // (features/0040): the assertion is that the **owner occupies one of
+      // them**, which is what "seats count total people" means, and that holds
+      // whatever the number is. With Free at one seat this is the first
+      // invitation being refused; with more, it is the last.
+      const seats = PLANS.free.seats!
+
+      for (let i = 0; i < seats - 1; i++) {
+        const fits = await invite(owner.token, `colleague-${i}@example.com`)
+        expect(fits.status).toBe(201)
+      }
+
+      const response = await invite(owner.token, 'one-too-many@example.com')
 
       expect(response.status).toBe(402)
       expect(response.body.error).toContain(PLANS.free.name)
 
-      // Nothing was created on the way to the refusal.
-      expect(await prisma.invitation.count()).toBe(0)
+      // Nothing was created on the way to the refusal: the invitations that
+      // exist are the ones that fit, and the refused one left no row.
+      expect(await prisma.invitation.count()).toBe(seats - 1)
     })
 
     it('refuses on Pro too — Pro is a single member, Team is the plan that adds people', async () => {
       await activate(owner.organization.id, { priceId: TEST_PRICE_PRO })
+
+      // Pro is one seat in the catalogue and stays one seat through the beta,
+      // so this really is the first invitation.
+      expect(PLANS.pro.seats).toBe(1)
 
       const response = await invite(owner.token, 'colleague@example.com')
 

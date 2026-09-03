@@ -93,12 +93,33 @@ export interface Plan {
 }
 
 export const PLANS: Readonly<Record<PlanKey, Readonly<Plan>>> = Object.freeze({
+  /**
+   * **Free carries beta limits right now, and they are temporary**
+   * (features/0040). The catalogue values before the private beta were
+   * `maxPublishedForms: 1`, `maxResponsesPerMonth: 50`, `seats: 1`.
+   *
+   * Why they moved: the private beta runs with Stripe unconfigured, and the
+   * only writer of `Organization.planKey` is the Stripe webhook — so every
+   * organization stays on Free permanently. On the old numbers a beta customer
+   * could publish one form, take fifty responses and invite nobody, which is
+   * not a product anybody can evaluate. `DEV_PLAN_KEY` is deliberately not the
+   * answer: it is honoured only when `NODE_ENV` is `development` or `test`
+   * (see `OVERRIDE_ENVIRONMENTS` below), and widening that to production would
+   * turn a silent failure into the normal way to operate.
+   *
+   * **Revert them when Stripe is configured and public registration opens** —
+   * that is the moment these stop being correct, and the moment nobody will
+   * remember them. The numbers to revert to are the three above; the ones to
+   * ship are whatever BIZ-007 concludes, which is still open. `hasBranding`
+   * and `hasApiAccess` were deliberately *not* touched: the product mark stays
+   * visible on a free plan, and API access stays a Team feature.
+   */
   free: Object.freeze({
     key: 'free',
     name: 'Free',
-    maxPublishedForms: 1,
-    maxResponsesPerMonth: 50,
-    seats: 1,
+    maxPublishedForms: 10,
+    maxResponsesPerMonth: 1000,
+    seats: 5,
     hasBranding: false,
     hasApiAccess: false
   }),
