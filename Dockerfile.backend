@@ -53,7 +53,22 @@ RUN apt-get update     && apt-get install -y --no-install-recommends ca-certific
 # Fails fast if the client is missing or older than the server, rather than at
 # 03:00 on the first scheduled night.
 RUN pg_dump --version
-CMD ["npm", "run", "backup", "--workspace=backend"]
+# **Runs the compiled script, and deliberately does not build.**
+#
+# `npm run backup` exists for a developer and starts with `npm run build`, which
+# is right at a terminal and wrong here: the `build` stage above already
+# compiled `backend/dist`, so building again on every scheduled run is slower and
+# makes the backup depend on a compiler working at 03:00.
+#
+# It also removes a real failure. There is no `tsconfig.json` at `/app`, so a
+# `tsc` invoked with the repository root as its working directory finds no
+# inputs and prints its usage instead of compiling — which is what a scheduled
+# run produced before this line changed. A job that takes backups should not
+# have a TypeScript compiler on its critical path at all.
+#
+# `backup-run.js` locates its two siblings relative to its own file, so the
+# working directory does not matter to it.
+CMD ["node", "backend/dist/scripts/backup-run.js"]
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production

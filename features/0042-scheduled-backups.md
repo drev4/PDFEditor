@@ -69,4 +69,8 @@ Sin `BACKUP_DIR`, salida `1` y el mensaje que explica por qué se quitó el valo
 
 **Verificado** (salida real): backend 32 ficheros / 396 tests; frontend 56 / 479; integración 26 + 3 saltados / 260 + 10 saltados; e2e 53; `tsc --noEmit`, `typecheck:tests`, `build --workspace=frontend` y `check:node` limpios; la imagen `backup` construye y `pg_dump --version` pasa dentro de ella.
 
+**Un fallo que la primera ejecución en Railway destapó, y que mi verificación no habría encontrado.** El `CMD` era `npm run backup`, y ese script empieza por `npm run build`. En un terminal es lo correcto; en un job programado es **recompilar TypeScript cada noche** sobre un `dist` que el stage `build` ya había producido. Peor: no hay `tsconfig.json` en la raíz del repositorio, así que un `tsc` cuyo directorio de trabajo acabe ahí no compila — imprime su ayuda, que es exactamente lo que apareció en el log del despliegue.
+
+Yo verifiqué ejecutando el script compilado y ejecutando la imagen, y las dos veces funcionó porque la compilación tuvo éxito. Lo que no verifiqué es que **la compilación no debía estar ahí en absoluto**. El `CMD` es ahora `node backend/dist/scripts/backup-run.js`: un trabajo que hace copias de seguridad no debe tener un compilador en su camino crítico. `npm run backup` sigue existiendo para un humano.
+
 **Lo que sigue siendo del despliegue, y ahora sí puede hacerse:** programar el job con `BACKUP_DIR` apuntando a un volumen montado, y que la plataforma avise ante salida distinta de cero. Y lo que este cambio deliberadamente no resuelve: **la copia off-site sigue sin existir**, y el RPO que esto habilita es «el intervalo que pongas», no un número que el repositorio pueda afirmar.
