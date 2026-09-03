@@ -38,10 +38,18 @@ COPY backend/src ./backend/src
 RUN npm run db:generate --workspace=backend \
     && npm run build --workspace=backend
 
-# `pg_dump` refuses to run against a server newer than itself, and Debian
-# bookworm ships 15 while the server is PostgreSQL 16 — so the stock package is
-# silently not enough. This is the image that satisfies what the runbook asks
-# for, and no other image in this repository has `pg_dump` at all.
+# **`pg_dump` refuses to run against a server newer than itself**, and this is
+# the version that matters rather than the one the local Compose file uses.
+# Railway's managed PostgreSQL is **18**; `docker-compose.yml` and CI run 16.
+# The first scheduled run failed on exactly that mismatch:
+#
+#   server version: 18.6 · pg_dump version: 16.15
+#   pg_dump: error: aborting because of server version mismatch
+#
+# A newer client reads an older server, so 18 covers both — pin it to the
+# highest server this backs up, never to the one on a developer's machine.
+# Debian bookworm's own package is 15 and covers neither, which is why this
+# comes from PGDG. No other image in this repository has `pg_dump` at all.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && install -d /usr/share/postgresql-common/pgdg \
@@ -50,7 +58,7 @@ RUN apt-get update \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
     && apt-get purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/*
 
