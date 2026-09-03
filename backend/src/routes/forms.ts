@@ -9,7 +9,8 @@ import { requireOrganizationId } from '../middleware/membership.js'
 import { assertCanPublishForm, isOverResponseLimit, mustShowBranding } from '../services/entitlements.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { exportResponsesToCSV } from '../services/csv-exporter.js'
-import { canonicalPdfUrl, pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
+import { pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
+import { assertUploadBelongsTo } from '../services/uploads.js'
 import { pdfStorage } from '../services/pdf-storage.js'
 import { collectOrphanDocuments, keysReferencedBy } from '../services/pdf-gc.js'
 import { logger } from '../services/logger.js'
@@ -104,17 +105,30 @@ formsRouter.post('/', authenticate, asyncHandler(async (req: AuthRequest, res, n
 
   const { title, description, pdfUrl } = validation.data
 
+  const organizationId = await requireOrganizationId(req)
+
+  // The document has to be one this organization uploaded (features/0039).
+  //
+  // `assertUploadBelongsTo` also returns the canonical unsigned URL, which is
+  // the only shape that may reach the column: a client echoing back a `pdfUrl`
+  // it read from this API would otherwise persist a signature and the form
+  // would break one TTL later.
+  //
+  // It **throws** on a value that names no upload, where this used to write
+  // `null` and answer `201` — a form the customer was told had a document and
+  // did not.
+  const document = pdfUrl === undefined
+    ? undefined
+    : await assertUploadBelongsTo(organizationId, pdfUrl)
+
   const form = await prisma.form.create({
     data: {
-      organizationId: await requireOrganizationId(req),
+      organizationId,
       // Provenance only. Authorization reads the organization, never this.
       createdByUserId: req.userId!,
       title,
       description,
-      // Only ever the canonical unsigned URL reaches the column. A client that
-      // echoes back a `pdfUrl` it read from this API would otherwise persist a
-      // signature, and the form would break one TTL later.
-      pdfUrl: pdfUrl === undefined ? undefined : canonicalPdfUrl(pdfUrl),
+      pdfUrl: document,
       shareId: nanoid(12)
     }
   })
@@ -208,12 +222,18 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
 
   const data = validation.data
 
-  // See the note in POST /: the column holds canonical URLs only.
-  if (data.pdfUrl !== undefined) {
-    data.pdfUrl = canonicalPdfUrl(data.pdfUrl) ?? undefined
-  }
-
   const existing = await verifyFormOwnership(req, id)
+
+  // See the note in POST /. Ownership of the *form* is resolved first, so a
+  // stranger still gets the `404` this endpoint has always given them and never
+  // reaches a message about the document — and because the organization the
+  // upload must belong to is the form's, not the caller's oldest membership.
+  //
+  // This used to silently drop a `pdfUrl` it could not canonicalise, so a
+  // malformed value answered `200` and changed nothing.
+  if (data.pdfUrl !== undefined) {
+    data.pdfUrl = await assertUploadBelongsTo(existing.organizationId, data.pdfUrl)
+  }
 
   // Publishing is what the plan meters, not creating — see
   // `services/entitlements.ts`. This route can publish too, because
@@ -273,10 +293,11 @@ formsRouter.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, r
 
   // Read the key **before** the row goes; afterwards there is nothing left to
   // read it from. Removing the bytes happens after the delete, and only when no
-  // surviving form still references the key — `Form.pdfUrl` is an unconstrained
-  // client-supplied string, so two forms can point at one document and an
-  // unconditional remove here would destroy another form's, possibly another
-  // organization's (features/0029, services/pdf-gc.ts).
+  // surviving form still references the key — two forms can point at one
+  // document, so an unconditional remove here would destroy a living form's
+  // (features/0029, services/pdf-gc.ts). Since features/0039 both of them must
+  // belong to this organization, which closes the cross-tenant case and leaves
+  // same-organization aliasing exactly as it was.
   const keys = keysReferencedBy([form])
 
   await prisma.form.delete({ where: { id } })

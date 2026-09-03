@@ -26,8 +26,11 @@ beforeEach(async () => {
   // is named for the visibility reason rather than the correctness one: it does
   // cascade from `organizations`, but a live credential surviving into the next
   // test is the kind of thing a reader should see cleared rather than infer.
+  // `uploads` is named for that same reason: it cascades, and a record saying
+  // one organization owns a stored document is exactly the kind of row a reader
+  // should see cleared between tests rather than take on trust.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "usage_counters", "subscriptions", "stripe_events", "invitations", "api_keys", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE "answers", "responses", "fields", "forms", "usage_counters", "subscriptions", "stripe_events", "invitations", "api_keys", "uploads", "memberships", "organizations", "refresh_tokens", "users" RESTART IDENTITY CASCADE'
   )
 })
 

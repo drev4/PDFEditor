@@ -119,7 +119,7 @@ There is **no grace period**. The deletion is immediate and complete — see [`f
 
 | Method | Path | Auth | Response |
 |---|---|---|---|
-| GET | `/organizations/export` | Bearer, **owner or admin** | `200` a streamed `application/json` attachment · `403` wrong role · `404` not a member · `429` when rate limited |
+| GET | `/organizations/export` | Bearer, **owner or admin** | `200` a streamed `application/json` attachment · `403` wrong role · `404` not a member · `429` when rate limited. Carries an `uploads` array since [`features/0039`](../../features/0039-uploads-belong-to-an-organization.md) — rows only, never the PDF bytes |
 
 Everything the **active** organization holds, as one document ([`features/0030`](../../features/0030-account-data-export.md)): the organization, the caller's own user record, members, forms with **all** their fields including archived ones, every response with its answers, `ipAddress` and `userAgent`, and the usage counters. `services/organization-export.ts` is the only module that knows the format, and `version` (currently `1`) is bumped when a reader would notice a change.
 
@@ -166,9 +166,9 @@ The role rules and the `404` / `403` split are in [07-security-and-privacy](./07
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/forms` | Bearer | The caller's forms, with `_count.fields` (live fields only) and `_count.responses` |
-| POST | `/forms` | Bearer | `{title, description?, pdfUrl?}`. Generates `shareId` with `nanoid(12)`. **Never refused by a plan limit** — drafting is free |
+| POST | `/forms` | Bearer | `{title, description?, pdfUrl?}`. Generates `shareId` with `nanoid(12)`. **Never refused by a plan limit** — drafting is free. **`400`** when `pdfUrl` names no upload of the caller's organization ([`features/0039`](../../features/0039-uploads-belong-to-an-organization.md)) |
 | GET | `/forms/:id` | Bearer + ownership | Includes ordered **live** `fields` (`deletedAt: null`). **Side effect:** if `pdfUrl` is set and the form has never had a field — archived ones count — it extracts them from the PDF on disk and persists them before responding (`syncFieldsFromPDF`, best-effort) |
-| PUT | `/forms/:id` | Bearer + ownership | Partial `{title?, description?, status?, pdfUrl?, settings?}`. **`402`** when `status: 'published'` would exceed the plan's published-form limit |
+| PUT | `/forms/:id` | Bearer + ownership | Partial `{title?, description?, status?, pdfUrl?, settings?}`. **`402`** when `status: 'published'` would exceed the plan's published-form limit. **`400`** when `pdfUrl` names no upload of the form's organization |
 | PATCH | `/forms/:id/status` | Bearer + ownership | `{status: 'draft' \| 'published' \| 'closed'}`. **`402`** when publishing would exceed the plan's limit |
 | DELETE | `/forms/:id` | Bearer + ownership | **Cascades to fields and every response.** Irreversible, no soft delete, no export prompt |
 | GET | `/forms/public/:shareId` | — | `200 {form, showBranding}`. Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`**, and carries nothing about the owner's plan except `showBranding` — see below. Answers `404` — not `402` — when the owning organization has spent the month's responses, so the form is unavailable before anyone fills it in |
@@ -322,11 +322,13 @@ Limits, windows and the `trust proxy` hop count are configuration — [08-operat
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/upload` | Bearer | Multipart, field name `pdf`. Multer: 10 MB limit, `application/pdf` mimetype filter, stored to `uploads/pdfs/<nanoid(12)>-<timestamp>.pdf` |
+| POST | `/upload` | Bearer + membership | Multipart, field name `pdf`. Multer: 10 MB limit, `application/pdf` mimetype filter, stored to `uploads/pdfs/<nanoid(12)>-<timestamp>.pdf`. **`404`** when the caller is in no organization — an upload has to land in one ([`features/0039`](../../features/0039-uploads-belong-to-an-organization.md)) |
 
 Then: `pdfProcessor.validatePDF` — on failure the file is deleted and the request fails with `400`. Then `extractFieldsFromPDF` — best-effort, a failure is logged and the upload still succeeds with `fields: []`.
 
 Response `201 {url, filename, size, fields}`, where `url` is the **canonical, unsigned** `${BASE_URL}/uploads/pdfs/<filename>`. This is the value to persist as `Form.pdfUrl`, and it is deliberately not a signed URL — a signature stored in that column would stop verifying one TTL later and permanently break the form. It is not fetchable on its own.
+
+**This endpoint is now the only way to obtain a usable `pdfUrl`** ([`features/0039`](../../features/0039-uploads-belong-to-an-organization.md)). It writes an `Upload` row owning the key, and `POST /api/forms` / `PUT /api/forms/:id` refuse any `pdfUrl` that does not resolve to one of the acting organization's. The bytes are written before the row, deliberately: the reverse ordering leaves a key a form may point at and which `404`s on every read.
 
 ## Serving an uploaded PDF — `app.ts`
 
@@ -343,7 +345,7 @@ Unauthenticated on purpose: an anonymous respondent has to load the PDF of a pub
 
 **No form response carries an owner id.** `toApiForm` strips `organizationId` and `createdByUserId` from every form the API returns, authenticated or public. Ownership is decided entirely on the server ([04-backend-patterns §9](./04-backend-patterns.md)); the client is deliberately unaware that organizations exist. A form the caller cannot reach answers `404`, never `403`.
 
-**Every response that carries a form carries a freshly signed `pdfUrl`** — `GET /api/forms`, `GET /api/forms/:id`, `GET /api/forms/public/:shareId`, `POST /api/forms`, `PUT /api/forms/:id`, `PATCH /api/forms/:id/status`. All of them go through one `toApiForm` serializer in `routes/forms.ts`. Conversely `POST /api/forms` and `PUT /api/forms/:id` normalise an incoming `pdfUrl` back to canonical form before writing, so a client echoing back a value it read cannot persist a signature.
+**Every response that carries a form carries a freshly signed `pdfUrl`** — `GET /api/forms`, `GET /api/forms/:id`, `GET /api/forms/public/:shareId`, `POST /api/forms`, `PUT /api/forms/:id`, `PATCH /api/forms/:id/status`. All of them go through one `toApiForm` serializer in `routes/forms.ts`. Conversely `POST /api/forms` and `PUT /api/forms/:id` normalise an incoming `pdfUrl` back to canonical form before writing, so a client echoing back a value it read cannot persist a signature — and, since [`features/0039`](../../features/0039-uploads-belong-to-an-organization.md), they **refuse** a value that names no upload of the acting organization rather than silently writing `null` (create) or dropping the field (update), which is what they used to do. The refusal is one `400` with one message whether the key belongs to somebody else or does not exist at all: two answers would let a caller enumerate real filenames without reading one.
 
 TTL is configuration — [08-operations](./08-operations.md#configuration).
 

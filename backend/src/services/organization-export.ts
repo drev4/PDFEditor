@@ -113,6 +113,7 @@ export async function writeOrganizationExport(out: Writable, target: ExportTarge
 
   await writeMembers(out, organizationId)
   await writeForms(out, organizationId)
+  await writeUploads(out, organizationId)
   await writeResponses(out, organizationId)
   await writeUsage(out, organizationId)
 
@@ -217,6 +218,46 @@ async function writeForms(out: Writable, organizationId: string): Promise<void> 
   })
 
   write(out, forms.length === 0 ? '],\n' : '\n  ],\n')
+}
+
+/**
+ * The documents this organization uploaded (features/0039).
+ *
+ * Here because features/0030's contract is *the whole tenant*, and `Upload` is a
+ * table that did not exist when it was written — an omission would have been a
+ * silent gap rather than a decision. `Form.pdfUrl` is the pointer into this
+ * list.
+ *
+ * **Rows, not bytes.** The PDFs themselves are still not in this file: that
+ * turns a streamed JSON document into ZIP assembly with its own memory design,
+ * and it stays the *uploaded PDFs are not in the data export* backlog row.
+ */
+async function writeUploads(out: Writable, organizationId: string): Promise<void> {
+  const uploads = await prisma.upload.findMany({
+    where: { organizationId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      key: true,
+      originalName: true,
+      size: true,
+      uploadedByUserId: true,
+      createdAt: true
+    }
+  })
+
+  const body = uploads.map(upload => ({
+    id: upload.id,
+    key: upload.key,
+    originalName: upload.originalName,
+    size: upload.size,
+    // Provenance, as everywhere else: who uploaded it, never who may use it.
+    uploadedByUserId: upload.uploadedByUserId,
+    createdAt: upload.createdAt.toISOString()
+  }))
+
+  write(out, `  "uploads": ${json(body)},
+`)
 }
 
 /**
