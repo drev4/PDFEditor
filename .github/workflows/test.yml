@@ -202,3 +202,32 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  dependency-audit:
+    name: Production Dependency Audit
+    runs-on: ubuntu-latest
+    # Independent of the test jobs: a vulnerable dependency is a fact about the
+    # image, not about whether the suites pass, and finding out on a red build
+    # is the whole point.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # One source of truth for the version developers install.
+          node-version-file: .nvmrc
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit the dependencies that are actually in the production image
+        # No --shipped-from here, deliberately. The runner has Docker, so the
+        # job builds Dockerfile.backend's runtime stage and enumerates it. A
+        # committed snapshot is a developer convenience; in CI it would be one
+        # more thing that can go stale and quietly make the gate measure an
+        # image nobody ships any more.
+        run: npm run audit:prod

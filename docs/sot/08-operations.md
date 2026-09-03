@@ -387,7 +387,7 @@ Two guards, deliberately overlapping:
 1. `backend/package.json` has `"postinstall": "prisma generate"`, so a fresh clone plus `npm ci` yields a working client.
 2. Every CI job that touches the database also runs `npx prisma generate` explicitly, so a pipeline using `--ignore-scripts` still works and a reader of the workflow can see it happen.
 
-**For a production build**, note that `prisma` is a devDependency: generate the client *before* pruning with `--omit=dev`, or the postinstall runs without its CLI.
+**For a production build**, generate the client *before* pruning with `--omit=dev`, which is what `Dockerfile.backend` does — the `build` stage runs `db:generate` and `production-dependencies` prunes afterwards. `prisma` is declared a devDependency in `backend/package.json`, but note that it also arrives as a **production** dependency of `@prisma/client`, so it is inside the runtime image either way; do not rely on that, because it is Prisma's packaging decision and not this repository's.
 
 ### The E2E job waits for the API, not just the frontend
 
@@ -400,7 +400,20 @@ What CI still does not do:
 | No lint | There is no ESLint configuration at all — see [09-quality-and-testing.md](./09-quality-and-testing.md) |
 | Coverage is measured but not enforced | No threshold, and Codecov failures are ignored |
 | Migrations are applied but never *tested* against existing data | The database jobs run `migrate deploy` against a fresh database, so a broken migration fails CI. Nothing exercises a migration against a database that already holds rows |
-| No dependency or secret scanning | No Dependabot, no `npm audit` gate, no secret scan. The pruned backend image built for [`features/0031`](../../features/0031-production-deployment.md) reports 15 production advisories (1 critical, 13 high, 1 moderate); they are filed for triage rather than hidden by a green build |
+| No secret scanning | No secret scan of the history or of a pull request. **Dependency scanning is closed** ([`features/0038`](../../features/0038-production-dependency-triage-and-an-audit-gate.md)): the `dependency-audit` job gates every pull request and `.github/dependabot.yml` opens the updates |
+| Nothing scans the base image | `npm audit` sees no OS package. Dependabot's `docker` ecosystem watches the `node:22-bookworm` tag; the layer itself is unscanned |
+
+### The production dependency audit
+
+**Built** ([`features/0038`](../../features/0038-production-dependency-triage-and-an-audit-gate.md)). `npm run audit:prod` runs `scripts/audit-production.mjs`, the `dependency-audit` job runs it on every pull request, and `.github/dependabot.yml` opens the updates weekly. The procedure, the triage of 2026-09-03 and the exception policy are in [`docs/runbooks/dependency-audit.md`](../runbooks/dependency-audit.md); this section records what the design settled.
+
+**`npm audit` describes no artifact this project ships, in both directions.** One lockfile spans three Dockerfiles, so the raw number counts advisories against a test runner that reaches no serving image — and hides that `Dockerfile.backend`'s runtime stage copies the *hoisted* `/app/node_modules`, which means **every workspace's production tree is inside the API image, the SPA's included**. On 2026-09-03 `vue` and `postcss` were in the API image. The gate therefore enumerates the shipped set **from the built image**, never from a manifest — the same argument `tests/config-coverage.spec.ts` makes about environment variables: a hand-written inventory is a second source of truth and drifts.
+
+**A missing shipped set exits `2`, not `0`.** A gate that degrades to "no findings" when Docker is unavailable is worse than no gate, because it is believed. CI builds the image itself and never reads the committed `.audit-shipped.json` snapshot, so it cannot end up measuring an image nobody ships.
+
+**Exceptions expire.** `.audit-exceptions.json` takes an advisory id, a package, a reachability argument and a date, and the run fails once the date passes. The alternative — lowering the failure threshold until the build is quiet — accepts everything silently and records no reasoning. Only `high` and `critical` block; moderates are reported and not gated, which is why the `qs` advisories under `express@4.22.2` are documented in the runbook rather than excepted.
+
+**`npm update` is not a safe no-op here**, and there is evidence rather than a worry: a blanket update moved `pdfjs-dist` *into* its vulnerable band, and the `bcrypt` 5→6 bump changed npm's hoisting enough that `Dockerfile.backend` failed on `COPY … /app/backend/node_modules` — which is why that stage now creates the directory explicitly. Both are why Dependabot does not auto-merge.
 
 ## Observability
 

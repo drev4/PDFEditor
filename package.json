@@ -45,7 +45,8 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "setup": "npm install && npm run db:generate",
-    "check:node": "node scripts/check-node.mjs --native"
+    "check:node": "node scripts/check-node.mjs --native",
+    "audit:prod": "node scripts/audit-production.mjs"
   },
   "workspaces": [
     "frontend",
@@ -53,7 +54,8 @@
   ],
   "devDependencies": {
     "@playwright/test": "^1.58.0",
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "semver": "^7.8.5"
   },
   "engines": {
     "node": ">=22.12.0"
