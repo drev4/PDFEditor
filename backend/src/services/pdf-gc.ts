@@ -19,17 +19,30 @@ import { pdfFilenameFrom } from './pdf-url.js'
  * `remove(pdfFilenameFrom(form.pdfUrl))`. It is wrong, and wrong in the
  * direction that destroys data.
  *
- * `Form.pdfUrl` is an **unconstrained client-supplied string** — `createFormSchema`
- * and `updateFormSchema` accept any `z.string()`, which is its own backlog row —
- * so two forms can reference one key, and nothing requires them to belong to the
- * same organization. The editor's save path uploads a new document and repoints
- * the form without deleting the old one, so keys are abandoned and reused in
- * ordinary use as well.
+ * Two forms can reference one key. The editor's save path uploads a new document
+ * and repoints the form without deleting the old one, so keys are abandoned and
+ * reused in ordinary use, and nothing stops a member building a second form on
+ * the same upload.
+ *
+ * Until features/0039 they need not even have belonged to the same organization:
+ * `Form.pdfUrl` was an unconstrained client-supplied string that
+ * `createFormSchema` and `updateFormSchema` accepted as any `z.string()`. It now
+ * has to name an `Upload` owned by the acting organization
+ * (`services/uploads.ts`).
  *
  * So the question is never "which key did this form have" but **"is any surviving
  * form still using this key"**, and it can only be answered *after* the rows are
  * gone. Hence the two-step shape: collect the candidate keys while the rows still
  * exist, then call `collectOrphanDocuments` once they do not.
+ *
+ * **features/0039 narrowed who can create an alias and did not remove aliasing**,
+ * so this question is still the right one. A `pdfUrl` must now name an `Upload`
+ * belonging to the acting organization, which closes the cross-tenant case — but
+ * two forms *in one organization* can still share a key, because the editor
+ * repoints a form at a newly uploaded document without deleting the old one
+ * (`useFormManagement.ts`, `FormSavePanel.vue`) and nothing stops a member
+ * building a second form on the same upload. Going back to
+ * `remove(pdfFilenameFrom(form.pdfUrl))` would destroy a live form's document.
  *
  * ## Rows first, bytes second
  *
@@ -104,6 +117,13 @@ export async function collectOrphanDocuments(keys: string[]): Promise<void> {
 
       const backup = backupKeyFor(key)
       if (await storage.exists(backup)) await storage.remove(backup)
+
+      // The ownership record goes with the object it describes, never before it
+      // (features/0039). An `Upload` row outliving its bytes is a key the
+      // organization may still point a form at and which 404s on every read —
+      // exactly the state the bytes-first ordering in `routes/upload.ts` exists
+      // to avoid, mirrored here.
+      await prisma.upload.deleteMany({ where: { key } })
 
       logger.info({ key }, 'Removed stored PDF for a deleted form')
     } catch (error) {

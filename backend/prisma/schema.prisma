@@ -20,6 +20,7 @@ model User {
   refreshTokens RefreshToken[]
   createdApiKeys ApiKey[]
   createdWebhookEndpoints WebhookEndpoint[]
+  uploads       Upload[]
 
   /// Which organization this account is currently acting in (features/0023).
   ///
@@ -75,6 +76,7 @@ model Organization {
   subscription  Subscription?
   apiKeys       ApiKey[]
   webhookEndpoints WebhookEndpoint[]
+  uploads       Upload[]
 
   @@map("organizations")
 }
@@ -558,4 +560,55 @@ model StripeEvent {
   processedAt DateTime @default(now()) @map("processed_at")
 
   @@map("stripe_events")
+}
+
+/// A PDF this organization uploaded, and the record that makes `Form.pdfUrl`
+/// checkable (features/0039).
+///
+/// **This table exists to answer one question: may this organization point a
+/// form at this key.** Before it, `createFormSchema` accepted any `z.string()`
+/// and `canonicalPdfUrl` validated shape alone, so any well-formed filename was
+/// accepted from anybody — and the filename is not a secret, because
+/// `GET /api/forms/public/:shareId` hands a signed URL containing it to every
+/// respondent. Anyone sent a share link could therefore point their own form at
+/// another organization's document and be issued fresh signed URLs for ever,
+/// which defeats `UPLOAD_URL_TTL_SECONDS` entirely.
+///
+/// **It is not a lifecycle record and must not become one.** Whether the bytes
+/// may be removed is still "does any surviving form reference this key", asked
+/// by `services/pdf-gc.ts`, because two forms *in one organization* can
+/// legitimately share a document — the editor repoints a form at a new upload
+/// without deleting the old one. A row here is deleted when the collector
+/// removes the object, never before.
+model Upload {
+  id             String   @id @default(uuid())
+  /// The storage key, exactly as `middleware/upload.ts` minted it and as
+  /// `services/pdf-url.ts` parses it back out of a `pdfUrl`. Unique because one
+  /// object has one owner; the key is the join between the two stores.
+  key            String   @unique
+  /// The owner, and **the only authorization input on this table**. Cascades:
+  /// deleting an organization takes its upload records with it, in the same
+  /// step as its forms (features/0029 removes the bytes separately, and rows go
+  /// before bytes there for the reason its module comment gives).
+  organizationId String   @map("organization_id")
+  /// Provenance, not ownership — the same split `Form.createdByUserId`
+  /// documents. Nullable and `SetNull` because a deleted user must not take the
+  /// organization's documents with them, and **no authorization check may read
+  /// it**: a colleague uploads a document and somebody else builds the form on
+  /// it, which is ordinary B2B use and is why the check above is scoped to the
+  /// organization.
+  uploadedByUserId String? @map("uploaded_by_user_id")
+  /// What the customer called the file. Display only; never used to build a
+  /// path — `key` is the only thing that addresses storage.
+  originalName   String?  @map("original_name")
+  /// Bytes, as multer measured them. Null on rows created by the 0039 backfill,
+  /// which had no way to know.
+  size           Int?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("uploads")
 }

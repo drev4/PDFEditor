@@ -208,6 +208,12 @@ describe('The API mints a signed URL on every read', () => {
   it('keeps the stored URL canonical when a client sends back a signed one', async () => {
     prismaMock.form.findFirst.mockResolvedValue(storedForm as any)
     prismaMock.form.update.mockResolvedValue(storedForm as any)
+    // Since features/0039 a `pdfUrl` must name an upload belonging to the
+    // acting organization, so the row has to exist for this test to reach the
+    // behaviour it is about. Note what is being asserted through it: the
+    // ownership check takes the value the client sent — a *signed* URL — and
+    // still stores the canonical one.
+    prismaMock.upload.findUnique.mockResolvedValue({ organizationId: 'org-1' } as never)
 
     const signed = signPdfUrl(CANONICAL)!
     const res = await request(app).put('/api/forms/form-1').send({ pdfUrl: signed })

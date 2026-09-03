@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { upload, newPdfKey } from '../middleware/upload.js'
 import { authenticate, AuthRequest } from '../middleware/auth.js'
+import { requireOrganizationId } from '../middleware/membership.js'
+import { prisma } from '../services/db.js'
 import { AppError } from '../middleware/errorHandler.js'
 import { pdfProcessor } from '../services/pdf-processor.js'
 import { pdfStorage } from '../services/pdf-storage.js'
@@ -22,6 +24,15 @@ uploadRouter.post('/', authenticate, upload.single('pdf'), asyncHandler(async (r
     throw new AppError(400, 'No file uploaded')
   }
 
+  // An upload has to land in an organization, because that is what owns it and
+  // what every later check reads (features/0039). Resolved before the bytes are
+  // touched: a caller with no membership has nowhere to put a document, and
+  // storing it first would leave an object no row will ever own.
+  //
+  // No real account is in that state — registration creates a personal
+  // organization transactionally — so this is a boundary rather than a flow.
+  const organizationId = await requireOrganizationId(req)
+
   const pdfBuffer = req.file.buffer
 
   const isValid = await pdfProcessor.validatePDF(pdfBuffer)
@@ -41,6 +52,25 @@ uploadRouter.post('/', authenticate, upload.single('pdf'), asyncHandler(async (r
 
   const filename = newPdfKey()
   await pdfStorage().put(filename, pdfBuffer)
+
+  // Bytes first, row second — the **opposite** order from deletion in
+  // `services/pdf-gc.ts`, and for the same reason: it is the arrangement whose
+  // failure is the reversible one. A row written before a `put` that then fails
+  // is a key the customer may point a form at and which 404s on every read; an
+  // object written before a row that then fails is an orphan, which is waste
+  // and is recoverable.
+  //
+  // `uploadedByUserId` is provenance and nothing reads it for authorization —
+  // the same split `Form.createdByUserId` documents.
+  await prisma.upload.create({
+    data: {
+      key: filename,
+      organizationId,
+      uploadedByUserId: req.userId!,
+      originalName: req.file.originalname,
+      size: req.file.size
+    }
+  })
 
   // Through `canonicalPdfUrl`, never assembled here: the unsigned canonical
   // URL is the only shape that may be persisted in `Form.pdfUrl`, and
