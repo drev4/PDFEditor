@@ -12,6 +12,34 @@ COPY frontend ./frontend
 ARG VITE_API_URL
 RUN node -e "const value=process.env.VITE_API_URL; if(!value) throw new Error('VITE_API_URL build arg is required'); const url=new URL(value); if(!/^https?:$/.test(url.protocol)||!url.pathname.endsWith('/api')) throw new Error('VITE_API_URL must be an absolute HTTP(S) URL ending in /api')"
 ENV VITE_API_URL=${VITE_API_URL}
+
+# Error tracking for the SPA (features/0041). It has to be a build ARG for the
+# same reason `VITE_API_URL` does: Vite bakes `VITE_*` into the bundle at build
+# time, and a Docker build sees none of the service's environment unless it is
+# declared here.
+#
+# **This was the defect.** features/0031 wrote this file when `VITE_API_URL` was
+# the only compile-time value; features/0034 added `VITE_SENTRY_DSN` and never
+# came back. Setting it in the platform therefore did nothing at all — the
+# bundle came out byte-identical and the CSP's `connect-src`, which is derived
+# from this value, never learned the ingest origin, so the browser would have
+# blocked every report anyway. Nothing failed and the deploy was green.
+#
+# **The rule here is deliberately weaker than the one above, and it is the thing
+# a reader will want to "fix".** `VITE_API_URL` throws when missing because
+# without it the SPA talks to nothing, so the image must not build. Error
+# tracking is optional on purpose: no DSN means it is off, which is a deployment
+# with less visibility rather than a broken one (`config/validate-env.ts` treats
+# the backend's `SENTRY_DSN` the same way). Requiring it would make the image
+# unbuildable for anyone without a Sentry account.
+#
+# Present-but-malformed is a different case and does fail, because its failure
+# mode is silence: the SDK disables itself and the derived CSP origin comes out
+# wrong, so reports are blocked in the browser with nothing said anywhere.
+ARG VITE_SENTRY_DSN
+RUN node -e "const value=process.env.VITE_SENTRY_DSN; if(!value) process.exit(0); let url; try{url=new URL(value)}catch{throw new Error('VITE_SENTRY_DSN is set but is not a URL. Leave it empty to build without error tracking.')} if(!/^https?:$/.test(url.protocol)) throw new Error('VITE_SENTRY_DSN must be an http(s) DSN; the CSP connect-src origin is derived from it')"
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+
 RUN npm run build --workspace=frontend
 
 FROM nginx:1.30.4-alpine AS runtime
