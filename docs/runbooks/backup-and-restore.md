@@ -78,6 +78,10 @@ It takes the dump, finds the manifest that dump produced, and copies the documen
 
 **Alerting is the platform's job and it is not optional.** Both halves exit non-zero on failure, into a void. Configure the scheduled job to notify on a non-zero exit; without that, a backup that stops working is discovered at the restore, which is the worst possible moment.
 
+**The artifacts live in the volume and nowhere else, and that was decided on 2026-09-03.** Nothing uploads them. R2 holds the live PDFs and is *read* by the backup; looking there for a backup finds nothing, correctly.
+
+Uploading the trio to a separate backup bucket was considered and **deliberately not built**. The argument against remains the one this runbook has always made: a copy living with the provider that holds the database is not an off-site copy, and an automatic upload would make that box look ticked. The accepted cost is concrete and worth naming, because it is paid at the worst moment: **getting files out of a platform volume is awkward**, so both the off-site copy and running `restore:verify` against a production backup begin with extracting the directory by hand. If that friction ever stops the drill from happening, revisit this — a drill that does not run is not a control.
+
 **Retention is your decision and nothing prunes.** One directory per run, so deleting the oldest is a directory removal. Decide the number and write it down here.
 
 Turn on the platform's own PostgreSQL snapshots and the bucket's versioning. They are a better answer than these scripts for the common cases — one deleted object, a mistake ten minutes ago — because they are continuous and need no host to run on.
