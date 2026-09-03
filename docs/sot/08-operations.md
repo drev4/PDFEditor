@@ -23,7 +23,7 @@ This makes the repository deployable, not deployed. The provider, same-site host
 
 ## The supported Node version
 
-**Node `>=22.12.0`**, written in `.nvmrc` (22.12.0) and enforced three ways, because `engines` alone only warns:
+**Node `>=22.22.2`**, written in `.nvmrc` (22.23.2) and enforced three ways, because `engines` alone only warns:
 
 | Guard | Catches |
 |---|---|
@@ -194,7 +194,7 @@ An endpoint disabled with *"The endpoint URL is no longer deliverable"* is not a
 
 ### `DEV_PLAN_KEY`, and the allowlist that makes it safe
 
-Plan limits are real from [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) onward, which makes the product harder to *build* — one published form on the free plan is not a workable development environment. `DEV_PLAN_KEY` is the escape hatch, and it is **meant to be deleted** once there are separate environments to run in. Removing it is a block at the bottom of `backend/src/services/plans.ts`, two call sites in `entitlements.ts`, and a line in `.env.example`.
+Plan limits are real from [`features/0012`](../../features/0012-plan-catalogue-and-entitlements.md) onward, which makes the product harder to *build* — a one-form free plan is not a workable development environment. `DEV_PLAN_KEY` is the escape hatch, and it is **meant to be deleted** once there are separate environments to run in. Removing it is a block at the bottom of `backend/src/services/plans.ts`, two call sites in `entitlements.ts`, and a line in `.env.example`.
 
 The dangerous version of this feature is the one that reads `NODE_ENV !== 'production'`. That honours the override whenever `NODE_ENV` is unset, misspelled, or dropped by a process manager — every one of which is an ordinary way a real deployment ends up giving the product away with **no error anywhere**. So the check is an **allowlist**: the override applies when `NODE_ENV` is exactly `development` or `test`, and in every other case it is ignored and a `console.error` says so. The failure mode of a missing `NODE_ENV` is that limits are enforced.
 
@@ -231,7 +231,7 @@ All four are optional. With none of them set, billing is off, the billing routes
 
 `backend` depends on `re2` (see [04-backend-patterns](./04-backend-patterns.md#8-code-like-input-is-compiled-in-one-audited-place)). Its install script downloads a prebuilt binary from GitHub and falls back to compiling with `node-gyp`, so a build toolchain is needed if that download is unavailable — `ubuntu-latest` in CI has one.
 
-`re2@1.24.1` itself declares `engines: { node: ">=22" }`, which is **why this repository supports Node 22.12+ and nothing older** — adding it in [`features/0004`](../../features/0004-safe-author-supplied-regex.md) silently dropped Node 20, and `engines` went on claiming `^20.19.0 || >=22.12.0` until `engine-strict` caught it.
+**`re2` is what sets this repository's Node floor, and it moves.** Adding it in [`features/0004`](../../features/0004-safe-author-supplied-regex.md) declared `engines: { node: ">=22" }` and silently dropped Node 20, while the root `engines` went on claiming `^20.19.0 || >=22.12.0` until `engine-strict` caught it. Updating it to `1.26.1` in [`features/0038`](../../features/0038-production-dependency-triage-and-an-audit-gate.md) narrowed that to `^22.22.2 || ^24.15.0 || >=26.0.0`, which **broke CI at `npm ci`**: `.nvmrc` still said 22.12.0, every job installs the version in `.nvmrc`, and `engine-strict=true` turns an unsatisfied `engines` into a failed install. It failed only in CI, because the developer's local Node already satisfied the new range. The floor is now `>=22.22.2` with `.nvmrc` at 22.23.2. **Treat `re2`'s `engines` as a thing a dependency bump can change** — read it after any `re2` update and move `.nvmrc` and the root `engines` together, or CI installs nothing.
 
 The binary is tied to a **Node ABI**: one built under Node 22 will not load under Node 20 and vice versa. `npm ci` builds the right one for whichever Node runs it. Locally, **after switching Node version run `npm rebuild re2`** — otherwise the engine fails to load. `npm run check:node` checks exactly this and says so.
 
@@ -387,7 +387,7 @@ Two guards, deliberately overlapping:
 1. `backend/package.json` has `"postinstall": "prisma generate"`, so a fresh clone plus `npm ci` yields a working client.
 2. Every CI job that touches the database also runs `npx prisma generate` explicitly, so a pipeline using `--ignore-scripts` still works and a reader of the workflow can see it happen.
 
-**For a production build**, note that `prisma` is a devDependency: generate the client *before* pruning with `--omit=dev`, or the postinstall runs without its CLI.
+**For a production build**, generate the client *before* pruning with `--omit=dev`, which is what `Dockerfile.backend` does — the `build` stage runs `db:generate` and `production-dependencies` prunes afterwards. `prisma` is declared a devDependency in `backend/package.json`, but note that it also arrives as a **production** dependency of `@prisma/client`, so it is inside the runtime image either way; do not rely on that, because it is Prisma's packaging decision and not this repository's.
 
 ### The E2E job waits for the API, not just the frontend
 
@@ -400,7 +400,20 @@ What CI still does not do:
 | No lint | There is no ESLint configuration at all — see [09-quality-and-testing.md](./09-quality-and-testing.md) |
 | Coverage is measured but not enforced | No threshold, and Codecov failures are ignored |
 | Migrations are applied but never *tested* against existing data | The database jobs run `migrate deploy` against a fresh database, so a broken migration fails CI. Nothing exercises a migration against a database that already holds rows |
-| No dependency or secret scanning | No Dependabot, no `npm audit` gate, no secret scan. The pruned backend image built for [`features/0031`](../../features/0031-production-deployment.md) reports 15 production advisories (1 critical, 13 high, 1 moderate); they are filed for triage rather than hidden by a green build |
+| No secret scanning | No secret scan of the history or of a pull request. **Dependency scanning is closed** ([`features/0038`](../../features/0038-production-dependency-triage-and-an-audit-gate.md)): the `dependency-audit` job gates every pull request and `.github/dependabot.yml` opens the updates |
+| Nothing scans the base image | `npm audit` sees no OS package. Dependabot's `docker` ecosystem watches the `node:22-bookworm` tag; the layer itself is unscanned |
+
+### The production dependency audit
+
+**Built** ([`features/0038`](../../features/0038-production-dependency-triage-and-an-audit-gate.md)). `npm run audit:prod` runs `scripts/audit-production.mjs`, the `dependency-audit` job runs it on every pull request, and `.github/dependabot.yml` opens the updates weekly. The procedure, the triage of 2026-09-03 and the exception policy are in [`docs/runbooks/dependency-audit.md`](../runbooks/dependency-audit.md); this section records what the design settled.
+
+**`npm audit` describes no artifact this project ships, in both directions.** One lockfile spans three Dockerfiles, so the raw number counts advisories against a test runner that reaches no serving image — and hides that `Dockerfile.backend`'s runtime stage copies the *hoisted* `/app/node_modules`, which means **every workspace's production tree is inside the API image, the SPA's included**. On 2026-09-03 `vue` and `postcss` were in the API image. The gate therefore enumerates the shipped set **from the built image**, never from a manifest — the same argument `tests/config-coverage.spec.ts` makes about environment variables: a hand-written inventory is a second source of truth and drifts.
+
+**A missing shipped set exits `2`, not `0`.** A gate that degrades to "no findings" when Docker is unavailable is worse than no gate, because it is believed. CI builds the image itself and never reads the committed `.audit-shipped.json` snapshot, so it cannot end up measuring an image nobody ships.
+
+**Exceptions expire.** `.audit-exceptions.json` takes an advisory id, a package, a reachability argument and a date, and the run fails once the date passes. The alternative — lowering the failure threshold until the build is quiet — accepts everything silently and records no reasoning. Only `high` and `critical` block; moderates are reported and not gated, which is why the `qs` advisories under `express@4.22.2` are documented in the runbook rather than excepted.
+
+**`npm update` is not a safe no-op here**, and there is evidence rather than a worry: a blanket update moved `pdfjs-dist` *into* its vulnerable band, and the `bcrypt` 5→6 bump changed npm's hoisting enough that `Dockerfile.backend` failed on `COPY … /app/backend/node_modules` — which is why that stage now creates the directory explicitly. Both are why Dependabot does not auto-merge.
 
 ## Observability
 
@@ -454,6 +467,49 @@ Two failure modes worth knowing, because both are silent by nature and both were
 
 - **A malformed `SENTRY_DSN` does not make the SDK complain.** It disables itself quietly, so the process boots, serves, and reports nothing. That was observed, not assumed. `validate-env.ts` now refuses to boot on it, the same treatment `WEBHOOK_SIGNING_KEY` gets.
 - **The SPA's CSP is an allowlist**, so an ingest origin missing from `connect-src` means the browser refuses every event while the SDK reports success. The origin is therefore *derived from the DSN* in `frontend/src/services/sentry-dsn.ts` rather than configured separately, and a DSN that is not a URL **fails the build** rather than emitting a policy without it.
+
+## `VITE_SENTRY_DSN` is a build argument, not a runtime variable
+
+Setting it on the platform and restarting the SPA **does nothing**, and nothing says so. Vite bakes `VITE_*` into the bundle at build time, and a Docker build sees none of the service environment unless the value is declared as an `ARG` — which `Dockerfile.frontend` did not do for this variable until [`features/0041`](../../features/0041-sentry-reaches-the-spa.md). It was configured correctly in Railway on 2026-09-03 and the SPA reported nothing for a day.
+
+**Two signals check it from outside, and both must move.** Neither needs access to the platform:
+
+| Signal | Wrong | Right |
+|---|---|---|
+| Bundle hash in `app.docaiflow.com`s HTML | unchanged after setting the variable | different |
+| `grep` for `ingest.*.sentry.io` in that bundle | 0 | 1 or more |
+| `connect-src` in the CSP meta tag | `'self' <api> blob:` | the same plus `https://o….ingest.<region>.sentry.io` |
+
+The `connect-src` one is the decisive check: the origin is **derived from the DSN at build time**, so a CSP without it means the build never saw the value — and even if the SDK had started, the browser would block every report with nothing logged anywhere.
+
+A malformed value now fails the image build with a message. Absent is still valid and builds without error tracking, deliberately: no DSN means less visibility, not a broken deployment.
+
+### Proving it works without waiting for a failure
+
+Only 5xx are ever sent, so a correctly configured deployment is silent until something genuinely breaks. `SENTRY_VERIFY_ON_BOOT=true` makes each backend process send **one** event at boot, tagged with its role, and log that it did.
+
+**Turn it off again.** The platform restarts services on its own, Sentry charges per event, and a project full of boot messages is one where nobody sees the real failure. Set it, redeploy, confirm both `api` and `worker` appear, unset it.
+
+It exists because the SPA can be checked from outside and the backend cannot — and the worker is the one that matters most: nothing waits on its responses, so an unhandled rejection there is the only signal it ever produces. Exposing the state on `/health/ready` was rejected; that endpoint is public and its contract is states and queue counts, never configuration.
+
+Each process also logs which of three states it is in at boot — not configured, configured but off, or reporting. `Configured` and `reporting` are different, and the difference is what fails silently.
+
+## Free is on beta limits, and they have to be reverted
+
+`PLANS.free` currently reads `maxPublishedForms: 10`, `maxResponsesPerMonth: 1000`, `seats: 5`. **The design canvas says 1 / 50 / 1**, and those are the numbers to restore ([`features/0040`](../../features/0040-beta-plan-limits.md)).
+
+Why they moved is an operational fact rather than a product decision. The private beta runs with **Stripe unconfigured**, and `services/stripe.ts` is the only writer of `Organization.planKey` — so every organization stays on `free` for ever, and the catalogue numbers are not one plan among three, they are *the whole product*. On 1 / 50 / 1 a beta customer publishes one form, takes fifty responses and invites nobody.
+
+`DEV_PLAN_KEY` is not the escape hatch here and must not be made into one. It is honoured only when `NODE_ENV` is exactly `development` or `test`, so that a missing or misspelled value **enforces** limits rather than lifting them; widening that allowlist to production would make a deliberately silent failure into the normal way to operate, and would then win over a real subscription the day Stripe is configured.
+
+**The revert is a single constant, and that is now true rather than aspirational.** Before 0040 the limit lived in `plans.ts` *and* in eight tests that wrote it as a literal — "the second published form is refused", "the first invitation is refused" — so changing it put the suite in the red. Every one of those now reads `PLANS.free`, and `tests/entitlements.spec.ts` carries the reminder that Free deviates from the canvas.
+
+| When | What to do |
+|---|---|
+| Stripe is configured and public registration opens | Restore `maxPublishedForms: 1`, `maxResponsesPerMonth: 50`, `seats: 1` in `services/plans.ts`, and the matching expectations in `tests/entitlements.spec.ts` |
+| Before that | Nothing. The numbers are correct for a beta where Free is the only plan anybody can be on |
+
+Note what was deliberately **not** changed: `hasBranding` stays `false`, so the product mark shows on every beta form, and `hasApiAccess` stays `false`, so the API remains a Team feature. Neither is a limit a beta customer runs into by working normally.
 
 ## Backups and recovery
 

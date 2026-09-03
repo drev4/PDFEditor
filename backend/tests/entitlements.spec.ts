@@ -67,12 +67,25 @@ describe('plan limits', () => {
   }
 
   describe('the catalogue', () => {
-    it('takes the free plan straight from the design canvas', () => {
-      // These numbers are the contract with the `Plans` artboard. If the canvas
-      // changes, this fails first — which is the point.
-      expect(PLANS.free.maxPublishedForms).toBe(1)
-      expect(PLANS.free.maxResponsesPerMonth).toBe(50)
-      expect(PLANS.free.seats).toBe(1)
+    it('keeps Free on beta limits, and records what to revert to', () => {
+      // **This test used to assert the `Plans` artboard's numbers — 1 / 50 / 1 —
+      // and it deliberately no longer does** (features/0040). Free deviates from
+      // the canvas for the length of the private beta, because Stripe is
+      // unconfigured, the only writer of `planKey` is its webhook, and on the
+      // canvas numbers a beta customer can publish one form and invite nobody.
+      //
+      // So this is now the revert reminder rather than the canvas contract.
+      // When Stripe is configured and public registration opens, put 1 / 50 / 1
+      // back here and in `services/plans.ts`, and this becomes the canvas
+      // contract again.
+      expect(PLANS.free.maxPublishedForms).toBe(10)
+      expect(PLANS.free.maxResponsesPerMonth).toBe(1000)
+      expect(PLANS.free.seats).toBe(5)
+
+      // Untouched by the beta, and still the canvas contract: a free plan shows
+      // the product mark, and the API stays a Team feature.
+      expect(PLANS.free.hasBranding).toBe(false)
+      expect(PLANS.free.hasApiAccess).toBe(false)
     })
 
     it('gives paid plans unlimited published forms', () => {
@@ -120,7 +133,9 @@ describe('plan limits', () => {
     it('answers 402, not 403', async () => {
       prismaMock.form.findFirst.mockResolvedValue(form as any)
       onPlan('free')
-      prismaMock.form.count.mockResolvedValue(1)
+      // The plan's own number, so this keeps meaning "already at the limit"
+      // whatever the limit is (features/0040).
+      prismaMock.form.count.mockResolvedValue(PLANS.free.maxPublishedForms!)
 
       const res = await request(app)
         .patch('/api/forms/form-1/status')
@@ -191,7 +206,9 @@ describe('plan limits', () => {
     it('404s the public read when the allowance is spent', async () => {
       prismaMock.form.findUnique.mockResolvedValue({ ...form, status: 'published' } as any)
       onPlan('free')
-      prismaMock.usageCounter.findUnique.mockResolvedValue({ responses: 50 } as any)
+      prismaMock.usageCounter.findUnique.mockResolvedValue(
+        { responses: PLANS.free.maxResponsesPerMonth! } as any
+      )
 
       const res = await request(app).get('/api/forms/public/share-123')
 
@@ -209,7 +226,8 @@ describe('plan limits', () => {
       prismaMock.$transaction.mockImplementation(async (fn: any) => {
         const tx = {
           organization: { findUnique: async () => ({ planKey: 'free' }) },
-          usageCounter: { upsert: async () => ({ responses: 51 }) },
+          // One past the allowance, whatever the allowance is.
+          usageCounter: { upsert: async () => ({ responses: PLANS.free.maxResponsesPerMonth! + 1 }) },
           response: { create: async () => form }
         }
         return fn(tx)
@@ -264,6 +282,9 @@ describe('plan limits', () => {
       onPlan('free')
       prismaMock.form.count.mockResolvedValue(1)
       prismaMock.usageCounter.findUnique.mockResolvedValue({ responses: 12 } as any)
+      // One published form and twelve responses are arbitrary usage numbers
+      // here — what this test asserts is the *shape* of the payload. The plan
+      // half of it is read from the catalogue below so it cannot drift.
       prismaMock.membership.count.mockResolvedValue(1)
       prismaMock.invitation.count.mockResolvedValue(0)
 
@@ -274,9 +295,9 @@ describe('plan limits', () => {
         plan: {
           key: 'free',
           name: 'Free',
-          maxPublishedForms: 1,
-          maxResponsesPerMonth: 50,
-          seats: 1,
+          maxPublishedForms: PLANS.free.maxPublishedForms,
+          maxResponsesPerMonth: PLANS.free.maxResponsesPerMonth,
+          seats: PLANS.free.seats,
           // Added by features/0021, so the API keys screen knows whether to
           // draw a create form. It decides what is rendered and nothing else:
           // `assertHasApiAccess` in the route is still the enforcer.

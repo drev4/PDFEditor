@@ -88,7 +88,7 @@ Each of these is true or false when the work is finished.
 
 **Done**, with one goal partially open and named below.
 
-Built on `origin/develop` rather than on top of [`features/0031`](0031-production-deployment.md), which is finished but unmerged. Everything the scripts touch already exists on `develop`; the only cost is that `docs/runbooks/backup-and-restore.md` cannot yet link `production-deployment.md`, and it says so in the one place it would have. **The reciprocal link belongs in that runbook when 0031 merges.**
+Built on `origin/develop` rather than on top of [`features/0031`](0031-production-deployment.md), which is finished but unmerged. Everything the scripts touch already exists on `develop`; the only cost is that `docs/runbooks/backup-and-restore.md` cannot yet link `production-deployment.md`, and it says so in the one place it would have. **The reciprocal link belongs in that runbook when 0031 merges.** — 0031 merged as PR #50 and both links now exist, added in `chore/backlog-drift-after-0031-merge` together with the two closed backlog rows that merge had resurrected.
 
 **Three deliverables, plus a service the spec did not ask for.** `backend/src/services/backup.ts` holds every decision — the two refusals, the manifest, the comparisons, the document check — with no shelling out, so `tests/backup.spec.ts` (30 tests) exercises them without a PostgreSQL binary, a bucket or a network. The scripts (`backup-db.ts`, `backup-objects.ts`, `restore-verify.ts`) are thin wrappers over it. The spec said "three things and no more"; splitting the logic out was the only way to satisfy its own constraint that no test may require `pg_dump`.
 

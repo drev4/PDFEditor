@@ -280,9 +280,12 @@ describe('stripe subscriptions', () => {
       )
       expect((await stateOf(organizationId)).planKey).toBe('pro')
 
-      // Three published forms — two more than the free plan allows — each with a
-      // response somebody actually submitted.
-      for (let i = 0; i < 3; i++) {
+      // Two more published forms than the free plan allows, each with a
+      // response somebody actually submitted. The count comes from the
+      // catalogue (features/0040) so this keeps being "past the limit" whatever
+      // the limit is.
+      const overTheLimit = PLANS.free.maxPublishedForms! + 2
+      for (let i = 0; i < overTheLimit; i++) {
         const form = await createForm(userId, { title: `Form ${i}`, status: 'published' })
         const field = await createField(form.id, { name: `field_${i}` })
         await createResponse(form.id, { [field.id]: `answer ${i}` })
@@ -303,17 +306,17 @@ describe('stripe subscriptions', () => {
       const stillPublished = await prisma.form.count({
         where: { organizationId, status: 'published' }
       })
-      expect(stillPublished).toBe(3)
+      expect(stillPublished).toBe(overTheLimit)
 
       const responses = await prisma.response.count({
         where: { form: { organizationId } }
       })
-      expect(responses).toBe(3)
+      expect(responses).toBe(overTheLimit)
 
       const answers = await prisma.answer.count({
         where: { response: { form: { organizationId } } }
       })
-      expect(answers).toBe(3)
+      expect(answers).toBe(overTheLimit)
 
       // And the limit does bite on *new* state: a fourth form cannot be
       // published. `assertCanPublishForm` was not changed by this feature —

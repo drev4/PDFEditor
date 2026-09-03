@@ -3,6 +3,7 @@ import request from 'supertest'
 import { app } from '../../src/app.js'
 import { prisma } from '../../src/services/db.js'
 import { createUser, createForm, grantSeats } from './helpers.js'
+import { PLANS } from '../../src/services/plans.js'
 
 /**
  * Two requests must not both pass the same plan limit
@@ -28,12 +29,20 @@ import { createUser, createForm, grantSeats } from './helpers.js'
  */
 describe('plan limits under concurrency (database-backed)', () => {
   /**
-   * Publishing is the cheaper race to set up: the free plan keeps one form
-   * published, so an organization with nothing published has exactly one slot
-   * and two drafts is one too many.
+   * Publishing is the cheaper race to set up: fill the plan to one short of its
+   * limit, and two drafts are then one too many for the single remaining slot.
+   *
+   * The fill count is read from the catalogue rather than assuming the free
+   * plan keeps one form published (features/0040), so the race is still run on
+   * the *last* slot wherever the limit sits.
    */
-  async function organizationWithTwoDrafts() {
+  async function organizationOnItsLastSlot() {
     const { user, authHeader, organization } = await createUser()
+
+    for (let i = 0; i < PLANS.free.maxPublishedForms! - 1; i++) {
+      await createForm(user.id, { status: 'published' })
+    }
+
     const first = await createForm(user.id, { status: 'draft' })
     const second = await createForm(user.id, { status: 'draft' })
     return { authHeader, organization, first, second }
@@ -88,7 +97,7 @@ describe('plan limits under concurrency (database-backed)', () => {
   })
 
   it('lets exactly one of two concurrent publishes take the last slot', async () => {
-    const { authHeader, organization, first, second } = await organizationWithTwoDrafts()
+    const { authHeader, organization, first, second } = await organizationOnItsLastSlot()
 
     // One request through each publish path, because both call the limit and a
     // fix applied to only one of them would still be a bug.
@@ -105,15 +114,15 @@ describe('plan limits under concurrency (database-backed)', () => {
 
     const statuses = [a.status, b.status].sort()
     expect(statuses).toEqual([200, 402])
-    expect(await publishedCount(organization.id)).toBe(1)
+    expect(await publishedCount(organization.id)).toBe(PLANS.free.maxPublishedForms)
 
     const refused = a.status === 402 ? a : b
-    expect(refused.body.error).toMatch(/Free plan keeps 1 form published/)
+    expect(refused.body.error).toMatch(/Free plan keeps/)
   })
 
   it('does not let one organization block another', async () => {
-    const left = await organizationWithTwoDrafts()
-    const right = await organizationWithTwoDrafts()
+    const left = await organizationOnItsLastSlot()
+    const right = await organizationOnItsLastSlot()
 
     // Four publishes at once across two organizations. Each organization has
     // one slot, so the answer is one success each — never one overall, which is
@@ -126,13 +135,13 @@ describe('plan limits under concurrency (database-backed)', () => {
     ])
 
     expect(results.filter((r) => r.status === 200)).toHaveLength(2)
-    expect(await publishedCount(left.organization.id)).toBe(1)
-    expect(await publishedCount(right.organization.id)).toBe(1)
+    expect(await publishedCount(left.organization.id)).toBe(PLANS.free.maxPublishedForms)
+    expect(await publishedCount(right.organization.id)).toBe(PLANS.free.maxPublishedForms)
   })
 
   it('does not wait on a lock held for a different organization', async () => {
-    const left = await organizationWithTwoDrafts()
-    const right = await organizationWithTwoDrafts()
+    const left = await organizationOnItsLastSlot()
+    const right = await organizationOnItsLastSlot()
 
     // The test above says every organization gets its slot, which a single
     // global lock would also satisfy — slowly. This says the scope is the
