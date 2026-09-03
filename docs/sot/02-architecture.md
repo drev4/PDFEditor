@@ -28,7 +28,7 @@ Orchestration is plain **npm workspaces**. The root `package.json` delegates eve
 | PDF rendering (browser) | PDF.js | `pdfjs-dist ^5.4.296` |
 | PDF manipulation (both sides) | pdf-lib | `^1.17.1` |
 | API | Express | `^4.21.2` |
-| ORM | Prisma + PostgreSQL 16 | `@prisma/client ^6.2.1` |
+| ORM | Prisma + PostgreSQL. **Production is 18; local development and CI are 16** — see the backlog row on that gap | `@prisma/client ^6.2.1` |
 | Auth | `jsonwebtoken` + `bcrypt` | `^9.0.2`, `^5.1.1` |
 | Validation | Zod | `^3.24.1` |
 | Uploads | Multer (in memory) → `services/pdf-storage.ts` | `^2.0.2` |

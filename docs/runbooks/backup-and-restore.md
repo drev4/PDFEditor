@@ -39,7 +39,7 @@ Keep them wherever the deployment's secrets live, and verify that store is itsel
 
 ## Prerequisites
 
-- `pg_dump` and `pg_restore` from the PostgreSQL client package, **at least the server's major version**. The server is PostgreSQL 16 (`docker-compose.yml`); `pg_dump` refuses to run against a server newer than itself. On Debian this is `postgresql-client-16` from the PGDG repository — the version in Debian bookworm is 15 and will not do.
+- `pg_dump` and `pg_restore` from the PostgreSQL client package, **at least the server's major version**, and *the server* means the one being backed up. **Production runs PostgreSQL 18 and local development runs 16** (`docker-compose.yml`), so the client must be **18** — a newer client reads an older server, never the reverse. This was found the hard way: the first scheduled run in production died on `server version: 18.6 · pg_dump version: 16.15`. On Debian this is `postgresql-client-18` from PGDG; bookworm's own package is 15 and covers neither.
 - `DATABASE_URL` for the source, and the storage variables for whichever driver holds the documents. Both scripts load `.env` themselves.
 - A **scratch** database for the drill. Never the production one; the tooling refuses, but do not rely on that as the only control.
 
@@ -74,7 +74,7 @@ It takes the dump, finds the manifest that dump produced, and copies the documen
 
 **The image runs the compiled script and does not build.** `npm run backup` starts with `npm run build`, which is right at a terminal and wrong in a scheduled job: the image compiled `backend/dist` when it was built. It is also a removed failure — there is no `tsconfig.json` at the repository root, so a `tsc` whose working directory ends up there prints its usage instead of compiling, and a backup should not have a compiler on its critical path.
 
-**Run it from `Dockerfile.backup`, not the serving image.** It is its own file rather than a stage because a platform that builds a Dockerfile without selecting a stage always gets the final one — `Dockerfile.migrations` exists for the same reason. It carries `postgresql-client-16` from PGDG. None of the other images has `pg_dump` at all, and the Debian package is 15, which will not read a 16 server. The image runs `pg_dump --version` at build time so a missing client fails then rather than at 03:00 on the first night.
+**Run it from `Dockerfile.backup`, not the serving image.** It is its own file rather than a stage because a platform that builds a Dockerfile without selecting a stage always gets the final one — `Dockerfile.migrations` exists for the same reason. It carries `postgresql-client-18` from PGDG — pinned to the highest server it backs up, which is production, not the developer's Compose file. None of the other images has `pg_dump` at all. The image runs `pg_dump --version` at build time so a missing client fails then rather than at 03:00 on the first night.
 
 **Alerting is the platform's job and it is not optional.** Both halves exit non-zero on failure, into a void. Configure the scheduled job to notify on a non-zero exit; without that, a backup that stops working is discovered at the restore, which is the worst possible moment.
 
@@ -119,7 +119,7 @@ A pass prints the restore duration. Write it down here with the date; a drill no
 
 | Date | Dataset | Dump | Restore | Result |
 |---|---|---|---|---|
-| 2026-09-02 | Development database: 16 tables, 1,925 users, 1,824 organizations, 155 forms, 154 referenced documents, 56 responses | 736 KB in 0.4 s; objects 5.7 MB in 1.8 s | < 1 s | **Pass.** Migration, row counts across all 16 tables and all 154 documents verified. Run against PostgreSQL 16 with the `local` storage driver |
+| 2026-09-02 | Development database: 16 tables, 1,925 users, 1,824 organizations, 155 forms, 154 referenced documents, 56 responses | 736 KB in 0.4 s; objects 5.7 MB in 1.8 s | < 1 s | **Pass.** Migration, row counts across all 16 tables and all 154 documents verified. Run against PostgreSQL 16 with the `local` storage driver. **Note this drill has never run against 18**, which is what production is |
 
 Three things that run established this is not a vacuous pass, and are worth repeating on any future drill:
 
