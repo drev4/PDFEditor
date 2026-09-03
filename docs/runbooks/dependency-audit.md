@@ -77,11 +77,13 @@ Note the drift that motivated the automation: `features/0031` recorded **15** ad
 | `GHSA-ggr8-5vv4-36mx` | `deepmerge-ts`, and `@prisma/config` / `prisma` indirectly | Stack exhaustion merging recursive object graphs. **No in-range fix exists**: `@prisma/config` pins `deepmerge-ts` to exactly `7.1.5`, so only Prisma can clear it. Not reachable here: `require('@prisma/client')` loads neither `@prisma/config` nor `deepmerge-ts` (verified by inspecting `require.cache`), and the only loader is the Prisma CLI reading a `prisma.config.*` file — **this repository has none**. Expires 2026-12-01 |
 | `GHSA-x5fp-wj9c-mxmx`, `GHSA-4mjr-xmp4-gh2g` | `qs`, and `express` / `body-parser` indirectly | Both **moderate**, below the gate's failure threshold, so no exception entry is needed — but they are listed here so nobody thinks they were missed. `express@4.22.2` and `body-parser@1.20.6` declare `qs: ~6.15.1` and the fix is only in `6.16.0`, outside that range. Express 4.22.2 is the last 4.x release. Forcing an out-of-range minor on the request parser to clear a moderate is not a trade this codebase should take; **Express 5 is the durable answer and is a separate filed row** — it deletes `asyncHandler` and its scan, so it is its own piece of work |
 
-### Two things that went wrong during the work, and both are findings
+### Three things that went wrong during the work, and all three are findings
 
 **A blanket `npm update` moved a package *into* a vulnerable range.** `pdfjs-dist` was at `5.4.530`; the advisory band is `>=5.6.83 <6.2.108`; `npm update` took it to `5.7.284`. The declared range `^5.4.296` guarantees this happens again, because every future `5.x` lands in the band. Constrained to `~5.4.296` (now `5.4.624`), which keeps patches and stays below it. **The real fix is the 5→6 major on the PDF renderer — the core of the product — and it is filed, not done here.** The general lesson is in `.github/dependabot.yml`: `npm update` is not a safe no-op in this repository.
 
 **The `bcrypt` bump broke the Docker build.** `Dockerfile.backend`'s runtime stage copies `/app/backend/node_modules`, and after the change npm hoisted everything to the root, so that directory no longer existed: `failed to compute cache key … "/app/backend/node_modules": not found`. Whether a workspace keeps a nested `node_modules` at all is a function of which versions are installed — meaning **any** dependency update could have done this. The stage now creates the directory explicitly so it cannot recur. This is exactly the failure the gate is for: it surfaced as an exit `2`, not as a silent pass.
+
+**The `re2` bump raised the repository's Node floor, and CI could not install at all.** `re2@1.26.1` declares `engines: { node: "^22.22.2 || ^24.15.0 || >=26.0.0" }` — `1.24.1` had said `>=22`. `.nvmrc` still said `22.12.0`, every CI job installs `node-version-file: .nvmrc`, and `.npmrc` sets `engine-strict=true`, which turns an unsatisfied `engines` into a **failed `npm ci`** rather than an `EBADENGINE` warning. All four jobs died at their install step. Nothing local caught it: the developer's Node was `22.23.2`, which satisfies the new range, so every verification in the Outcome ran on a version CI was not using. Fixed by raising the root `engines` to `>=22.22.2` and `.nvmrc` to `22.23.2`. **`re2`'s `engines` is a moving input to the supported Node version** — read it on every `re2` bump, and move `.nvmrc` and the root `engines` together, or CI installs nothing.
 
 ### The risk the `bcrypt` major carried, and how it was closed
 
@@ -101,7 +103,8 @@ docker run --rm vuepdf-audit-runtime node -e "require('bcrypt').compareSync('…
 2. Check the `dependency-audit` job. Green means nothing shipped is affected above the threshold; it does **not** mean the update is safe.
 3. If the update touches `bcrypt`, `re2` or `@prisma/client`, the suites are not enough. `bcrypt` needs `password-hash-compatibility.spec.ts` green; `bcrypt` and `re2` are native and need the in-image load check above; a major on any of them needs its own reasoning written down here.
 4. If the update touches `pdfjs-dist`, re-read the advisory band above before accepting it.
-5. If the Docker build fails on a `COPY` of a `node_modules` path, it is hoisting, not the package — see above.
+5. **If the update touches `re2`, read its `engines` in the new `package-lock.json` entry.** It sets this repository's Node floor. If it moved, update `.nvmrc` and the root `engines` in the same commit — otherwise `engine-strict=true` fails `npm ci` in every CI job while the developer's machine stays green.
+6. If the Docker build fails on a `COPY` of a `node_modules` path, it is hoisting, not the package — see above.
 
 ## Re-running the triage
 

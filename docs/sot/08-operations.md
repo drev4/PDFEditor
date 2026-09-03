@@ -23,7 +23,7 @@ This makes the repository deployable, not deployed. The provider, same-site host
 
 ## The supported Node version
 
-**Node `>=22.12.0`**, written in `.nvmrc` (22.12.0) and enforced three ways, because `engines` alone only warns:
+**Node `>=22.22.2`**, written in `.nvmrc` (22.23.2) and enforced three ways, because `engines` alone only warns:
 
 | Guard | Catches |
 |---|---|
@@ -231,7 +231,7 @@ All four are optional. With none of them set, billing is off, the billing routes
 
 `backend` depends on `re2` (see [04-backend-patterns](./04-backend-patterns.md#8-code-like-input-is-compiled-in-one-audited-place)). Its install script downloads a prebuilt binary from GitHub and falls back to compiling with `node-gyp`, so a build toolchain is needed if that download is unavailable — `ubuntu-latest` in CI has one.
 
-`re2@1.24.1` itself declares `engines: { node: ">=22" }`, which is **why this repository supports Node 22.12+ and nothing older** — adding it in [`features/0004`](../../features/0004-safe-author-supplied-regex.md) silently dropped Node 20, and `engines` went on claiming `^20.19.0 || >=22.12.0` until `engine-strict` caught it.
+**`re2` is what sets this repository's Node floor, and it moves.** Adding it in [`features/0004`](../../features/0004-safe-author-supplied-regex.md) declared `engines: { node: ">=22" }` and silently dropped Node 20, while the root `engines` went on claiming `^20.19.0 || >=22.12.0` until `engine-strict` caught it. Updating it to `1.26.1` in [`features/0038`](../../features/0038-production-dependency-triage-and-an-audit-gate.md) narrowed that to `^22.22.2 || ^24.15.0 || >=26.0.0`, which **broke CI at `npm ci`**: `.nvmrc` still said 22.12.0, every job installs the version in `.nvmrc`, and `engine-strict=true` turns an unsatisfied `engines` into a failed install. It failed only in CI, because the developer's local Node already satisfied the new range. The floor is now `>=22.22.2` with `.nvmrc` at 22.23.2. **Treat `re2`'s `engines` as a thing a dependency bump can change** — read it after any `re2` update and move `.nvmrc` and the root `engines` together, or CI installs nothing.
 
 The binary is tied to a **Node ABI**: one built under Node 22 will not load under Node 20 and vice versa. `npm ci` builds the right one for whichever Node runs it. Locally, **after switching Node version run `npm rebuild re2`** — otherwise the engine fails to load. `npm run check:node` checks exactly this and says so.
 
