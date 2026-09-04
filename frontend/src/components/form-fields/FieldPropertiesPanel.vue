@@ -255,12 +255,21 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { usePatternAuthoring } from '@/composables/usePatternAuthoring'
-import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import {
+  useFormFieldsStore,
+  cloneFields,
+  createLocalFieldId,
+  isLocalFieldId,
+  type FieldType,
+  type FormField
+} from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
 import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 
 const formFieldsStore = useFormFieldsStore()
+const editorStore = useEditorStore()
 const toast = useToast()
 
 // Local form state
@@ -522,11 +531,59 @@ const deleteField = () => {
   showRemoveConfirm.value = true
 }
 
+/**
+ * Makes a removal undoable — or deliberately does not.
+ *
+ * The bulk save rejects the **whole** payload if it carries an id that is not a
+ * live field of the form, so what may go back on the undo stack depends on what
+ * the server actually did (features/0047):
+ *
+ * - **archived** — the field held responses, so its row is still there under
+ *   `deletedAt` and its id is not live. Nothing is recorded, and the way back is
+ *   the rail's Restore, which returns the row with its answers attached
+ *   (features/0045). Every older entry forgets the field too, or undoing past
+ *   this point would send the archived id and `400` the entire save.
+ * - **hard-deleted** — the field held nothing, so there are no answers to orphan
+ *   and it may come back as a **new local field**. Its dead id is rewritten
+ *   everywhere on the stack, not just in this entry.
+ * - **never saved** — a local id, gone from the browser only, and it returns
+ *   exactly as it was.
+ */
+const recordRemovalForUndo = (
+  field: FormField,
+  fieldsBeforeRemoval: FormField[],
+  removedIndex: number,
+  archived: boolean
+) => {
+  if (archived) {
+    editorStore.forgetFieldId(field.id, null)
+    return
+  }
+
+  const revivedId = isLocalFieldId(field.id) ? field.id : createLocalFieldId()
+
+  if (revivedId !== field.id) editorStore.forgetFieldId(field.id, revivedId)
+
+  const restored = fieldsBeforeRemoval.map(f =>
+    f.id === field.id ? { ...f, id: revivedId } : f
+  )
+
+  editorStore.pushFieldsUndo(
+    restored,
+    removedIndex === -1 ? null : revivedId,
+    'Field removed'
+  )
+}
+
 const confirmRemoveField = async () => {
   const field = formFieldsStore.selectedField
   if (!field) return
 
   const fieldName = field.label || field.name
+  // Captured before the deletion, because the entry is built from the list as
+  // it was — with the removed field put back at the index it held.
+  const fieldsBeforeRemoval = cloneFields(formFieldsStore.fields)
+  const removedIndex = formFieldsStore.fields.findIndex(f => f.id === field.id)
   removing.value = true
 
   try {
@@ -536,6 +593,8 @@ const confirmRemoveField = async () => {
     // and the store returns nothing for it.
     const result = await formFieldsStore.deleteFieldFromServer(field.id)
     showRemoveConfirm.value = false
+
+    recordRemovalForUndo(field, fieldsBeforeRemoval, removedIndex, result?.archived === true)
 
     const kept = result?.answerCount ?? 0
 

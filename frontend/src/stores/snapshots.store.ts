@@ -7,39 +7,49 @@ interface DocumentSnapshot {
   timestamp: number
 }
 
+let sequence = 0
+
+/**
+ * The bytes behind the editor's undo stack.
+ *
+ * This store holds documents and nothing else; **which snapshot belongs to
+ * which undo step is `editor.store.ts`'s business**, and every snapshot here is
+ * addressed by the id `addSnapshot` returns. That is deliberate. There used to
+ * be a `getLatestSnapshot(documentId)` and it is what made undo one level deep:
+ * `undoLastEdit` popped its own history and left the snapshot in place, so the
+ * second press handed back the same bytes as the first and the button looked
+ * broken (features/0047). Anything shaped like "the newest snapshot for this
+ * document" reintroduces that, so there is no such function any more.
+ */
 export const useDocumentSnapshotsStore = defineStore('documentSnapshots', () => {
   // State
   const snapshots = ref<DocumentSnapshot[]>([])
-  const maxSnapshots = 10
 
   // Actions
-  const addSnapshot = (documentId: string, arrayBuffer: ArrayBuffer): void => {
-    const snapshot: DocumentSnapshot = {
-      id: `${documentId}-${Date.now()}`,
+
+  /** Stores a copy of the bytes and returns the id that addresses them. */
+  const addSnapshot = (documentId: string, arrayBuffer: ArrayBuffer): string => {
+    // The document id is a prefix so `clearSnapshots(documentId)` still works;
+    // the counter is what makes the id unique. `Date.now()` was not enough —
+    // two edits inside the same millisecond produced one id for two snapshots.
+    const id = `${documentId}-${Date.now()}-${sequence++}`
+
+    snapshots.value.push({
+      id,
       arrayBuffer: arrayBuffer.slice(0), // Create a copy
       timestamp: Date.now()
-    }
+    })
 
-    snapshots.value.push(snapshot)
-
-    // Keep only the latest snapshots
-    if (snapshots.value.length > maxSnapshots) {
-      snapshots.value.shift()
-    }
+    return id
   }
 
-  const getLatestSnapshot = (documentId: string): ArrayBuffer | null => {
-    const documentSnapshots = snapshots.value.filter(s => s.id.startsWith(documentId))
-    if (documentSnapshots.length === 0) return null
-
-    const latest = documentSnapshots[documentSnapshots.length - 1]
-    if (!latest) return null
-    
-    return latest.arrayBuffer.slice(0) // Return a copy
+  const getSnapshotById = (snapshotId: string): ArrayBuffer | null => {
+    const snapshot = snapshots.value.find(s => s.id === snapshotId)
+    return snapshot ? snapshot.arrayBuffer.slice(0) : null // Return a copy
   }
 
-  const removeSnapshot = (documentId: string): void => {
-    const index = snapshots.value.findIndex(s => s.id.startsWith(documentId))
+  const removeSnapshotById = (snapshotId: string): void => {
+    const index = snapshots.value.findIndex(s => s.id === snapshotId)
     if (index !== -1) {
       snapshots.value.splice(index, 1)
     }
@@ -59,10 +69,9 @@ export const useDocumentSnapshotsStore = defineStore('documentSnapshots', () => 
 
   return {
     snapshots,
-    maxSnapshots,
     addSnapshot,
-    getLatestSnapshot,
-    removeSnapshot,
+    getSnapshotById,
+    removeSnapshotById,
     clearSnapshots,
     getSnapshotsCount
   }

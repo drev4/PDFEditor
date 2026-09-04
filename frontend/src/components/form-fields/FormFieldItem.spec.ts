@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import FormFieldItem from './FormFieldItem.vue'
 import { useFormFieldsStore } from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
 
 vi.mock('@/services/fields')
 
@@ -81,5 +82,62 @@ describe('FormFieldItem', () => {
     const unmoved = store.fields.find(f => f.id === 'field-1')
     expect(unmoved?.position.x).toBe(100)
     expect(store.hasUnsavedChanges).toBe(false)
+  })
+
+  // Undo commits on mouseup (features/0047). `moveField` runs on every
+  // mousemove, so anything pushing from there turns one drag into a stack of
+  // sixty steps.
+  describe('undo', () => {
+    it('records one step for one drag, however many mousemoves it took', async () => {
+      const editorStore = useEditorStore()
+      const wrapper = mountItem()
+
+      await wrapper.trigger('mousedown', { clientX: 100, clientY: 100 })
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 110, clientY: 105 }))
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 130, clientY: 115 }))
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 140, clientY: 120 }))
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(editorStore.undoDepth).toBe(1)
+      expect(editorStore.nextUndoLabel).toBe('Field moved')
+
+      editorStore.undoLastEdit()
+
+      const restored = store.fields.find(f => f.id === 'field-1')
+      expect(restored?.position.x).toBe(100)
+      expect(restored?.position.y).toBe(50)
+    })
+
+    it('records nothing for a mouse-down that only selects', async () => {
+      const editorStore = useEditorStore()
+      const wrapper = mountItem()
+
+      await wrapper.trigger('mousedown', { clientX: 100, clientY: 100 })
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(editorStore.undoDepth).toBe(0)
+      expect(store.hasUnsavedChanges).toBe(false)
+    })
+
+    it('records one step for one resize', async () => {
+      const editorStore = useEditorStore()
+      store.selectField('field-1')
+      const wrapper = mountItem()
+      await wrapper.vm.$nextTick()
+
+      await wrapper.find('.resize-handle.se').trigger('mousedown', { clientX: 300, clientY: 80 })
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 340, clientY: 100 }))
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 360, clientY: 110 }))
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(editorStore.undoDepth).toBe(1)
+      expect(editorStore.nextUndoLabel).toBe('Field resized')
+
+      editorStore.undoLastEdit()
+
+      const restored = store.fields.find(f => f.id === 'field-1')
+      expect(restored?.position.width).toBe(200)
+      expect(restored?.position.height).toBe(30)
+    })
   })
 })

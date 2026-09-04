@@ -121,6 +121,8 @@ There is no shared constant and no test spanning both. **Changing the editor's r
 
 The rule that follows: **anything that builds a payload from `fields` must decide, explicitly, what it does with the id.** Local ids must never be sent, server ids must never be dropped.
 
+There is a third case now, and it is the one that bites: **an id whose row no longer exists must never be sent either.** The bulk save rejects the entire payload over one unknown id, so a field put back into `fields` by an undo carries a **freshly minted local id** rather than the id of the row the server just deleted — see the undo stack in §8. `createLocalFieldId()` is exported for exactly that, so there is one place ids are minted.
+
 The endpoint answers with `archived: string[]` — fields the user deleted that the server kept because they hold responses. The store parks them in `archivedFieldIds` and `FormSavePanel.vue` shows them as a non-blocking toast, then clears them. A response the frontend receives and silently ignores is how the previous attempt at this fix confused everyone: fields reappeared in the editor with no explanation.
 
 That toast used to be the **only** signal, which meant an archived field was visible for eight seconds and then in no screen at all. Since [`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md) it is the transient half of two: `archivedFieldIds` stays the one-shot "this just happened", and `archivedFields` is the standing list `EditorRail.vue` renders under **Archived**, loaded from `GET /forms/:formId/fields/archived` and re-read only after a save or delete that actually archived something. The responses table marks those columns too, reading the `deletedAt` that endpoint had been returning and the client had been discarding.
@@ -303,9 +305,39 @@ They are now held deliberately, not accidentally. `documentStore.hasUnsavedEdits
 
 **Field geometry works the same way**, and did not used to. Placing, moving or resizing a field wrote to the server on mouseup (`formFieldsStore.saveField`), so one screen had two save models and the user could not know what was stored without remembering which tool they had used. `formFieldsStore.hasUnsavedChanges` is the field-side flag; `Save all` clears it through `saveAllFields`. The editor's warning and its button read both flags as one.
 
+### Undo is one stack, and it covers the fields too
+
+Undo used to mean the document only. `editorStore.undoLastEdit` popped an `EditAction` and returned a snapshot, so a text or an image could be taken back — and **moving, resizing, placing or deleting a field could not be undone by anything**. In an editor where every field is placed by dragging, that is the first key a user reaches for.
+
+There is now **one ordered stack** in `editor.store.ts` ([`features/0047`](../../features/0047-undo-covers-field-edits.md)). A `document` entry owns bytes in `snapshots.store.ts` by id; a `fields` entry owns a copy of the field list. `composables/useEditorUndo.ts` is the only place that knows what applying an undo means, and both controls — the button in `PDFEditor.vue` and `Ctrl/Cmd+Z` in `EditorView.vue` — go through it. Two stacks was the obvious alternative and it is wrong: there is one Undo, and with two stacks the same control does different things depending on state the user cannot see.
+
+Five things about it are easy to get wrong, and four of them are silent.
+
+**The commit point is the end of the gesture, not the mutation.** `moveField` and `resizeField` run on every `mousemove`, so a push from inside them — or a deep watcher — makes one drag sixty undo steps. `FormFieldItem.vue` copies the list at `mousedown`, pushes at `mouseup`, and pushes **nothing** when the position did not actually change, because a mouse-down that only selects is not an edit.
+
+**Saving a snapshot *is* pushing the entry.** They were two calls, and `addBlankPage` made only the first — so the page was added, the bytes were kept and the Undo button stayed disabled, because it read a history the caller had forgotten to append to. The two cannot drift apart now: `saveSnapshot(documentId, bytes, label)` does both.
+
+**A snapshot is addressed by id, never by "the newest for this document".** `getLatestSnapshot` is gone. It is what made undo one level deep — `undoLastEdit` popped its own history and left the snapshot in place, so the second press returned the same bytes as the first and looked like a broken button. Eviction removes an entry and its bytes together, so nothing can outlive what it needs.
+
+**A deleted field must not come back with the id it had.** This is the sharp one, because it fails far from where it is caused. `POST /forms/:formId/fields/bulk` rejects the **whole** payload over an id that is not a live field of the form, so one dead id anywhere on the stack breaks every later `Save all` of that form — not just that field — until the page is reloaded. What is allowed depends on what the server actually did, which is why `FieldPropertiesPanel.vue` reads the answer rather than guessing:
+
+| The server | Undo | Because |
+|---|---|---|
+| hard-deleted it (`archived: false`) | brings it back as a **new local field** | it held no answers, so a new id orphans nothing |
+| archived it (`archived: true`) | records nothing | the way back is the rail's **Restore**, which returns the row with its id and its answers ([`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md)) |
+| was never asked (a local id) | brings it back unchanged | there was never a row |
+
+And the correction reaches **backwards**: `forgetFieldId` rewrites or removes that id in every older entry, and `rememberField` is its mirror for a restore. Without the second one, undoing past a restore drops the field from the list again — and the next save reads that absence as a removal and re-archives what the user just recovered, with a `200` and no error anywhere.
+
+**A save invalidates field history.** `saveAllFields` hands back server ids for fields that were local a moment earlier, so an older entry holds ids that no longer mean anything — and restoring it would send *no* id for a field that now has a row, which the bulk save reads as "create" and duplicates. The store watches `hasUnsavedChanges` fall and drops the field entries, keeping the document ones. It watches the flag rather than the action so the dependency runs one way and there is no cycle between the two stores.
+
+An undo always marks the form dirty, deliberately without checking whether the result matches what was last saved. A false positive is one save that writes what is already there; a false negative is the leave-the-editor prompt staying quiet while somebody walks away from their work.
+
+**Not built, and filed:** redo, undo of the property panel's own fields (the browser's undo already works inside those inputs), and undo surviving a reload — the stack is in memory, like the snapshots always were.
+
 ### One thing ends an editor session
 
-`useFormManagement().resetEditorSession()` closes the document, clears the fields, and forgets the form — the three together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form.
+`useFormManagement().resetEditorSession()` closes the document, clears the fields, forgets the form and empties the undo stack — the four together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form. Undo belongs to a session too — an entry kept across a close would offer to restore one document's bytes, or one form's fields, into the next.
 
 Because the edits are held, three things have to exist together and are easy to drop one of:
 

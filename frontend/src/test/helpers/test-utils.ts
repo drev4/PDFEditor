@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { PDFDocument, SearchMatch, EditAction } from '@/types/pdf'
+import type { PDFDocument, SearchMatch } from '@/types/pdf'
 
 /**
  * Create a mock PDF File object with arrayBuffer support
@@ -58,16 +58,6 @@ export const createMockSearchMatches = (count = 3): SearchMatch[] => {
     }
   }))
 }
-
-/**
- * Create mock edit action
- */
-export const createMockEditAction = (type: 'text' | 'image' | 'draw' | 'delete' = 'text'): EditAction => ({
-  type,
-  page: 1,
-  data: { content: 'test' },
-  timestamp: Date.now()
-})
 
 /**
  * Create a mock ArrayBuffer from string

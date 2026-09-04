@@ -142,6 +142,7 @@ import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
 import type { ArchivedField } from '@/services/fields'
 import PageThumbnails from '@/components/pdf/PageThumbnails.vue'
 
@@ -161,6 +162,7 @@ defineProps<{
 
 const documentStore = useDocumentStore()
 const formFieldsStore = useFormFieldsStore()
+const editorStore = useEditorStore()
 
 const hasDocument = computed(() => !!documentStore.activeDocument)
 const pageCount = computed(() => documentStore.activeDocument?.numPages ?? 0)
@@ -223,6 +225,13 @@ const confirmRestore = async () => {
       })
       return
     }
+
+    // History from before the restore does not contain this field, and the bulk
+    // save reads a missing live field as a removal — so undoing past this point
+    // would re-archive what was just recovered, with a 200 and no error anywhere
+    // (features/0045, features/0047). Every entry learns about it instead.
+    const restoredField = formFieldsStore.fields.find(f => f.id === restored.id)
+    if (restoredField) editorStore.rememberField(restoredField)
 
     // Says what is still pending on purpose. No individual field write
     // re-embeds the PDF, so the downloadable document does not have this field

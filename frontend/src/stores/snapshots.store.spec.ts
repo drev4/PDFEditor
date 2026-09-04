@@ -22,14 +22,16 @@ describe('Document Snapshots Store', () => {
       expect(store.snapshots[0]?.id).toContain('doc-1')
     })
 
-    it('should limit snapshots to maxSnapshots', () => {
+    it('should give every snapshot its own id, even within one millisecond', () => {
       const store = useDocumentSnapshotsStore()
 
       for (let i = 0; i < 12; i++) {
         store.addSnapshot('doc-1', createMockArrayBuffer())
       }
 
-      expect(store.snapshots).toHaveLength(store.maxSnapshots)
+      // The stack in editor.store.ts addresses bytes by this id and caps its own
+      // length; a repeated id would make it release somebody else's snapshot.
+      expect(new Set(store.snapshots.map(s => s.id)).size).toBe(12)
     })
 
     it('should create copy of buffer', () => {
@@ -42,49 +44,46 @@ describe('Document Snapshots Store', () => {
     })
   })
 
-  describe('getLatestSnapshot', () => {
-    it('should return latest snapshot', () => {
+  describe('getSnapshotById', () => {
+    it('should return the snapshot that id names, not the newest', () => {
       const store = useDocumentSnapshotsStore()
       const buffer1 = createMockArrayBuffer()
       const buffer2 = new Uint8Array([6, 7, 8]).buffer
 
-      store.addSnapshot('doc-1', buffer1)
+      const first = store.addSnapshot('doc-1', buffer1)
       store.addSnapshot('doc-1', buffer2)
 
-      const latest = store.getLatestSnapshot('doc-1')
+      const restored = store.getSnapshotById(first)
 
-      expect(latest).toBeDefined()
-      expect(new Uint8Array(latest!)).toEqual(new Uint8Array(buffer2))
+      expect(new Uint8Array(restored!)).toEqual(new Uint8Array(buffer1))
     })
 
-    it('should return null if no snapshots', () => {
+    it('should return null for an id it does not hold', () => {
       const store = useDocumentSnapshotsStore()
 
-      const result = store.getLatestSnapshot('doc-1')
-
-      expect(result).toBeNull()
+      expect(store.getSnapshotById('doc-1-nothing')).toBeNull()
     })
 
     it('should return copy of buffer', () => {
       const store = useDocumentSnapshotsStore()
-      store.addSnapshot('doc-1', createMockArrayBuffer())
+      const id = store.addSnapshot('doc-1', createMockArrayBuffer())
 
-      const snapshot = store.getLatestSnapshot('doc-1')
+      const snapshot = store.getSnapshotById(id)
 
       expect(snapshot).not.toBe(store.snapshots[0]?.arrayBuffer)
     })
   })
 
-  describe('removeSnapshot', () => {
-    it('should remove first matching snapshot', () => {
+  describe('removeSnapshotById', () => {
+    it('should remove the snapshot that id names', () => {
       const store = useDocumentSnapshotsStore()
+      const first = store.addSnapshot('doc-1', createMockArrayBuffer())
       store.addSnapshot('doc-1', createMockArrayBuffer())
-      store.addSnapshot('doc-2', createMockArrayBuffer())
 
-      store.removeSnapshot('doc-1')
+      store.removeSnapshotById(first)
 
       expect(store.snapshots).toHaveLength(1)
-      expect(store.snapshots[0]?.id).toContain('doc-2')
+      expect(store.snapshots[0]?.id).not.toBe(first)
     })
   })
 
