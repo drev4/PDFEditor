@@ -225,8 +225,6 @@
       @discard="handleLeaveDiscard"
       @cancel="handleLeaveCancel"
     />
-
-    <Toast position="top-right" />
   </div>
 </template>
 
@@ -237,7 +235,6 @@ import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import ProgressSpinner from 'primevue/progressspinner'
-import Toast from 'primevue/toast'
 import { useAuthStore } from '@/stores/auth.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'

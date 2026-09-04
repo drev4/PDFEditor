@@ -18,6 +18,6 @@
         <path d="M9.2 1.9v3.7h3.5" />
       </svg>
     </div>
-    <span class="text-brand font-semibold">VuePDF Forms</span>
+    <span class="text-brand font-semibold">DocAIFlow</span>
   </div>
 </template>
