@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import FieldPropertiesPanel from './FieldPropertiesPanel.vue'
 import { useFormFieldsStore, isLocalFieldId } from '@/stores/formFields.store'
 import { useEditorStore } from '@/stores/editor.store'
+import { useDocumentStore } from '@/stores/document.store'
 import { fieldsService } from '@/services/fields'
 import { describePattern } from '@/services/pattern-check'
 import { flushPromises } from '@/test/helpers/test-utils'
@@ -355,4 +356,90 @@ describe('removing a field', () => {
     })
   })
 })
+})
+
+/**
+ * The panel when more than one field is selected (features/0048).
+ *
+ * What is asserted here is the boundary: the set gets geometry and duplication
+ * and **no per-field inputs**, because a name typed into six fields at once is
+ * the properties-panel undo problem this repository deliberately has not
+ * solved.
+ */
+describe('FieldPropertiesPanel — a selection of fields', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  const selectThree = () => {
+    const store = useFormFieldsStore()
+    store.fields = [
+      { id: 'f1', type: 'text', name: 'a', label: 'A', required: false, border: false, position: { x: 0, y: 0, width: 100, height: 20, page: 1 } },
+      { id: 'f2', type: 'text', name: 'b', label: 'B', required: false, border: false, position: { x: 140, y: 60, width: 100, height: 20, page: 1 } },
+      { id: 'f3', type: 'text', name: 'c', label: 'C', required: false, border: false, position: { x: 400, y: 90, width: 100, height: 20, page: 1 } }
+    ] as never[]
+    store.selectFields(['f1', 'f2', 'f3'])
+    return store
+  }
+
+  it('says how many fields are selected and offers no name box', () => {
+    selectThree()
+    const wrapper = mountPanel()
+
+    expect(wrapper.find('[data-testid="selection-count"]').text()).toContain('3 fields')
+    expect(wrapper.find('#field-name').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="remove-field"]').exists()).toBe(false)
+  })
+
+  it('aligns the selection in one undo step', async () => {
+    const store = selectThree()
+    const editorStore = useEditorStore()
+    const wrapper = mountPanel()
+
+    await wrapper.find('[data-testid="align-left"]').trigger('click')
+
+    expect(store.fields.map(f => f.position.x)).toEqual([0, 0, 0])
+    expect(editorStore.undoDepth).toBe(1)
+
+    editorStore.undoLastEdit()
+
+    expect(store.fields.map(f => f.position.x)).toEqual([0, 140, 400])
+  })
+
+  it('distributes the selection in one undo step', async () => {
+    const store = selectThree()
+    const editorStore = useEditorStore()
+    const wrapper = mountPanel()
+
+    await wrapper.find('[data-testid="distribute-horizontal"]').trigger('click')
+
+    expect(store.fields[1]?.position.x).toBe(200)
+    expect(editorStore.undoDepth).toBe(1)
+  })
+
+  it('duplicates every selected field', async () => {
+    const store = selectThree()
+    const wrapper = mountPanel()
+
+    await wrapper.find('[data-testid="duplicate-selection"]').trigger('click')
+
+    expect(store.fields).toHaveLength(6)
+    expect(store.fields.filter(f => isLocalFieldId(f.id))).toHaveLength(3)
+    expect(store.hasUnsavedChanges).toBe(true)
+  })
+
+  // Same refusal the drag already makes: a screen direction is not a stored
+  // axis on a turned page.
+  it('disables the geometry buttons while the page is rotated', () => {
+    selectThree()
+    const documentStore = useDocumentStore()
+    documentStore.documents.push({ id: 'doc-1', rotation: 90 } as never)
+    documentStore.activeDocumentId = 'doc-1'
+
+    const wrapper = mountPanel()
+
+    expect(wrapper.find('[data-testid="align-left"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="duplicate-selection"]').attributes('disabled')).toBeUndefined()
+  })
 })

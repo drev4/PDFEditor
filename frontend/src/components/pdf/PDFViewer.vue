@@ -36,7 +36,12 @@
                turning the wrapper as well rotated everything twice: at 90 the
                page showed at 180, and the field overlay - positioned in
                unrotated coordinates - sat nowhere near the page. -->
-          <div class="pdf-canvas-wrapper">
+          <!-- A click that lands on the page rather than on a field clears the
+               selection (features/0048). It is bound here, not on the fields
+               overlay, because that overlay is `pointer-events: none` and sits
+               above `.text-layer` — making it take the pointer would take text
+               selection and search highlighting away from the whole canvas. -->
+          <div class="pdf-canvas-wrapper" @click="clearFieldSelection">
             <!-- Grid Overlay -->
             <canvas
               ref="gridCanvasRef"
@@ -210,6 +215,13 @@ const drawingStore = useDrawingStore()
 const editorStore = useEditorStore()
 const searchStore = useSearchStore()
 const formFieldsStore = useFormFieldsStore()
+
+const clearFieldSelection = () => {
+  // A field stops the click itself, so anything arriving here came from the
+  // page. The public form has no selection to clear.
+  if (props.readOnly) return
+  formFieldsStore.clearSelection()
+}
 
 // Use composables
 const {

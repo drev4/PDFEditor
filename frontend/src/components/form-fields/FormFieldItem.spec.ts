@@ -84,6 +84,47 @@ describe('FormFieldItem', () => {
     expect(store.hasUnsavedChanges).toBe(false)
   })
 
+  // Multi-selection (features/0048). A marquee would have to take `mousedown`
+  // on empty page area away from the text layer underneath, so the gesture is a
+  // modifier-click on the field itself.
+  describe('multi-selection', () => {
+    beforeEach(() => {
+      store.loadFieldsFromForm([makeField(), { ...makeField(), id: 'field-2', name: 'text_2' }] as any)
+    })
+
+    it('adds a field to the selection on shift-click without dragging it', async () => {
+      store.selectField('field-1')
+      const wrapper = mountItem({ field: store.fields[1] })
+
+      await wrapper.trigger('mousedown', { clientX: 100, clientY: 100, shiftKey: true })
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200 }))
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(store.selectedFieldIds).toEqual(['field-1', 'field-2'])
+      expect(store.fields[1]?.position.x).toBe(100)
+    })
+
+    it('takes a field back out of the selection on a second modifier click', async () => {
+      store.selectFields(['field-1', 'field-2'])
+      const wrapper = mountItem({ field: store.fields[1] })
+
+      await wrapper.trigger('mousedown', { clientX: 100, clientY: 100, ctrlKey: true })
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(store.selectedFieldIds).toEqual(['field-1'])
+    })
+
+    it('replaces the selection on a plain click', async () => {
+      store.selectFields(['field-1', 'field-2'])
+      const wrapper = mountItem({ field: store.fields[1] })
+
+      await wrapper.trigger('mousedown', { clientX: 100, clientY: 100 })
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(store.selectedFieldIds).toEqual(['field-2'])
+    })
+  })
+
   // Undo commits on mouseup (features/0047). `moveField` runs on every
   // mousemove, so anything pushing from there turns one drag into a stack of
   // sixty steps.
@@ -117,6 +158,27 @@ describe('FormFieldItem', () => {
 
       expect(editorStore.undoDepth).toBe(0)
       expect(store.hasUnsavedChanges).toBe(false)
+    })
+
+    // Six fields moved by one drag is one gesture, so it is one entry. The
+    // capture is of the whole list, which is what makes that possible at all
+    // (features/0048).
+    it('records one step for a drag that moves a whole selection', async () => {
+      const editorStore = useEditorStore()
+      store.loadFieldsFromForm([makeField(), { ...makeField(), id: 'field-2', name: 'text_2' }] as any)
+      store.selectFields(['field-1', 'field-2'])
+      const wrapper = mountItem({ field: store.fields[0] })
+
+      await drag(wrapper)
+
+      expect(editorStore.undoDepth).toBe(1)
+      expect(store.fields[0]?.position.x).toBe(140)
+      expect(store.fields[1]?.position.x).toBe(140)
+
+      editorStore.undoLastEdit()
+
+      expect(store.fields[0]?.position.x).toBe(100)
+      expect(store.fields[1]?.position.x).toBe(100)
     })
 
     it('records one step for one resize', async () => {

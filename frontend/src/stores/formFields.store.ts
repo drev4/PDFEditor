@@ -64,7 +64,18 @@ export interface FormField {
 
 export const useFormFieldsStore = defineStore('formFields', () => {
   const fields = ref<FormField[]>([])
+  /**
+   * The field whose properties the panel shows.
+   *
+   * It is **always** a member of `selectedFieldIds` while that is non-empty,
+   * and null exactly when it is empty. Nothing outside this store writes either
+   * of them directly: `setSelection` is the one place the two are kept in step,
+   * because a primary outside the selection is a panel editing a field the user
+   * cannot see is selected.
+   */
   const selectedFieldId = ref<string | null>(null)
+  /** Every selected field, in the order they were added (features/0048). */
+  const selectedFieldIds = ref<string[]>([])
   /**
    * Field changes that are only in the browser.
    *
@@ -95,6 +106,31 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     return fields.value.find(f => f.id === selectedFieldId.value) || null
   })
 
+  /** Every selected field, in the document's own order. */
+  const selectedFields = computed(() =>
+    fields.value.filter(f => selectedFieldIds.value.includes(f.id))
+  )
+
+  const hasMultiSelection = computed(() => selectedFieldIds.value.length > 1)
+
+  const isFieldSelected = (id: string) => selectedFieldIds.value.includes(id)
+
+  /**
+   * The one place a selection is written.
+   *
+   * Ids that name no field are dropped here rather than at each call site: a
+   * selection surviving a delete, a restored snapshot or a reload would leave
+   * the panel showing a field that is gone, and a nudge writing to nothing.
+   */
+  const setSelection = (ids: string[], primary?: string | null) => {
+    const live = ids.filter(id => fields.value.some(f => f.id === id))
+    selectedFieldIds.value = live
+    const wanted = primary === undefined ? selectedFieldId.value : primary
+    selectedFieldId.value = wanted && live.includes(wanted)
+      ? wanted
+      : (live[live.length - 1] ?? null)
+  }
+
   const fieldsByPage = computed(() => {
     const byPage: Record<number, FormField[]> = {}
     for (const field of fields.value) {
@@ -110,7 +146,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   const startAddingField = (type: FieldType) => {
     isAddingField.value = true
     fieldTypeToAdd.value = type
-    selectedFieldId.value = null
+    setSelection([])
   }
 
   const cancelAddingField = () => {
@@ -125,7 +161,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       id
     }
     fields.value.push(newField)
-    selectedFieldId.value = id
+    setSelection([id], id)
     isAddingField.value = false
     fieldTypeToAdd.value = null
     return newField
@@ -156,14 +192,48 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     const index = fields.value.findIndex(f => f.id === id)
     if (index !== -1) {
       fields.value.splice(index, 1)
-      if (selectedFieldId.value === id) {
-        selectedFieldId.value = null
-      }
+      setSelection(selectedFieldIds.value.filter(selected => selected !== id))
     }
   }
 
+  /** Replaces the whole selection with this one field, or clears it. */
   const selectField = (id: string | null) => {
-    selectedFieldId.value = id
+    setSelection(id ? [id] : [], id)
+  }
+
+  const selectFields = (ids: string[]) => {
+    setSelection(ids, ids[ids.length - 1] ?? null)
+  }
+
+  const clearSelection = () => {
+    setSelection([])
+  }
+
+  /**
+   * Adds a field to the selection, or takes it out again.
+   *
+   * A selection is confined to one page: aligning a field on page 1 with one on
+   * page 3 means nothing, and the canvas only ever renders one page at a time,
+   * so a cross-page selection is only reachable from the panel's layer list.
+   * Reaching for a field on another page replaces the selection instead of
+   * quietly producing a set no operation can act on.
+   */
+  const toggleFieldSelection = (id: string) => {
+    const field = fields.value.find(f => f.id === id)
+    if (!field) return
+
+    if (selectedFieldIds.value.includes(id)) {
+      setSelection(selectedFieldIds.value.filter(selected => selected !== id))
+      return
+    }
+
+    const primary = fields.value.find(f => f.id === selectedFieldId.value)
+    if (primary && primary.position.page !== field.position.page) {
+      setSelection([id], id)
+      return
+    }
+
+    setSelection([...selectedFieldIds.value, id], id)
   }
 
   const moveField = (id: string, x: number, y: number) => {
@@ -183,6 +253,76 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   }
 
   /**
+   * Moves a whole set by one delta (features/0048).
+   *
+   * The delta is clamped, not the fields. Clamping each field on its own would
+   * squash the layout the author built — the one at the edge stops while the
+   * rest keep going — so the set moves as a set, or stops as a set.
+   */
+  const moveFieldsBy = (ids: string[], dx: number, dy: number) => {
+    const targets = fields.value.filter(f => ids.includes(f.id))
+    if (targets.length === 0) return
+
+    const allowedDx = Math.max(dx, -Math.min(...targets.map(f => f.position.x)))
+    const allowedDy = Math.max(dy, -Math.min(...targets.map(f => f.position.y)))
+
+    for (const field of targets) {
+      field.position.x += allowedDx
+      field.position.y += allowedDy
+    }
+  }
+
+  /** Writes the corners `utils/fieldGeometry.ts` worked out. */
+  const applyPlacements = (placements: Array<{ id: string; x: number; y: number }>) => {
+    for (const placement of placements) {
+      const field = fields.value.find(f => f.id === placement.id)
+      if (!field) continue
+      field.position.x = Math.max(0, placement.x)
+      field.position.y = Math.max(0, placement.y)
+    }
+  }
+
+  /**
+   * Copies fields, and never their ids.
+   *
+   * `saveAllFields` sends `id` for every field whose id is not local, so a copy
+   * carrying its original's server id is a **second update to one row**: the
+   * bulk save applies both, the later one wins, and one of the two fields is
+   * simply never created — with a `200` and nothing in any log. The name has to
+   * be new for the same class of reason, because an AcroForm identifies a field
+   * by name and `addField` does not check for a collision the way `updateField`
+   * does.
+   */
+  const DUPLICATE_OFFSET = 12
+
+  const duplicateFields = (ids: string[]): FormField[] => {
+    const originals = fields.value.filter(f => ids.includes(f.id))
+    if (originals.length === 0) return []
+
+    const copies = cloneFields(originals).map(original => {
+      const copy: FormField = {
+        ...original,
+        id: createLocalFieldId(),
+        name: generateUniqueFieldName(original.type),
+        position: {
+          ...original.position,
+          x: original.position.x + DUPLICATE_OFFSET,
+          y: original.position.y + DUPLICATE_OFFSET
+        }
+      }
+      // Pushed one at a time on purpose: `generateUniqueFieldName` reads the
+      // live list, so two copies made in one pass would otherwise be handed the
+      // same name.
+      fields.value.push(copy)
+      return copy
+    })
+
+    setSelection(copies.map(f => f.id))
+    markDirty()
+    return copies
+  }
+
+  /**
    * Puts back a field list the undo stack was holding (features/0047).
    *
    * It marks the form dirty on purpose, and without checking whether the result
@@ -193,15 +333,18 @@ export const useFormFieldsStore = defineStore('formFields', () => {
    */
   const restoreFieldsSnapshot = (snapshot: FormField[], selection: string | null) => {
     fields.value = cloneFields(snapshot)
-    selectedFieldId.value = selection && fields.value.some(f => f.id === selection)
-      ? selection
-      : null
+    // The multi-selection is not restored, only filtered. An `UndoEntry` carries
+    // one `selectedFieldId` and `forgetFieldId` scrubs exactly that one when a
+    // row dies (features/0047); a second collection inside the entry would have
+    // to be scrubbed in both places too, and a stale selection there is a nudge
+    // writing to a field that no longer exists.
+    setSelection(selectedFieldIds.value, selection)
     markDirty()
   }
 
   const clearFields = () => {
     fields.value = []
-    selectedFieldId.value = null
+    setSelection([])
     isAddingField.value = false
     fieldTypeToAdd.value = null
     hasUnsavedChanges.value = false
@@ -231,7 +374,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
 
   const loadFieldsFromPDF = (pdfFields: Omit<FormField, 'id'>[]) => {
     fields.value = []
-    selectedFieldId.value = null
+    setSelection([])
 
     pdfFields.forEach(field => {
       const id = createLocalFieldId()
@@ -264,7 +407,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
 
   const loadFieldsFromForm = (formFields: Field[]) => {
     fields.value = formFields.map(toFormField)
-    selectedFieldId.value = null
+    setSelection([])
   }
 
   const saveAllFields = async () => {
@@ -414,7 +557,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       const restored = await fieldsService.restore(formId, fieldId)
       fields.value.push(toFormField(restored))
       archivedFields.value = archivedFields.value.filter(f => f.id !== fieldId)
-      selectedFieldId.value = restored.id
+      setSelection([restored.id], restored.id)
       return restored
     }, { fallbackMessage: 'Failed to restore field' })
   }
@@ -433,6 +576,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   return {
     fields,
     selectedFieldId,
+    selectedFieldIds,
     isAddingField,
     hasUnsavedChanges,
     markDirty,
@@ -444,6 +588,9 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     archivedFields,
     liveFieldNames,
     selectedField,
+    selectedFields,
+    hasMultiSelection,
+    isFieldSelected,
     fieldsByPage,
     startAddingField,
     cancelAddingField,
@@ -451,7 +598,13 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     updateField,
     deleteField,
     selectField,
+    selectFields,
+    toggleFieldSelection,
+    clearSelection,
     moveField,
+    moveFieldsBy,
+    applyPlacements,
+    duplicateFields,
     resizeField,
     restoreFieldsSnapshot,
     clearFields,
