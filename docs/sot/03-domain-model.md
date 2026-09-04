@@ -149,7 +149,7 @@ Three things about that agreement are worth keeping, because each of them is a w
 
 `Field.deletedAt` exists so that removing a question from a form does not destroy the answers already given to it.
 
-A field is **archived** (`deletedAt` set) by exactly one code path: the bulk save, when the field is absent from the payload *and* at least one `Answer` references it. A removed field with no answers is hard-deleted, because there is nothing to protect.
+A field is **archived** (`deletedAt` set) by two code paths, which apply the same rule: the bulk save, when the field is absent from the payload *and* at least one `Answer` references it, and the individual `DELETE` since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md). A removed field with no answers is hard-deleted by either, because there is nothing to protect.
 
 Who sees an archived field:
 
@@ -163,8 +163,18 @@ Who sees an archived field:
 | `GET /forms/:id/responses` (`fields` in the payload) | **Included** | Its answers are in these responses and need a labelled column |
 | `GET /forms/:id/responses/export` (CSV) | **Included** | A historical row keeps its column and its original label |
 | `scripts/migrate-existing-forms.ts` | Hidden | Re-embedding it would put it back on the PDF |
+| `GET /forms/:formId/fields/archived` | **The only ones** | The editor rail's Archived list — the one place an author can see what was kept ([`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md)) |
+| `GET /organizations/export` | **Included**, with `archivedAt` | The export is the record of everything held |
 
-There is no un-archive path, and no UI that lists archived fields. A field is archived silently to the form and visibly to the responses; the editor tells the user it happened via the `archived` array the endpoint returns (see [06-api-reference](./06-api-reference.md)).
+**There is an un-archive path** since [`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md): `POST /forms/:formId/fields/:fieldId/restore` clears `deletedAt` and hands back the whole row. It exists because the alternative was permanent: placing a replacement field mints a **new id**, so the old answers stay on the old id and the CSV grows two columns for one question that nothing can ever join. Stable field ids ([`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md)) are what make recovery possible at all.
+
+Three consequences worth carrying:
+
+- **A restored field must go back into the editor's own field list, not just the sidebar.** The bulk save reads its removals as *a live field whose id is missing from the payload*, so a field restored on the server and absent from the next save is archived again — with a `200`, and no error for anyone to see.
+- **Restoring does not re-embed the PDF**, like every other individual field write. The document lags until the next bulk save; the editor's toast says so.
+- **A name collision is a warning, not a refusal.** `Field.name` has no unique constraint, and refusing to restore over a live field with the same name would strand its answers permanently — the exact outcome soft deletion exists to prevent. The rail warns and the author decides.
+
+Three surfaces show an archived field to its owner now: the rail's **Archived** list, the marked column in the responses table, and the CSV — where the column is deliberately **not** marked, because the header text is a contract with whatever parses the export.
 
 One consequence worth knowing: `GET /forms/:id` re-extracts fields from the PDF when a form has none. That guard counts archived fields too, so a form edited down to zero live fields does not resurrect them as new rows.
 

@@ -34,6 +34,19 @@ export interface DeleteFieldResult {
 }
 
 /**
+ * A field the author removed that the server kept because it holds answers
+ * (features/0045).
+ *
+ * `answerCount` is the server's, not a count of what the responses screen
+ * happens to have loaded: that screen holds one page of submissions, and the
+ * number worth showing is how many answers this field is keeping in total.
+ */
+export interface ArchivedField extends Field {
+  deletedAt: string
+  answerCount: number
+}
+
+/**
  * The bulk save is the only endpoint that accepts an `id`. Sending back the id
  * the server gave us is what makes a save a diff instead of a delete-and-
  * recreate; without it the server cannot tell an edited field from a new one,
@@ -101,6 +114,26 @@ export const fieldsService = {
    */
   async delete(formId: string, fieldId: string): Promise<DeleteFieldResult> {
     return api.delete<DeleteFieldResult>(`/forms/${formId}/fields/${fieldId}`)
+  },
+
+  /** The fields of this form that were archived rather than deleted. */
+  async listArchived(formId: string): Promise<ArchivedField[]> {
+    const response = await api.get<{ fields: ArchivedField[] }>(`/forms/${formId}/fields/archived`)
+    return response.fields ?? []
+  },
+
+  /**
+   * Brings an archived field back to life.
+   *
+   * The **whole row** comes back, not an acknowledgement, and the caller must
+   * put it into the editor's field list. The bulk save reads removals as "a
+   * live field whose id is missing from the payload", so a restored field left
+   * out of that list is archived again by the very next save — silently, with
+   * no error for the user to see.
+   */
+  async restore(formId: string, fieldId: string): Promise<Field> {
+    const response = await api.post<FieldResponse>(`/forms/${formId}/fields/${fieldId}/restore`, {})
+    return response.field
   },
 
   async bulkSave(formId: string, fields: BulkFieldData[]): Promise<BulkSaveResult> {

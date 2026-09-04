@@ -123,6 +123,10 @@ The rule that follows: **anything that builds a payload from `fields` must decid
 
 The endpoint answers with `archived: string[]` — fields the user deleted that the server kept because they hold responses. The store parks them in `archivedFieldIds` and `FormSavePanel.vue` shows them as a non-blocking toast, then clears them. A response the frontend receives and silently ignores is how the previous attempt at this fix confused everyone: fields reappeared in the editor with no explanation.
 
+That toast used to be the **only** signal, which meant an archived field was visible for eight seconds and then in no screen at all. Since [`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md) it is the transient half of two: `archivedFieldIds` stays the one-shot "this just happened", and `archivedFields` is the standing list `EditorRail.vue` renders under **Archived**, loaded from `GET /forms/:formId/fields/archived` and re-read only after a save or delete that actually archived something. The responses table marks those columns too, reading the `deletedAt` that endpoint had been returning and the client had been discarding.
+
+**The one rule that is not obvious:** `restoreArchivedField` pushes the restored row into `fields`, and that is not bookkeeping. The bulk save computes removals as *a live field whose id is absent from the payload*, so a restore that only refreshes the sidebar is undone by the next `Save all` — silently. It also deliberately does **not** `markDirty`: the restore already reached the server, and claiming unsaved work would make the leave-the-editor prompt lie.
+
 ## 6. Persistence is decided per store, explicitly
 
 `pinia-plugin-persistedstate` is applied per store, never globally, and with an explicit `pick`:

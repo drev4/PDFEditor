@@ -7,6 +7,7 @@ import { verifyFormOwnership, verifyFieldOwnership } from '../middleware/formOwn
 import { checkPattern } from '../services/pattern-validator.js'
 import { requestEmbed } from '../services/embed-queue.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
+import { AppError } from '../middleware/errorHandler.js'
 
 export const formFieldsRouter = Router()
 
@@ -114,6 +115,88 @@ formFieldsRouter.post('/:formId/fields', authenticate, asyncHandler(async (req: 
   })
 
   res.status(201).json({ field })
+}))
+
+// GET /api/forms/:formId/fields/archived - List the archived fields of a form
+//
+// The other half of soft deletion (features/0045). Archiving worked and was
+// tested; *seeing* it did not exist — the only signal a field had been archived
+// was a toast that appeared once and expired after eight seconds, and after
+// that the field was in no screen at all.
+//
+// **Declared above the `/:formId/fields/:fieldId` routes on purpose**, for the
+// same reason `POST /fields/check-pattern` is declared above everything: a
+// static segment underneath a family of parameterised ones is exactly where
+// shadowing happens. There is no `GET /:formId/fields/:fieldId` today to
+// collide with, and this ordering is what keeps that true the day somebody adds
+// one. `tests/fields.spec.ts` asserts this route is still reached.
+//
+// `answerCount` comes from the server because the client cannot compute it: the
+// responses screen holds one page of submissions, and the number that makes
+// this list mean anything is how many answers each archived field is keeping in
+// total.
+formFieldsRouter.get('/:formId/fields/archived', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
+  const formId = req.params.formId as string
+
+  await verifyFormOwnership(req, formId)
+
+  const fields = await prisma.field.findMany({
+    where: { formId, deletedAt: { not: null } },
+    include: { _count: { select: { answers: true } } },
+    orderBy: { deletedAt: 'desc' }
+  })
+
+  res.json({
+    fields: fields.map(({ _count, ...field }) => ({ ...field, answerCount: _count.answers }))
+  })
+}))
+
+// POST /api/forms/:formId/fields/:fieldId/restore - Un-archive a field
+//
+// Without this, the only way to bring back an archived question is to place a
+// new field, which gets a **new id**. The old answers stay attached to the old
+// id, so the CSV grows two columns for one question and nothing can ever join
+// them. Stable field ids are the work of features/0001; this is what makes them
+// recoverable when somebody removes a field by mistake.
+//
+// It deliberately does **not** go through `verifyFieldOwnership`, and that
+// helper must not grow an `includeArchived` flag: it is the single thing
+// guaranteeing the individual `PUT` and `DELETE` cannot reach an archived
+// field, and an optional parameter living inside that guarantee is what someone
+// eventually passes `true` for convenience.
+//
+// **No transaction and no `SELECT … FOR UPDATE` here, unlike the `DELETE`
+// above.** That lock exists because deleting *counts* answers and then destroys
+// rows, so a submission arriving between the two would lose its answer.
+// Restoring counts nothing and destroys nothing: the worst a concurrent
+// submission can do is land on a field that becomes live a moment later, which
+// is the outcome either ordering produces.
+//
+// It does not call `requestEmbed` either. No individual field write does, so
+// the stored PDF's AcroForm lags until the next bulk save — the asymmetry is
+// filed in docs/BACKLOG.md, and fixing it on this one route would deepen it.
+formFieldsRouter.post('/:formId/fields/:fieldId/restore', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
+  const formId = req.params.formId as string
+  const fieldId = req.params.fieldId as string
+
+  await verifyFormOwnership(req, formId)
+
+  const archivedField = await prisma.field.findFirst({
+    where: { id: fieldId, formId, deletedAt: { not: null } }
+  })
+
+  // A live field is a 404 here, the mirror of an archived field being a 404 to
+  // `PUT` and `DELETE`: each route can only reach the fields it is about.
+  if (!archivedField) {
+    throw new AppError(404, 'Archived field not found')
+  }
+
+  const field = await prisma.field.update({
+    where: { id: fieldId },
+    data: { deletedAt: null }
+  })
+
+  res.json({ field })
 }))
 
 // PUT /api/forms/:formId/fields/:fieldId - Update field

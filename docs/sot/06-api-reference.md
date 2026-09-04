@@ -193,7 +193,7 @@ The form endpoints accept and return `collectsRespondentMetadata` as an explicit
 
 ## Fields — `routes/form-fields.ts`
 
-Mounted under `/api/forms`, so every path here is nested under a form. **There is no list endpoint** — fields come embedded in `GET /forms/:id`.
+Mounted under `/api/forms`, so every path here is nested under a form. **Live fields have no list endpoint** — they come embedded in `GET /forms/:id`. Archived ones do, because nothing else returns them: `GET /forms/:formId/fields/archived` ([`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md)).
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
@@ -201,8 +201,14 @@ Mounted under `/api/forms`, so every path here is nested under a form. **There i
 | PUT | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | Partial body (`createFieldSchema.partial()`) |
 | DELETE | `/forms/:formId/fields/:fieldId` | Bearer + field ownership | Removes one field, by the same rule as the bulk save since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md): **archived** (`deletedAt`) when it holds answers, deleted when it holds none. Answers are never destroyed. Answers `{ message, archived, answerCount }` — the caller cannot know which happened beforehand |
 | POST | `/forms/:formId/fields/bulk` | Bearer + form ownership | Body `{fields: BulkFieldData[]}`. A **diff**, not a replacement — see below. Re-embeds the AcroForm in the PDF on disk from the resulting live set |
+| GET | `/forms/:formId/fields/archived` | Bearer + form ownership | The form's **archived** fields (`deletedAt` non-null), newest first, each with `answerCount` — how many answers it is keeping. `{fields: [...]}` |
+| POST | `/forms/:formId/fields/:fieldId/restore` | Bearer + form ownership | Un-archives one field: clears `deletedAt` and returns the whole row as `{field}`. A **live** field is `404` here, the mirror of an archived one being `404` to `PUT`/`DELETE` |
 
-`PUT` and `DELETE` resolve the field through `verifyFieldOwnership`, which only matches live fields: an archived field is `404` to both.
+`PUT` and `DELETE` resolve the field through `verifyFieldOwnership`, which only matches live fields: an archived field is `404` to both. **`restore` deliberately does not use that helper**, and it must never grow an `includeArchived` flag — that helper is the single thing keeping the individual write routes away from archived rows, and an optional parameter inside a guarantee is what somebody eventually passes `true` for convenience. It does its own `deletedAt: { not: null }` lookup after `verifyFormOwnership`.
+
+Two things about `restore` that look like omissions and are not. It takes **no transaction and no row lock**, unlike `DELETE`: that lock exists because deleting counts answers and then destroys rows, and restoring counts nothing and destroys nothing. And it does **not** call `requestEmbed`, like every other individual field write — so the stored PDF's AcroForm lags a restored field until the next bulk save, which is the asymmetry filed in [BACKLOG](../BACKLOG.md) rather than deepened here. The editor's toast says so rather than claiming the PDF is up to date.
+
+**A restored field must be sent back with the next bulk save.** That save reads its removals as *a live field of this form whose id is absent from the payload*, so a client that restores a field without adding it to the list it saves gets it archived again — with a `200`, and nothing to notice. `restoreArchivedField` in `frontend/src/stores/formFields.store.ts` pushes the row into `fields` for exactly this reason, and `backend/tests/integration/fields-archived.spec.ts` covers both orderings.
 
 ### `POST /forms/:formId/fields/bulk`
 
