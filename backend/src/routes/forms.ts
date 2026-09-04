@@ -235,6 +235,26 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
     data.pdfUrl = await assertUploadBelongsTo(existing.organizationId, data.pdfUrl)
   }
 
+  // The document this request replaces, if it replaces one (features/0046).
+  //
+  // The editor's save uploads the edited bytes and repoints the form here
+  // (`useFormManagement.ts`, `FormSavePanel.vue`), so before this every save
+  // left one more object nothing would ever reference again.
+  //
+  // Read now, collected after the write, and both halves are deliberate:
+  //  - **Keys, not URLs.** `assertUploadBelongsTo` canonicalises, and a client
+  //    may echo back the signed URL it read from this API, so the two strings
+  //    can differ while naming one object. `pdfFilenameFrom` — the one parser —
+  //    decides, and an unchanged key means there is nothing to collect and no
+  //    reason to touch storage at all.
+  //  - **Never `remove(replaced)`.** Two forms in one organization can point at
+  //    one upload, because an upload is not consumed by being used
+  //    (`services/uploads.ts`), so only `collectOrphanDocuments` may decide —
+  //    it asks whether any *surviving* form still references the key.
+  const replaced = data.pdfUrl !== undefined && pdfFilenameFrom(data.pdfUrl) !== pdfFilenameFrom(existing.pdfUrl)
+    ? keysReferencedBy([existing])
+    : []
+
   // Publishing is what the plan meters, not creating — see
   // `services/entitlements.ts`. This route can publish too, because
   // `updateFormSchema` accepts `status`; gating only PATCH /:id/status would
@@ -254,6 +274,17 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
         data: data as any,
         include: formCounts
       })
+
+  // Rows first, bytes second, and **after** the write rather than before it.
+  // Before, the form itself is still pointing at the old key, so
+  // `stillReferenced` answers `true` and the call removes nothing — a silent
+  // no-op that looks like working code. And the ordering is the same one
+  // `DELETE /:id` and `services/pdf-gc.ts` argue for: a rollback after the
+  // bytes are gone leaves a live form with no document and is unrecoverable,
+  // while a commit followed by a failed removal is an orphan, which is logged
+  // and fixable. `collectOrphanDocuments` never throws, so a storage outage
+  // cannot turn the author's save into a `500`.
+  if (replaced.length > 0) await collectOrphanDocuments(replaced)
 
   res.json({ form: toApiForm(form) })
 }))
