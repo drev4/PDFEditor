@@ -69,6 +69,89 @@ test.describe('PDF Workflow', () => {
       .toBe(Math.round(before.x));
   });
 
+  /**
+   * The keyboard half of features/0048.
+   *
+   * The coalescing, the geometry and the store's invariants are all asserted in
+   * unit tests. What only a browser can show is that the arrow keys are bound at
+   * all, that a burst of them is a single `Ctrl+Z` away from being undone, and
+   * that shift-clicking a second field really moves both.
+   */
+  test('nudges a selection with the arrow keys, and undoes the burst in one press', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+    await page.locator('input[type="file"]').first().setInputFiles(FIXTURE_PDF);
+    await expect(page.locator('.pdf-viewer-container')).toBeVisible({ timeout: 30000 });
+
+    /**
+     * Places a field at the first point of the page that nothing is covering.
+     *
+     * Fixed coordinates do not work here: the floating drawing toolbar and the
+     * properties panel both sit over the canvas, they move with the viewport,
+     * and a click that lands on either is intercepted rather than placed. The
+     * overlay only takes the pointer while a field is being placed, which is
+     * exactly when this runs — so a point whose topmost element *is* the overlay
+     * is a point where a field can be dropped, and one whose topmost element is
+     * anything else is not.
+     */
+    const placeFieldBelow = async (minY: number) => {
+      await page.locator('[data-testid="add-field-text"]').first().click();
+
+      const point = await page.evaluate((from) => {
+        const overlay = document.querySelector('.form-fields-overlay');
+        if (!overlay) return null;
+        const box = overlay.getBoundingClientRect();
+        for (let y = Math.max(box.top + 40, from); y < box.bottom - 40; y += 15) {
+          for (let x = box.left + 60; x < box.right - 60; x += 20) {
+            if (document.elementFromPoint(x, y) === overlay) return { x, y };
+          }
+        }
+        return null;
+      }, minY);
+
+      if (!point) throw new Error(`no free point on the page below ${minY}`);
+      await page.mouse.click(point.x, point.y);
+      return point;
+    };
+
+    const fields = page.locator('.form-field-item');
+
+    // Placing the first field creates the form behind it, which saves — and the
+    // save puts a full-screen loading layer over the page. Placing the second
+    // one before that clears finds nothing on the canvas clickable at all.
+    const firstPoint = await placeFieldBelow(0);
+    await expect(fields).toHaveCount(1);
+    await page.waitForTimeout(2000);
+
+    await placeFieldBelow(firstPoint.y + 90);
+    await expect(fields).toHaveCount(2);
+    await page.waitForTimeout(2000);
+
+    const first = fields.nth(0);
+    const second = fields.nth(1);
+    const firstBefore = await first.boundingBox();
+    const secondBefore = await second.boundingBox();
+    if (!firstBefore || !secondBefore) throw new Error('a placed field has no box');
+
+    // The second field is selected from placing it; shift-click adds the first.
+    await first.click({ modifiers: ['Shift'] });
+    await expect(page.locator('[data-testid="selection-count"]')).toContainText('2 fields');
+
+    for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowRight');
+
+    await expect
+      .poll(async () => (await first.boundingBox())!.x)
+      .toBeGreaterThan(firstBefore.x);
+    expect((await second.boundingBox())!.x).toBeGreaterThan(secondBefore.x);
+
+    // Ten presses, one burst, one entry: a single undo puts both fields back.
+    await page.keyboard.press('Control+z');
+
+    await expect
+      .poll(async () => Math.round((await first.boundingBox())!.x))
+      .toBe(Math.round(firstBefore.x));
+    expect(Math.round((await second.boundingBox())!.x)).toBe(Math.round(secondBefore.x));
+  });
+
   test('should offer a working upload affordance on an empty dashboard', async ({ page }) => {
     const fileInput = page.locator('input[type="file"]').first();
     await expect(fileInput).toBeAttached();

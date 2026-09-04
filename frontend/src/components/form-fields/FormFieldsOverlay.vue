@@ -185,6 +185,10 @@ const handleOverlayClick = async (e: MouseEvent) => {
     return
   }
 
+  // Placing a field selects it, and the wrapper behind this overlay clears the
+  // selection on any click that reaches it — so this one must not.
+  e.stopPropagation()
+
   // `getBoundingClientRect` reports the *visual* box, so a click inside a
   // scaled element has to be divided back out to element-local pixels.
   const rect = overlayRef.value.getBoundingClientRect()

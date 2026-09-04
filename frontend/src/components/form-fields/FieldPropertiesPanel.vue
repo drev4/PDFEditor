@@ -1,5 +1,79 @@
 <template>
-  <div class="field-properties-panel font-sans" v-if="formFieldsStore.selectedField">
+  <!--
+    More than one field selected (features/0048).
+
+    It deliberately carries **no per-field inputs**. A name or a pattern written
+    into six fields at once is the properties-panel undo problem this repository
+    has already decided not to solve by accident: one entry per keystroke floods
+    the stack, one on blur records a rename and misses the four other properties
+    touched in the same visit. What belongs here is what only makes sense on a
+    set — geometry, and duplication.
+  -->
+  <div class="field-properties-panel font-sans" v-if="formFieldsStore.hasMultiSelection">
+    <div class="panel-header bg-surface border-b border-line px-4 h-11 flex items-center">
+      <h3 class="text-meta font-semibold text-faint uppercase tracking-widest">Selection</h3>
+      <button class="close-btn p-2 hover:bg-surface-sunken rounded-xl transition-colors text-faint" @click="formFieldsStore.clearSelection()">
+        <i class="pi pi-times text-meta"></i>
+      </button>
+    </div>
+
+    <div class="panel-content p-6 space-y-8">
+      <p class="text-body text-muted" data-testid="selection-count">
+        <span class="font-semibold text-ink">{{ formFieldsStore.selectedFieldIds.length }} fields</span>
+        selected. Drag any one of them to move them together, or nudge them with the
+        arrow keys.
+      </p>
+
+      <div class="form-group">
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-3 block">Align</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button
+            v-for="option in alignOptions"
+            :key="option.mode"
+            :data-testid="`align-${option.mode}`"
+            :disabled="!canEditGeometry"
+            :title="canEditGeometry ? undefined : rotatedHint"
+            class="py-2.5 px-2 bg-surface-subtle border border-line rounded-xl text-meta font-semibold text-muted enabled:hover:border-accent enabled:hover:text-accent transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            @click="alignSelection(option.mode)"
+          >{{ option.label }}</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-3 block">
+          Distribute <span class="text-faint normal-case tracking-normal font-normal">(three or more)</span>
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            v-for="option in distributeOptions"
+            :key="option.axis"
+            :data-testid="`distribute-${option.axis}`"
+            :disabled="!canEditGeometry || formFieldsStore.selectedFieldIds.length < 3"
+            :title="canEditGeometry ? undefined : rotatedHint"
+            class="py-2.5 px-2 bg-surface-subtle border border-line rounded-xl text-meta font-semibold text-muted enabled:hover:border-accent enabled:hover:text-accent transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            @click="distributeSelection(option.axis)"
+          >{{ option.label }}</button>
+        </div>
+      </div>
+
+      <div class="pt-2">
+        <button
+          data-testid="duplicate-selection"
+          class="w-full flex items-center justify-center gap-3 py-4 bg-surface-subtle border border-line hover:border-accent hover:text-accent text-muted rounded-2xl transition-all font-semibold text-meta"
+          @click="duplicateSelection()"
+        >
+          <i class="pi pi-clone"></i>
+          DUPLICATE {{ formFieldsStore.selectedFieldIds.length }} FIELDS
+        </button>
+        <p class="text-meta text-faint mt-3">
+          Copies are new fields with their own names. Removing fields is still one at a
+          time, from a single field's settings.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="field-properties-panel font-sans" v-else-if="formFieldsStore.selectedField">
     <div class="panel-header bg-surface border-b border-line px-4 h-11 flex items-center">
       <div class="flex flex-col gap-1">
         <h3 class="text-meta font-semibold text-faint uppercase tracking-widest">Field Settings</h3>
@@ -162,6 +236,19 @@
         </div>
       </div>
 
+      <!-- Duplicate (features/0048). A configured field is worth more than an
+           empty one, so copying it is the cheapest way to build the next. -->
+      <div class="pt-6">
+        <button
+          data-testid="duplicate-field"
+          class="w-full flex items-center justify-center gap-3 py-3.5 bg-surface-subtle border border-line hover:border-accent hover:text-accent text-muted rounded-2xl transition-all font-semibold text-meta"
+          @click="duplicateSelection()"
+        >
+          <i class="pi pi-clone"></i>
+          DUPLICATE FIELD
+        </button>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pt-10">
         <button @click="deleteField" data-testid="remove-field" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-semibold text-meta border border-danger group">
@@ -264,6 +351,8 @@ import {
   type FormField
 } from '@/stores/formFields.store'
 import { useEditorStore } from '@/stores/editor.store'
+import { useFieldEditing } from '@/composables/useFieldEditing'
+import type { AlignMode, DistributeAxis } from '@/utils/fieldGeometry'
 import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
@@ -271,6 +360,28 @@ import Button from 'primevue/button'
 const formFieldsStore = useFormFieldsStore()
 const editorStore = useEditorStore()
 const toast = useToast()
+
+/**
+ * The set operations (features/0048). They live in `useFieldEditing` because the
+ * keyboard reaches for the same three, and each of them is one undo entry.
+ */
+const { canEditGeometry, duplicateSelection, alignSelection, distributeSelection } = useFieldEditing()
+
+const rotatedHint = 'Rotate the page back to upright to move these fields'
+
+const alignOptions: Array<{ mode: AlignMode; label: string }> = [
+  { mode: 'left', label: 'Left' },
+  { mode: 'center-x', label: 'Centre' },
+  { mode: 'right', label: 'Right' },
+  { mode: 'top', label: 'Top' },
+  { mode: 'center-y', label: 'Middle' },
+  { mode: 'bottom', label: 'Bottom' }
+]
+
+const distributeOptions: Array<{ axis: DistributeAxis; label: string }> = [
+  { axis: 'horizontal', label: 'Horizontally' },
+  { axis: 'vertical', label: 'Vertically' }
+]
 
 // Local form state
 const fieldName = ref('')

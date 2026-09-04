@@ -335,6 +335,26 @@ An undo always marks the form dirty, deliberately without checking whether the r
 
 **Not built, and filed:** redo, undo of the property panel's own fields (the browser's undo already works inside those inputs), and undo surviving a reload — the stack is in memory, like the snapshots always were.
 
+### A selection is a set, and the keyboard reaches it
+
+Placing thirty aligned checkboxes — the form this product exists for — used to be thirty mouse gestures with nothing to help. Fields are selected as a **set** now, and there are keys ([`features/0048`](../../features/0048-multi-select-duplicate-and-keyboard-nudge.md)).
+
+`formFields.store.ts` holds `selectedFieldIds` beside `selectedFieldId`, and the invariant between them is the thing to keep: **the primary is the field whose properties the panel shows, and it is always a member of the set while the set is non-empty.** `setSelection` is the one function that writes either of them, which is also where ids that name no field are dropped — a selection surviving a delete or a restored snapshot is a panel editing a field that is gone. A selection is confined to **one page**: reaching for a field on another page replaces it rather than producing a set that align and distribute cannot act on.
+
+`Shift`/`Ctrl`/`Cmd`-click on a field toggles it in and out. A **marquee** would be the natural gesture and is deliberately not built: the fields overlay is `pointer-events: none` at `z-index: 8`, directly above `.text-layer` at `z-index: 7`, so an overlay that took `mousedown` on empty page area would take text selection and search highlighting away from the whole canvas. For the same layering reason, clearing the selection by clicking the page is bound on the canvas **wrapper** in `PDFViewer.vue` — a listener there takes nothing from the layers underneath, and a field stops its own click.
+
+Three things about the set operations are worth knowing before changing them.
+
+**A duplicate never carries its original's id.** `saveAllFields` sends `id` for every field whose id is not local, so a copy keeping a server id is a second update to one row: the bulk save applies both, the later wins, and one of the two fields is simply never created — with a `200` and nothing in any log. `duplicateFields` mints a local id and a fresh name from `generateUniqueFieldName`, because an AcroForm identifies a field by name and `addField` does not check for a collision the way `updateField` does.
+
+**A burst of arrow keys is one undo entry, and that is a data-loss guard rather than a nicety.** The stack is capped at ten and evicts from the front, freeing the bytes of any `document` entry it drops — so one entry per keypress would not merely fill the stack, it would destroy every document snapshot the session holds and make the text and image edits behind them unundoable, silently. `useFieldKeyboard.ts` opens a step on the first press and closes it after a pause (`BURST_IDLE_MS`) or a change of selection. Note that it closes on a **pause, not on `keyup`**: ten taps in a row are one act of nudging and would evict the history just as effectively as key repeat. `Ctrl/Cmd+D` duplicates, `Escape` clears the selection, and the arrow keys are exempt inside an `input`, a `textarea` or a `contenteditable` — the same three checks the `Ctrl+Z` handler makes, because the caret owns those keys while somebody is renaming a field.
+
+**Geometry is refused while the page is rotated**, exactly as dragging already was: nudging, aligning and distributing all name a *screen* direction and write a *stored* axis, and on a turned page those are not the same thing. `useFieldEditing.ts` holds that rule once and both callers — the panel and the keyboard — read it.
+
+The split between the two composables follows the store/composable rule and one hard constraint: `editor.store.ts` imports `formFields.store.ts`, so the field store cannot push undo entries itself without a cycle. The store mutates; `useFieldEditing.ts` captures, calls it, and records exactly one entry. `utils/fieldGeometry.ts` is pure — align and distribute are the easiest thing here to get subtly wrong and the easiest to test, so they are tested apart from any store, in stored coordinates.
+
+The multi-selection panel deliberately carries **no per-field inputs**. A name typed into six fields at once is the properties-panel undo problem this repository has already decided not to solve by accident, and removing fields stays one at a time, because each removal is a separate server answer — archived or hard-deleted — with a different undo consequence.
+
 ### One thing ends an editor session
 
 `useFormManagement().resetEditorSession()` closes the document, clears the fields, forgets the form and empties the undo stack — the four together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form. Undo belongs to a session too — an entry kept across a close would offer to restore one document's bytes, or one form's fields, into the next.

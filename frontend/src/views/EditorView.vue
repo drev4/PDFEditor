@@ -253,6 +253,7 @@ import UnsavedChangesDialog from '@/components/ui/UnsavedChangesDialog.vue'
 import { useAppNav } from '@/composables/useAppNav'
 import { useDownloadPDF } from '@/composables/useDownloadPDF'
 import { useEditorUndo } from '@/composables/useEditorUndo'
+import { useFieldKeyboard } from '@/composables/useFieldKeyboard'
 import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 
 const authStore = useAuthStore()
@@ -330,6 +331,13 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', warnOnUnload))
  * the properties panel unable to take back a keystroke.
  */
 const { undo: undoEdit } = useEditorUndo()
+
+/**
+ * The rest of the editor's keyboard (features/0048): the arrow keys, `Ctrl+D`
+ * and Escape. Instantiated **once**, here, because it holds the open-nudge
+ * gesture that keeps a burst of presses to one undo entry.
+ */
+useFieldKeyboard()
 
 const onEditorKeydown = (event: KeyboardEvent) => {
   if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return

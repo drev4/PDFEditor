@@ -41,7 +41,7 @@
     </template>
 
     <!-- Resize Handles (only when selected, and only upright) -->
-    <template v-if="isSelected && !isRotated">
+    <template v-if="showHandles">
       <div class="resize-handle nw" @mousedown.stop="startResize($event, 'nw')"></div>
       <div class="resize-handle ne" @mousedown.stop="startResize($event, 'ne')"></div>
       <div class="resize-handle sw" @mousedown.stop="startResize($event, 'sw')"></div>
@@ -94,7 +94,19 @@ const commitGesture = (label: string, changed: boolean) => {
   editorStore.pushFieldsUndo(before, formFieldsStore.selectedFieldId, label)
 }
 
-const isSelected = computed(() => formFieldsStore.selectedFieldId === props.field.id)
+const isSelected = computed(() => formFieldsStore.isFieldSelected(props.field.id))
+
+/**
+ * Resizing stays a single-field gesture (features/0048).
+ *
+ * Handles appear only when this field is the whole selection: resizing six
+ * fields at once is a second geometry decision — do they keep their sizes, their
+ * proportions, or their edges? — and offering the handles without answering it
+ * would resize one field out of six and look broken.
+ */
+const showHandles = computed(
+  () => isSelected.value && !formFieldsStore.hasMultiSelection && !isRotated.value
+)
 
 // Where the field is *drawn*. What is stored never changes when the page is
 // turned — see rotateFieldRect in utils/pdfCoordinates.ts.
@@ -151,18 +163,71 @@ const isResizing = ref(false)
 const resizeHandle = ref<string | null>(null)
 const resizeStart = ref({ x: 0, y: 0, width: 0, height: 0, fieldX: 0, fieldY: 0 })
 
-const onClick = () => {
-  formFieldsStore.selectField(props.field.id)
-}
+/** Shift, Ctrl or Cmd means "add this one", not "select only this one". */
+const isMultiSelectClick = (e: MouseEvent) => e.shiftKey || e.ctrlKey || e.metaKey
+
+/**
+ * Deliberately does nothing but stop the click.
+ *
+ * The selection is settled on `mousedown` (so a drag can start immediately) and
+ * on `mouseup` (so a click that did not drag collapses a multi-selection).
+ * Selecting here as well would undo a modifier click the moment the button came
+ * back up, and would collapse a selection that had just been dragged, because a
+ * drag ending over the field still produces a `click`. The `.stop` is what keeps
+ * the page's own click from clearing the selection.
+ */
+const onClick = () => {}
+
+/**
+ * Where every field being dragged started.
+ *
+ * A drag of a multi-selection moves all of them by one delta, so each field's
+ * new corner is its own start plus that delta — never its current position plus
+ * a step, which accumulates rounding over sixty mousemoves.
+ */
+const dragIds = ref<string[]>([])
+const dragStartPositions = ref<Map<string, { x: number; y: number }>>(new Map())
+
+/**
+ * Pressing an already-selected field keeps the set, so the whole set can be
+ * dragged; letting go without having moved means it was a plain click, and a
+ * plain click selects one field. Deciding this on mousedown would make the set
+ * impossible to drag at all.
+ */
+const collapseOnRelease = ref(false)
 
 const onMouseDown = (e: MouseEvent) => {
   if (isResizing.value) return
+
+  if (isMultiSelectClick(e)) {
+    formFieldsStore.toggleFieldSelection(props.field.id)
+    return
+  }
+
   if (isRotated.value) {
     formFieldsStore.selectField(props.field.id)
     return
   }
 
-  formFieldsStore.selectField(props.field.id)
+  // Pressing on a field that is already part of the selection drags the whole
+  // set; pressing on any other field selects it alone first.
+  collapseOnRelease.value = false
+  if (!formFieldsStore.isFieldSelected(props.field.id)) {
+    formFieldsStore.selectField(props.field.id)
+  } else if (formFieldsStore.hasMultiSelection) {
+    collapseOnRelease.value = true
+  }
+
+  dragIds.value = formFieldsStore.selectedFieldIds.includes(props.field.id)
+    ? [...formFieldsStore.selectedFieldIds]
+    : [props.field.id]
+
+  dragStartPositions.value = new Map(
+    formFieldsStore.fields
+      .filter(f => dragIds.value.includes(f.id))
+      .map(f => [f.id, { x: f.position.x, y: f.position.y }])
+  )
+
   isDragging.value = true
   dragStart.value = { x: e.clientX, y: e.clientY }
   fieldStart.value = { x: props.field.position.x, y: props.field.position.y }
@@ -178,10 +243,15 @@ const onDrag = (e: MouseEvent) => {
   const dx = e.clientX - dragStart.value.x
   const dy = e.clientY - dragStart.value.y
 
-  const newX = Math.max(0, fieldStart.value.x + dx)
-  const newY = Math.max(0, fieldStart.value.y + dy)
+  // The delta is clamped, not each field: stopping one field at the edge while
+  // the rest keep going would deform the layout the author lined up.
+  const starts = [...dragStartPositions.value.values()]
+  const allowedDx = Math.max(dx, -Math.min(...starts.map(p => p.x)))
+  const allowedDy = Math.max(dy, -Math.min(...starts.map(p => p.y)))
 
-  formFieldsStore.moveField(props.field.id, newX, newY)
+  for (const [id, start] of dragStartPositions.value) {
+    formFieldsStore.moveField(id, start.x + allowedDx, start.y + allowedDy)
+  }
 }
 
 const stopDrag = () => {
@@ -189,11 +259,19 @@ const stopDrag = () => {
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
 
-  const moved =
-    props.field.position.x !== fieldStart.value.x ||
-    props.field.position.y !== fieldStart.value.y
+  const moved = formFieldsStore.fields.some(field => {
+    const start = dragStartPositions.value.get(field.id)
+    return !!start && (field.position.x !== start.x || field.position.y !== start.y)
+  })
 
-  commitGesture('Field moved', moved)
+  const count = dragStartPositions.value.size
+  commitGesture(count > 1 ? `${count} fields moved` : 'Field moved', moved)
+
+  if (!moved && collapseOnRelease.value) formFieldsStore.selectField(props.field.id)
+  collapseOnRelease.value = false
+
+  dragIds.value = []
+  dragStartPositions.value = new Map()
 
   // Not saved here. `Save all` is what writes field positions, the same as it
   // is for text and images — see formFields.store.ts.
