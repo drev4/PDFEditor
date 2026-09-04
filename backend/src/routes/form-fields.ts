@@ -139,16 +139,58 @@ formFieldsRouter.put('/:formId/fields/:fieldId', authenticate, asyncHandler(asyn
   res.json({ field })
 }))
 
-// DELETE /api/forms/:formId/fields/:fieldId - Delete field
+// DELETE /api/forms/:formId/fields/:fieldId - Delete or archive a field
+//
+// This used to be a bare `prisma.field.delete`. `Answer.field` is
+// `onDelete: Cascade`, so that one line destroyed every answer the field had
+// ever collected, in every past response, without counting them or saying so.
+// features/0001 left it that way deliberately — the cascade was "an explicit
+// act by the user rather than a side effect of saving" — and said to revisit it
+// "once soft delete exists". It exists, and the explicitness did not: the
+// editor's confirmation never mentioned responses at all.
+//
+// The rule is now the bulk save's rule, and it is the same rule for the same
+// reason: a field holding answers is archived, a field holding none is really
+// deleted. Archiving both would leave a permanent row for every field placed
+// and discarded while designing a form (features/0044).
 formFieldsRouter.delete('/:formId/fields/:fieldId', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
   const formId = req.params.formId as string
   const fieldId = req.params.fieldId as string
 
+  // Also the 404 for an already-archived field: `verifyFieldOwnership` filters
+  // on `deletedAt: null`, so this endpoint cannot reach one the editor cannot
+  // see.
   await verifyFieldOwnership(req, formId, fieldId)
 
-  await prisma.field.delete({ where: { id: fieldId } })
+  const { archived, answerCount } = await prisma.$transaction(async tx => {
+    // The lock goes **before** the count, exactly as in the bulk save above,
+    // and taking it afterwards restores the race in full. Inserting an `Answer`
+    // takes `FOR KEY SHARE` on the field it references, which conflicts with
+    // this: a submission arriving while we decide either lands first — and we
+    // see its answer, and archive — or waits until we commit and then fails its
+    // foreign key. Counting first leaves the window where a response is
+    // accepted with a 201 and its answer is cascaded away a moment later.
+    await tx.$queryRaw`SELECT id FROM "fields" WHERE id = ${fieldId} FOR UPDATE`
 
-  res.json({ message: 'Field deleted' })
+    const answerCount = await tx.answer.count({ where: { fieldId } })
+
+    if (answerCount > 0) {
+      await tx.field.update({ where: { id: fieldId }, data: { deletedAt: new Date() } })
+      return { archived: true, answerCount }
+    }
+
+    await tx.field.delete({ where: { id: fieldId } })
+    return { archived: false, answerCount }
+  })
+
+  // The caller is told which of the two happened and how many responses were at
+  // stake, because the editor cannot know either before asking: the form is
+  // published and can take a submission while the author reads the dialog.
+  res.json({
+    message: archived ? 'Field archived' : 'Field deleted',
+    archived,
+    answerCount
+  })
 }))
 
 // POST /api/forms/:formId/fields/bulk - Bulk save fields

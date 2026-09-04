@@ -190,12 +190,19 @@ describe('FormFields Store', () => {
       const serverFieldId = '550e8400-e29b-41d4-a716-446655440000'
       store.fields.push({ ...mockField, id: serverFieldId })
 
-      vi.mocked(fieldsService.delete).mockResolvedValue()
+      vi.mocked(fieldsService.delete).mockResolvedValue({
+        message: 'Field archived',
+        archived: true,
+        answerCount: 3
+      })
 
-      await store.deleteFieldFromServer(serverFieldId)
+      const result = await store.deleteFieldFromServer(serverFieldId)
 
       expect(fieldsService.delete).toHaveBeenCalledWith('form-1', serverFieldId)
       expect(store.fields).toHaveLength(0)
+      // The server's answer reaches the caller: only it knows whether the field
+      // was archived and how many responses that kept (features/0044).
+      expect(result).toEqual({ message: 'Field archived', archived: true, answerCount: 3 })
     })
   })
 
