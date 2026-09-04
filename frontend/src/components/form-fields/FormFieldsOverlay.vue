@@ -59,7 +59,8 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import { useFormFieldsStore, cloneFields, type FieldType } from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
 import { unrotateFieldPoint, unrotatedPageSize } from '@/utils/pdfCoordinates'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
@@ -73,6 +74,7 @@ const props = defineProps<{
 }>()
 
 const formFieldsStore = useFormFieldsStore()
+const editorStore = useEditorStore()
 const documentStore = useDocumentStore()
 const { autoInitializeForm } = useFormManagement()
 const toast = useToast()
@@ -223,6 +225,9 @@ const handleOverlayClick = async (e: MouseEvent) => {
   const uniqueName = formFieldsStore.generateUniqueFieldName(fieldType)
   const fieldNumber = uniqueName.split('_')[1] || '1'
 
+  // Captured before the field exists, so undo takes the placement back.
+  const fieldsBeforePlacement = cloneFields(formFieldsStore.fields)
+
   const newField = formFieldsStore.addField({
     type: fieldType,
     name: uniqueName,
@@ -244,6 +249,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   // be stored for any of this to mean anything — see useFormManagement.
   try {
     await autoInitializeForm()
+    editorStore.pushFieldsUndo(fieldsBeforePlacement, null, 'Field placed')
     formFieldsStore.markDirty()
   } catch (error) {
     console.error('Failed to prepare the form:', error)

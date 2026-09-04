@@ -11,13 +11,6 @@ export interface PDFDocument {
   pageOrder?: number[] // Custom page order for reordering pages
 }
 
-export interface EditAction {
-  type: 'text' | 'image' | 'draw' | 'delete'
-  page: number
-  data: any
-  timestamp: number
-}
-
 export interface TextAnnotation {
   text: string
   x: number

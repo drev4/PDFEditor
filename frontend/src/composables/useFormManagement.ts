@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useFormsStore } from '@/stores/forms.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
+import { useEditorStore } from '@/stores/editor.store'
 import { uploadService, type UploadProgress } from '@/services/upload'
 
 /**
@@ -73,6 +74,9 @@ export function useFormManagement() {
     documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
     formFieldsStore.clearFields()
     formFieldsStore.setCurrentForm(null)
+    // Undo belongs to a session too. An entry kept across a close would offer
+    // to restore one document's bytes, or one form's fields, into the next.
+    useEditorStore().clearUndoHistory()
     documentStore.markSaved()
   }
 

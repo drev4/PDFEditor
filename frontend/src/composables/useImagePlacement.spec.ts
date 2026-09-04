@@ -97,8 +97,8 @@ describe('useImagePlacement', () => {
 
       await confirmImagePlacement()
 
-      expect(editorStore.editHistory).toHaveLength(1)
-      expect(editorStore.editHistory[0].type).toBe('image')
+      expect(editorStore.undoDepth).toBe(1)
+      expect(editorStore.nextUndoLabel).toBe('Image')
       expect(editorStore.imagePreview).toBeNull()
     })
 
@@ -107,7 +107,7 @@ describe('useImagePlacement', () => {
 
       await confirmImagePlacement()
 
-      expect(editorStore.editHistory).toHaveLength(0)
+      expect(editorStore.undoDepth).toBe(0)
     })
 
     it('guarda snapshot antes de confirmar', async () => {
@@ -132,7 +132,8 @@ describe('useImagePlacement', () => {
       // Verify snapshot was saved
       expect(saveSnapshotSpy).toHaveBeenCalledWith(
         documentStore.activeDocument?.id,
-        expect.any(ArrayBuffer)
+        expect.any(ArrayBuffer),
+        'Image'
       )
     })
   })

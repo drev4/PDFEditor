@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import FieldPropertiesPanel from './FieldPropertiesPanel.vue'
-import { useFormFieldsStore } from '@/stores/formFields.store'
+import { useFormFieldsStore, isLocalFieldId } from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
 import { fieldsService } from '@/services/fields'
 import { describePattern } from '@/services/pattern-check'
 import { flushPromises } from '@/test/helpers/test-utils'
@@ -274,6 +275,84 @@ describe('removing a field', () => {
 
     expect(fieldsService.delete).toHaveBeenCalledWith('form-1', serverFieldId)
     expect(store.fields).toHaveLength(0)
+  })
+
+  /**
+   * What may go back on the undo stack is the server's answer, not a guess
+   * (features/0047). The bulk save rejects the **whole** payload when it
+   * carries an id that is not a live field of the form, so an entry holding a
+   * dead id would break every later save of that form, not just that field.
+   */
+  describe('undo', () => {
+    const serverFieldId = '550e8400-e29b-41d4-a716-446655440000'
+
+    async function removeAndConfirm() {
+      const wrapper = mountPanel()
+      await removeButton(wrapper).trigger('click')
+      await wrapper.find('[data-testid="remove-field-confirmed"]').trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+
+    it('brings a hard-deleted field back under a new local id', async () => {
+      const store = selectField('text')
+      const editorStore = useEditorStore()
+      store.setCurrentForm('form-1')
+      store.fields[0]!.id = serverFieldId
+      store.selectedFieldId = serverFieldId
+      vi.mocked(fieldsService.delete).mockResolvedValue({
+        message: 'Field removed',
+        archived: false,
+        answerCount: 0
+      })
+
+      await removeAndConfirm()
+
+      expect(editorStore.nextUndoLabel).toBe('Field removed')
+
+      editorStore.undoLastEdit()
+
+      expect(store.fields).toHaveLength(1)
+      // The row is gone, so its id must not come back with it. Sending it in
+      // the next `Save all` would 400 the whole form.
+      expect(store.fields[0]!.id).not.toBe(serverFieldId)
+      expect(isLocalFieldId(store.fields[0]!.id)).toBe(true)
+      expect(store.fields[0]!.label).toBe('Postcode')
+    })
+
+    it('records nothing for a field the server archived', async () => {
+      const store = selectField('text')
+      const editorStore = useEditorStore()
+      store.setCurrentForm('form-1')
+      store.fields[0]!.id = serverFieldId
+      store.selectedFieldId = serverFieldId
+      vi.mocked(fieldsService.delete).mockResolvedValue({
+        message: 'Field archived',
+        archived: true,
+        answerCount: 2
+      })
+
+      await removeAndConfirm()
+
+      // Restore in the rail is the way back, because it returns the row with
+      // its own id and its answers still attached (features/0045).
+      expect(editorStore.canUndo).toBe(false)
+    })
+
+    it('keeps its own id for a field that was never saved', async () => {
+      const store = selectField('text')
+      const editorStore = useEditorStore()
+      store.setCurrentForm('form-1')
+
+      await removeAndConfirm()
+
+      expect(fieldsService.delete).not.toHaveBeenCalled()
+
+      editorStore.undoLastEdit()
+
+      expect(store.fields).toHaveLength(1)
+      expect(store.fields[0]!.id).toBe('field-1')
+    })
   })
 })
 })

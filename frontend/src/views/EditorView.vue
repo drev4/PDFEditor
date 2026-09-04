@@ -252,6 +252,7 @@ import BrandMark from '@/components/ui/BrandMark.vue'
 import UnsavedChangesDialog from '@/components/ui/UnsavedChangesDialog.vue'
 import { useAppNav } from '@/composables/useAppNav'
 import { useDownloadPDF } from '@/composables/useDownloadPDF'
+import { useEditorUndo } from '@/composables/useEditorUndo'
 import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 
 const authStore = useAuthStore()
@@ -318,6 +319,32 @@ const warnOnUnload = (event: BeforeUnloadEvent) => {
 
 onMounted(() => window.addEventListener('beforeunload', warnOnUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', warnOnUnload))
+
+/**
+ * Ctrl/Cmd+Z, the key people reach for before they look for a button.
+ *
+ * It is bound on the window rather than on the canvas because a field is
+ * dragged with the mouse and nothing in the editor holds focus afterwards.
+ * **Typing is exempt**: inside an input, a textarea or a contenteditable the
+ * browser's own undo is the right one, and stealing the key there would make
+ * the properties panel unable to take back a keystroke.
+ */
+const { undo: undoEdit } = useEditorUndo()
+
+const onEditorKeydown = (event: KeyboardEvent) => {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+  if (event.key !== 'z' && event.key !== 'Z') return
+
+  const target = event.target as HTMLElement | null
+  const tag = target?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return
+
+  event.preventDefault()
+  undoEdit()
+}
+
+onMounted(() => window.addEventListener('keydown', onEditorKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onEditorKeydown))
 
 /**
  * Every in-app navigation out of the editor, whichever control started it —

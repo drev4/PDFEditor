@@ -68,9 +68,8 @@ describe('useTextPlacement', () => {
 
       await confirmTextPlacement()
 
-      expect(editorStore.editHistory).toHaveLength(1)
-      expect(editorStore.editHistory[0].type).toBe('text')
-      expect(editorStore.editHistory[0].data.text).toBe('Hello World')
+      expect(editorStore.undoDepth).toBe(1)
+      expect(editorStore.nextUndoLabel).toBe('Text')
       expect(editorStore.textPreview).toBeNull()
     })
 
@@ -79,7 +78,7 @@ describe('useTextPlacement', () => {
 
       await confirmTextPlacement()
 
-      expect(editorStore.editHistory).toHaveLength(0)
+      expect(editorStore.undoDepth).toBe(0)
     })
 
     it('no hace nada si el texto está vacío', async () => {
@@ -97,7 +96,7 @@ describe('useTextPlacement', () => {
 
       await confirmTextPlacement()
 
-      expect(editorStore.editHistory).toHaveLength(0)
+      expect(editorStore.undoDepth).toBe(0)
       expect(editorStore.textPreview).toBeNull()
     })
 
@@ -122,7 +121,8 @@ describe('useTextPlacement', () => {
       // Verify snapshot was saved
       expect(saveSnapshotSpy).toHaveBeenCalledWith(
         documentStore.activeDocument?.id,
-        expect.any(ArrayBuffer)
+        expect.any(ArrayBuffer),
+        'Text'
       )
     })
 
@@ -149,7 +149,7 @@ describe('useTextPlacement', () => {
         await confirmTextPlacement()
       }
 
-      expect(editorStore.editHistory).toHaveLength(4)
+      expect(editorStore.undoDepth).toBe(4)
     })
 
     it('maneja errores durante la colocación', async () => {

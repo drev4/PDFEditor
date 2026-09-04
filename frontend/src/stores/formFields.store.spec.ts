@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useFormFieldsStore, type FormField } from './formFields.store'
+import { useEditorStore } from './editor.store'
 import { fieldsService } from '@/services/fields'
 
 vi.mock('@/services/fields')
@@ -203,6 +204,42 @@ describe('FormFields Store', () => {
       // The server's answer reaches the caller: only it knows whether the field
       // was archived and how many responses that kept (features/0044).
       expect(result).toEqual({ message: 'Field archived', archived: true, answerCount: 3 })
+    })
+  })
+
+  /**
+   * Undo hands the store a field list it was holding, and the save then has to
+   * be sendable (features/0047). The failure this guards against is not local:
+   * `POST /forms/:id/fields/bulk` rejects the whole payload over one id that is
+   * not a live field, so every later save of the form fails until a reload.
+   */
+  describe('Undo and the save payload', () => {
+    it('sends no id for a field the undo revived, and says the work is unsaved', async () => {
+      const store = useFormFieldsStore()
+      const editorStore = useEditorStore()
+      store.setCurrentForm('form-1')
+
+      const deadServerId = '550e8400-e29b-41d4-a716-446655440000'
+      store.loadFieldsFromForm([
+        { ...mockField, id: deadServerId, options: undefined, validation: undefined }
+      ] as never)
+
+      // What the properties panel does once the server reports a hard delete.
+      const revived = store.fields.map(f => ({ ...f, id: 'field-revived' }))
+      editorStore.pushFieldsUndo(revived, null, 'Field removed')
+      store.deleteField(deadServerId)
+      store.hasUnsavedChanges = false
+
+      editorStore.undoLastEdit()
+
+      expect(store.hasUnsavedChanges).toBe(true)
+
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({ fields: [], archived: [] } as never)
+      await store.saveAllFields()
+
+      const payload = vi.mocked(fieldsService.bulkSave).mock.calls[0]?.[1] ?? []
+      expect(payload).toHaveLength(1)
+      expect(payload[0]).not.toHaveProperty('id')
     })
   })
 

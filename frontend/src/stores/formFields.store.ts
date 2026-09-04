@@ -9,8 +9,35 @@ export type FieldType = 'text' | 'textarea' | 'checkbox' | 'radio' | 'dropdown'
 
 const LOCAL_ID_PREFIX = 'field-'
 
-function isLocalFieldId(id: string): boolean {
+export function isLocalFieldId(id: string): boolean {
   return id.startsWith(LOCAL_ID_PREFIX)
+}
+
+/**
+ * An id for a field that exists only in the browser.
+ *
+ * Exported because undo mints one too: a field the server hard-deleted may come
+ * back, and it must come back as a **new local field** rather than with the id
+ * of a row that no longer exists — see `forgetFieldId` in editor.store.ts.
+ */
+export function createLocalFieldId(): string {
+  return `${LOCAL_ID_PREFIX}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+}
+
+/**
+ * A copy deep enough that editing the original cannot reach it.
+ *
+ * The undo stack holds field lists, and a shallow copy would share `position`
+ * with the live field — so dragging would silently rewrite the history entry
+ * that is supposed to undo the drag.
+ */
+export function cloneFields(fields: FormField[]): FormField[] {
+  return fields.map(field => ({
+    ...field,
+    position: { ...field.position },
+    ...(field.options ? { options: [...field.options] } : {}),
+    ...(field.validation ? { validation: { ...field.validation } } : {})
+  }))
 }
 
 export interface FormField {
@@ -92,7 +119,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   }
 
   const addField = (field: Omit<FormField, 'id'>) => {
-    const id = `${LOCAL_ID_PREFIX}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const id = createLocalFieldId()
     const newField: FormField = {
       ...field,
       id
@@ -155,6 +182,23 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     }
   }
 
+  /**
+   * Puts back a field list the undo stack was holding (features/0047).
+   *
+   * It marks the form dirty on purpose, and without checking whether the result
+   * happens to match what was last saved. That check is not worth its cost: a
+   * false positive is one save that writes what is already there, and a false
+   * negative is the leave-the-editor prompt staying quiet while the user walks
+   * away from work.
+   */
+  const restoreFieldsSnapshot = (snapshot: FormField[], selection: string | null) => {
+    fields.value = cloneFields(snapshot)
+    selectedFieldId.value = selection && fields.value.some(f => f.id === selection)
+      ? selection
+      : null
+    markDirty()
+  }
+
   const clearFields = () => {
     fields.value = []
     selectedFieldId.value = null
@@ -190,7 +234,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     selectedFieldId.value = null
 
     pdfFields.forEach(field => {
-      const id = `${LOCAL_ID_PREFIX}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const id = createLocalFieldId()
       fields.value.push({
         ...field,
         id
@@ -409,6 +453,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     selectField,
     moveField,
     resizeField,
+    restoreFieldsSnapshot,
     clearFields,
     getFieldsForPage,
     generateUniqueFieldName,

@@ -56,7 +56,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useFormFieldsStore, type FormField } from '@/stores/formFields.store'
+import { useFormFieldsStore, cloneFields, type FormField } from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
 import { rotateFieldRect } from '@/utils/pdfCoordinates'
 
 const props = defineProps<{
@@ -68,6 +69,30 @@ const props = defineProps<{
 }>()
 
 const formFieldsStore = useFormFieldsStore()
+const editorStore = useEditorStore()
+
+/**
+ * The field list as it was when the gesture started.
+ *
+ * Undo commits at `mouseup`, not at every `mousemove`. `moveField` runs dozens
+ * of times during one drag, so pushing from there — or from a deep watcher —
+ * would make one drag sixty undo steps and the user press Undo sixty times to
+ * put one field back (features/0047).
+ */
+const fieldsBeforeGesture = ref<FormField[] | null>(null)
+
+const beginGesture = () => {
+  fieldsBeforeGesture.value = cloneFields(formFieldsStore.fields)
+}
+
+const commitGesture = (label: string, changed: boolean) => {
+  const before = fieldsBeforeGesture.value
+  fieldsBeforeGesture.value = null
+  // A mouse-down that only selects a field is not an edit, and an undo step
+  // that restores an identical list is a press that appears to do nothing.
+  if (!before || !changed) return
+  editorStore.pushFieldsUndo(before, formFieldsStore.selectedFieldId, label)
+}
 
 const isSelected = computed(() => formFieldsStore.selectedFieldId === props.field.id)
 
@@ -141,6 +166,7 @@ const onMouseDown = (e: MouseEvent) => {
   isDragging.value = true
   dragStart.value = { x: e.clientX, y: e.clientY }
   fieldStart.value = { x: props.field.position.x, y: props.field.position.y }
+  beginGesture()
 
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
@@ -163,9 +189,15 @@ const stopDrag = () => {
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
 
+  const moved =
+    props.field.position.x !== fieldStart.value.x ||
+    props.field.position.y !== fieldStart.value.y
+
+  commitGesture('Field moved', moved)
+
   // Not saved here. `Save all` is what writes field positions, the same as it
   // is for text and images — see formFields.store.ts.
-  formFieldsStore.markDirty()
+  if (moved) formFieldsStore.markDirty()
 }
 
 const startResize = (e: MouseEvent, handle: string) => {
@@ -180,6 +212,7 @@ const startResize = (e: MouseEvent, handle: string) => {
     fieldX: props.field.position.x,
     fieldY: props.field.position.y
   }
+  beginGesture()
 
   document.addEventListener('mousemove', onResize)
   document.addEventListener('mouseup', stopResize)
@@ -226,7 +259,15 @@ const stopResize = () => {
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
 
-  formFieldsStore.markDirty()
+  const resized =
+    props.field.position.width !== resizeStart.value.width ||
+    props.field.position.height !== resizeStart.value.height ||
+    props.field.position.x !== resizeStart.value.fieldX ||
+    props.field.position.y !== resizeStart.value.fieldY
+
+  commitGesture('Field resized', resized)
+
+  if (resized) formFieldsStore.markDirty()
 }
 </script>
 
