@@ -45,9 +45,14 @@ describe('DELETE /api/forms/:formId/fields/:fieldId (database-backed)', () => {
     expect(stored.deletedAt).not.toBeNull()
 
     // And the answer it holds is still there, pointing at it.
-    const answers = await prisma.answer.findMany({ orderBy: { value: 'asc' } })
+    const answers = await prisma.answer.findMany()
     expect(answers).toHaveLength(2)
-    expect(answers.map(a => a.value)).toEqual(['Ada Lovelace', 'ada@example.com'])
+    // The persistence invariant does not have an order. Ordering by a text
+    // value makes this assertion depend on the PostgreSQL collation installed
+    // by the runner (CI sorts the lowercase email before the capitalized name).
+    expect(new Set(answers.map(a => a.value))).toEqual(
+      new Set(['Ada Lovelace', 'ada@example.com'])
+    )
     expect(answers.some(a => a.fieldId === nameField.id)).toBe(true)
   })
 
