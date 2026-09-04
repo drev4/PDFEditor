@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { fieldsService, type CreateFieldData, type BulkFieldData } from '../services/fields'
+import { fieldsService, type CreateFieldData, type BulkFieldData, type ArchivedField } from '../services/fields'
 import { ApiError } from '../services/api'
 import type { Field } from '../services/forms'
 import { useAsyncAction } from '../composables/useAsyncAction'
@@ -58,6 +58,11 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   // Ids of fields the user removed in the editor that the server kept because
   // they hold responses. Surfaced to the user after a save, then cleared.
   const archivedFieldIds = ref<string[]>([])
+  // The archived fields themselves, as the rail lists them (features/0045).
+  // Distinct from `archivedFieldIds`, which is the one-shot "this just
+  // happened" signal the save toast reads: this one is the standing list of
+  // everything this form ever archived, loaded from the server.
+  const archivedFields = ref<ArchivedField[]>([])
 
   const selectedField = computed(() => {
     return fields.value.find(f => f.id === selectedFieldId.value) || null
@@ -156,6 +161,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     isAddingField.value = false
     fieldTypeToAdd.value = null
     hasUnsavedChanges.value = false
+    archivedFields.value = []
   }
 
   const getFieldsForPage = (page: number) => {
@@ -196,18 +202,24 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     currentFormId.value = formId
   }
 
+  // The server's row shape is not the editor's. Extracted because restoring a
+  // field has to produce exactly the same thing `loadFieldsFromForm` does —
+  // a field that came back by a different door must be indistinguishable from
+  // one that was loaded with the form.
+  const toFormField = (field: Field): FormField => ({
+    id: field.id,
+    type: field.type,
+    name: field.name,
+    label: field.label,
+    required: field.required,
+    border: false,
+    position: field.position as FormField['position'],
+    options: field.options,
+    validation: field.validation
+  })
+
   const loadFieldsFromForm = (formFields: Field[]) => {
-    fields.value = formFields.map(field => ({
-      id: field.id,
-      type: field.type,
-      name: field.name,
-      label: field.label,
-      required: field.required,
-      border: false,
-      position: field.position as FormField['position'],
-      options: field.options,
-      validation: field.validation
-    }))
+    fields.value = formFields.map(toFormField)
     selectedFieldId.value = null
   }
 
@@ -238,6 +250,10 @@ export const useFormFieldsStore = defineStore('formFields', () => {
       loadFieldsFromForm(savedFields)
       archivedFieldIds.value = archived
       hasUnsavedChanges.value = false
+      // Only when this save actually archived something. The rail's list has to
+      // grow the moment it happens, and re-reading it on every save would spend
+      // a request on the answer "still none".
+      if (archived.length > 0) await refreshArchivedFields(formId)
       return savedFields
     }, { fallbackMessage: 'Failed to save fields' })
   }
@@ -302,9 +318,65 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     return useAsyncAction({ loading, error }, async () => {
       const result = await fieldsService.delete(formId, fieldId)
       deleteField(fieldId)
+      if (result?.archived) await refreshArchivedFields(formId)
       return result
     }, { fallbackMessage: 'Failed to delete field' })
   }
+
+  // Re-reads the archived list, swallowing its own failure: it is called after
+  // a save or a delete that already succeeded, and turning "the sidebar is a
+  // little stale" into an error toast would report the wrong thing as broken.
+  const refreshArchivedFields = async (formId: string) => {
+    try {
+      archivedFields.value = await fieldsService.listArchived(formId)
+    } catch {
+      // Left as it was; the next load of the editor corrects it.
+    }
+  }
+
+  /** The standing list of this form's archived fields, for the editor rail. */
+  const loadArchivedFields = async () => {
+    const formId = currentFormId.value
+    if (!formId) return
+
+    return useAsyncAction({ loading, error }, async () => {
+      archivedFields.value = await fieldsService.listArchived(formId)
+      return archivedFields.value
+    }, { fallbackMessage: 'Failed to load archived fields' })
+  }
+
+  /**
+   * Brings an archived field back, and **puts it into `fields`**.
+   *
+   * That second half is not bookkeeping, it is the whole point. The bulk save
+   * reads its removals as "a live field of this form whose id is not in the
+   * payload" — so a field restored on the server but missing from this list is
+   * archived again by the very next `Save all`, with no error anywhere. The
+   * user watches what they just recovered disappear.
+   *
+   * It deliberately does **not** call `markDirty`. The restore is a server
+   * write that already happened; claiming there are unsaved changes would make
+   * the "you have unsaved work" prompt on the way out of the editor say
+   * something untrue.
+   */
+  const restoreArchivedField = async (fieldId: string) => {
+    const formId = currentFormId.value
+    if (!formId) {
+      error.value = 'No form selected'
+      return
+    }
+
+    return useAsyncAction({ loading, error }, async () => {
+      const restored = await fieldsService.restore(formId, fieldId)
+      fields.value.push(toFormField(restored))
+      archivedFields.value = archivedFields.value.filter(f => f.id !== fieldId)
+      selectedFieldId.value = restored.id
+      return restored
+    }, { fallbackMessage: 'Failed to restore field' })
+  }
+
+  /** Live fields already using a name, so the rail can warn before restoring. */
+  const liveFieldNames = computed(() => new Set(fields.value.map(f => f.name)))
 
   const clearError = () => {
     error.value = null
@@ -325,6 +397,8 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     loading,
     error,
     archivedFieldIds,
+    archivedFields,
+    liveFieldNames,
     selectedField,
     fieldsByPage,
     startAddingField,
@@ -345,6 +419,8 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     saveAllFields,
     saveField,
     deleteFieldFromServer,
+    loadArchivedFields,
+    restoreArchivedField,
     clearError,
     clearArchivedFieldIds
   }
