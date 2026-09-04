@@ -8,7 +8,7 @@ export function usePublicForm() {
   const error = ref<string | null>(null)
 
   /**
-   * Whether to render the "Made with VuePDF" mark (features/0014).
+   * Whether to render the "Made with DocAIFlow" mark (features/0014).
    *
    * Decided by the server from the owner's plan and passed through untouched —
    * nothing here re-derives it, because the client is given no plan to derive

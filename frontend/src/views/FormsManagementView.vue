@@ -181,8 +181,6 @@
       :form-title="limitReached?.formTitle"
       @close="limitReached = null"
     />
-
-    <ConfirmDialog />
   </AppShell>
 </template>
 
@@ -193,7 +191,6 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import Menu from 'primevue/menu'
 import ProgressSpinner from 'primevue/progressspinner'
-import ConfirmDialog from 'primevue/confirmdialog'
 import AppShell from '@/layouts/AppShell.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import ShareFormModal from '@/components/forms/ShareFormModal.vue'

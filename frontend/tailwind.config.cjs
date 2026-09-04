@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 
-// The VuePDF Forms design system, read out of the `System` artboard of the
+// The DocAIFlow design system, read out of the `System` artboard of the
 // design canvas. See docs/sot/05-frontend-patterns.md §8 for where it comes
 // from and the three rules it is built on.
 //

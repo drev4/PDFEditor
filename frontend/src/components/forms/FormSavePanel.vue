@@ -146,9 +146,6 @@
       @publish="handlePublish"
       @unpublish="handleUnpublish"
     />
-
-    <!-- Success Toast -->
-    <Toast position="top-right" />
   </div>
 </template>
 
@@ -158,7 +155,6 @@ import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
-import Toast from 'primevue/toast'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { ApiError } from '@/services/api'
 import { useFormsStore } from '@/stores/forms.store'
