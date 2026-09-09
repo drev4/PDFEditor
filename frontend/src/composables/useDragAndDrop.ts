@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue'
 import { useDrawingStore } from '@/stores/drawing.store'
+import { snapToStep } from '@/utils/fieldGeometry'
 import type { Position, Size } from '@/types/common'
 
 export interface DragState {
@@ -45,9 +46,17 @@ export function useDragAndDrop(callbacks: DragCallbacks): DragState & {
   const elementStartWidth = ref(0)
   const elementStartHeight = ref(0)
 
+  /**
+   * The magnet, for the text and image previews this composable moves.
+   *
+   * The arithmetic lives in `utils/fieldGeometry.ts` and is shared with the
+   * field drag, which passes a different step: these elements are positioned in
+   * canvas pixels, which is the space the grid is drawn in, and a field is
+   * stored in base-scale units (features/0051).
+   */
   const snapToGridValue = (value: number): number => {
     if (!drawingStore.snapToGrid) return value
-    return Math.round(value / drawingStore.gridSize) * drawingStore.gridSize
+    return snapToStep(value, drawingStore.gridSize)
   }
 
   const startDrag = (event: MouseEvent) => {

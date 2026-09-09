@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { alignRects, distributeRects, bandBetween, idsWithinBand, type Rect } from './fieldGeometry'
+import { alignRects, distributeRects, bandBetween, idsWithinBand, snapToStep, type Rect } from './fieldGeometry'
 
 /**
  * Align and distribute (features/0048).
@@ -175,5 +175,37 @@ describe('idsWithinBand', () => {
     const band = bandBetween({ x: 200, y: 200 }, { x: 300, y: 300 })
 
     expect(idsWithinBand(band, rects)).toEqual([])
+  })
+})
+
+/**
+ * The magnet (features/0051). Shared by the two drags in the editor, which pass
+ * **different steps** — the previews work in canvas pixels and a field is
+ * stored in base-scale units.
+ */
+describe('snapToStep', () => {
+  it('rounds to the nearest multiple', () => {
+    expect(snapToStep(147, 20)).toBe(140)
+    expect(snapToStep(153, 20)).toBe(160)
+    expect(snapToStep(150, 20)).toBe(160)
+  })
+
+  it('works on negative values, so a field dragged past the origin still lands', () => {
+    expect(snapToStep(-13, 20)).toBe(-20)
+  })
+
+  it('is the identity when there is no grid, rather than dividing by zero', () => {
+    expect(snapToStep(147, 0)).toBe(147)
+    expect(snapToStep(147, -20)).toBe(147)
+  })
+
+  /**
+   * The step a field passes at twice the base scale: a visible line every 20
+   * canvas pixels is every 10 stored units. Snapping the stored value to 20
+   * would be a different grid from the one on the screen.
+   */
+  it('lands on the visible grid when the caller divides by the scale', () => {
+    expect(snapToStep(147, 20 / 2)).toBe(150)
+    expect(snapToStep(147, 20 / 0.5)).toBe(160)
   })
 })
