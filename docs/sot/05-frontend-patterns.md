@@ -386,6 +386,18 @@ It also covers a second way to lose work that is not an edit at all. A PDF that 
 
 `persistEditedDocument` uploads through the existing `POST /api/upload` and repoints the form with `PUT /api/forms/:id` (`formsService.update`); no new endpoint, because those two already do this. It does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced, deliberately: **the server does that on the repoint** ([`features/0046`](../../features/0046-editor-save-collects-the-replaced-document.md)). Only the API can answer whether another form still points at those bytes, so this client neither asks nor names bytes to destroy — and a `DELETE /api/uploads/:key` would also never run for the tab that is closed between the upload and the repoint.
 
+### The base scale and the zoom are both called "scale"
+
+A field's position is stored **once**, in canvas pixels at a base scale of `1.5` with the page upright, and that number is now `BASE_SCALE`, exported from `utils/pdfCoordinates.ts` ([`features/0052`](../../features/0052-stored-positions-round-trip.md)). It was a bare literal in nine places before that.
+
+**`documentStore.activeDocument.scale` is not it.** That is the *zoom* — `setScale` writes it from the viewer's buttons and clamps it to 0.5–3.0 — and it is used as `scale / BASE_SCALE` to decide where a stored position is *drawn*. The two are equal by default, which is precisely why mistaking one for the other survives every manual check: it is invisible until somebody zooms.
+
+Three places had made that mistake and are fixed: `useDownloadPDF.ts` and `useFormFieldsExport.ts` divided stored positions by the zoom before embedding, so a document downloaded after zooming in carried every field in the wrong place; `usePDFFieldsLoader.ts` multiplied by the zoom while reading an AcroForm *into* storage, so extracting while zoomed in wrote every position scaled by whatever the author happened to be looking through. `utils/pdfFieldEmbedder.ts` no longer takes a scale from its callers at all — a stored position has exactly one scale in it, so the function does not need to be told.
+
+**There are two embedders and they are pinned to each other by a shared worked example.** `pdf-processor.ts` on the server and `utils/pdfFieldEmbedder.ts` in the browser implement the same mapping; `backend/tests/pdf-processor.spec.ts` and `utils/pdfFieldEmbedder.spec.ts` assert the *same* stored rectangle produces the *same* PDF rectangle, on a deliberately non-square page. Before that each was pinned only to itself, which is how they drifted. The backend keeps its own `DEFAULT_SCALE` because the workspaces share no package, and a shared package for one number is worse than a comment in each.
+
+One property of the round trip is worth knowing before it looks like a bug: `pdf-lib` **expands** a widget rectangle by half its border on each side, so a bordered field comes back 0.75 stored pixels up and left and 1.5 wider and taller. It is fixed and it does not accumulate — nothing writes an extracted position back over a stored one except `syncFieldsFromPDF`, and only for a form that has never had a field.
+
 ### Page rotation
 
 Field positions are stored **once**, in canvas pixels at the base scale with the page upright, because that is what the backend embeds against (`pdf-processor.ts`). Rotating the view must never change what is stored — only where the field is drawn.

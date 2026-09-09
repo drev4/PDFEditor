@@ -23,7 +23,7 @@ import { computed } from 'vue'
 import { useDocumentStore } from '@/stores/document.store'
 import { usePublicResponsesStore } from '@/stores/publicResponses.store'
 import type { Field } from '@/services/forms'
-import { unrotatedPageSize } from '@/utils/pdfCoordinates'
+import { BASE_SCALE, unrotatedPageSize } from '@/utils/pdfCoordinates'
 import PublicFormFieldItem from './PublicFormFieldItem.vue'
 
 const props = defineProps<{
@@ -45,7 +45,7 @@ const currentPage = computed(() => documentStore.activeDocument?.currentPage || 
 const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
 
 const pageSize = computed(() =>
-  unrotatedPageSize(props.canvasWidth || 0, props.canvasHeight || 0, rotation.value, props.scale / 1.5)
+  unrotatedPageSize(props.canvasWidth || 0, props.canvasHeight || 0, rotation.value, props.scale / BASE_SCALE)
 )
 
 const overlayStyle = computed(() => ({

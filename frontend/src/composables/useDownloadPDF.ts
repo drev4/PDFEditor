@@ -35,8 +35,6 @@ export function useDownloadPDF() {
     }
 
     if (formFieldsStore.fields.length > 0) {
-      const scale = documentStore.activeDocument.scale || 1.5
-
       const fields: EmbedField[] = formFieldsStore.fields.map(field => ({
         type: field.type,
         name: field.name,
@@ -47,7 +45,10 @@ export function useDownloadPDF() {
         options: field.options
       }))
 
-      await embedFieldsInPDF(pdfDoc, fields, scale)
+      // No scale: a stored position has one in it already, and this used to
+      // pass the **zoom**, so a download after zooming in put every field in the
+      // wrong place (features/0052).
+      await embedFieldsInPDF(pdfDoc, fields)
     }
 
     const pdfBytes = await pdfDoc.save()

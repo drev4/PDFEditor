@@ -76,6 +76,8 @@ npm run test:integration                       # from the repo root
 npm run test:integration --workspace=backend   # or from the workspace
 ```
 
+**One contract asserted in two workspaces.** `backend/tests/pdf-processor.spec.ts` and `frontend/src/utils/pdfFieldEmbedder.spec.ts` embed the *same* stored rectangle and assert the *same* PDF rectangle ([`features/0052`](../../features/0052-stored-positions-round-trip.md)). They are the only pair of specs in this repository deliberately coupled by their expected values, because they cover two implementations of one mapping: pinning each to itself is what let the browser's copy start dividing by the zoom. Change one and the other has to change with it.
+
 - Config: `backend/vitest.integration.config.ts`. Separate from `vitest.config.ts`, which excludes `tests/integration/**` so the mocked suite stays fast and database-free.
 - `DATABASE_URL` defaults to `postgresql://postgres:postgres@localhost:5432/vuepdf_test`. Create it once and apply migrations: `npm run db:migrate:deploy` with that URL.
 - `tests/integration/setup.ts` truncates every table before each test; `helpers.ts` builds users, tokens, forms, fields and responses.
