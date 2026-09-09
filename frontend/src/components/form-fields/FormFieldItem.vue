@@ -59,6 +59,8 @@ import { computed, ref } from 'vue'
 import { useFormFieldsStore, cloneFields, type FormField } from '@/stores/formFields.store'
 import { useEditorStore } from '@/stores/editor.store'
 import { rotateFieldRect } from '@/utils/pdfCoordinates'
+import { snapToStep } from '@/utils/fieldGeometry'
+import { useDrawingStore } from '@/stores/drawing.store'
 
 const props = defineProps<{
   field: FormField
@@ -70,6 +72,25 @@ const props = defineProps<{
 
 const formFieldsStore = useFormFieldsStore()
 const editorStore = useEditorStore()
+const drawingStore = useDrawingStore()
+
+/**
+ * The magnet, in the space a field is stored in (features/0051).
+ *
+ * The grid is drawn every `gridSize` **canvas** pixels (`useGridOverlay.ts`)
+ * and a field is stored in base-scale units, so the step here is
+ * `gridSize / scaleFactor`. Rounding the stored value to `gridSize` itself is
+ * the version that looks right and puts the field on a grid nobody can see at
+ * any zoom but the base one.
+ */
+const gridStep = computed(() =>
+  drawingStore.snapToGrid && props.scaleFactor > 0
+    ? drawingStore.gridSize / props.scaleFactor
+    : 0
+)
+
+/** `value` on the grid, or `value` when the magnet is off (`gridStep` is 0). */
+const snap = (value: number) => snapToStep(value, gridStep.value)
 
 /**
  * The field list as it was when the gesture started.
@@ -246,8 +267,22 @@ const onDrag = (e: MouseEvent) => {
   // The delta is clamped, not each field: stopping one field at the edge while
   // the rest keep going would deform the layout the author lined up.
   const starts = [...dragStartPositions.value.values()]
-  const allowedDx = Math.max(dx, -Math.min(...starts.map(p => p.x)))
-  const allowedDy = Math.max(dy, -Math.min(...starts.map(p => p.y)))
+  let allowedDx = Math.max(dx, -Math.min(...starts.map(p => p.x)))
+  let allowedDy = Math.max(dy, -Math.min(...starts.map(p => p.y)))
+
+  // **The delta is snapped, not each field** (features/0051), which is the same
+  // rule as the clamp above and for the same reason: snapping every field on
+  // its own collapses six fields the author spaced 7px apart onto one line. The
+  // field under the pointer is the one that lands on the grid, and the rest
+  // keep their offsets from it.
+  if (gridStep.value > 0) {
+    allowedDx = snap(fieldStart.value.x + allowedDx) - fieldStart.value.x
+    allowedDy = snap(fieldStart.value.y + allowedDy) - fieldStart.value.y
+
+    // Snapping can push the set back over the edge the clamp just protected.
+    allowedDx = Math.max(allowedDx, -Math.min(...starts.map(p => p.x)))
+    allowedDy = Math.max(allowedDy, -Math.min(...starts.map(p => p.y)))
+  }
 
   for (const [id, start] of dragStartPositions.value) {
     formFieldsStore.moveField(id, start.x + allowedDx, start.y + allowedDy)
@@ -325,6 +360,29 @@ const onResize = (e: MouseEvent) => {
     const heightChange = Math.min(dy, resizeStart.value.height - minSize)
     newHeight = resizeStart.value.height - heightChange
     newY = resizeStart.value.fieldY + heightChange
+  }
+
+  // Only the edges this handle moves, and **after** the `minSize` clamp above:
+  // snapping first can round a width back under the minimum, so the field ends
+  // up smaller than the one rule this code has (features/0051). The clamp is
+  // re-applied for the same reason, since a snap down can cross it too.
+  if (gridStep.value > 0) {
+    if (resizeHandle.value.includes('e')) {
+      newWidth = Math.max(minSize, snap(resizeStart.value.fieldX + newWidth) - resizeStart.value.fieldX)
+    }
+    if (resizeHandle.value.includes('w')) {
+      const right = resizeStart.value.fieldX + resizeStart.value.width
+      newX = Math.min(snap(newX), right - minSize)
+      newWidth = right - newX
+    }
+    if (resizeHandle.value.includes('s')) {
+      newHeight = Math.max(minSize, snap(resizeStart.value.fieldY + newHeight) - resizeStart.value.fieldY)
+    }
+    if (resizeHandle.value.includes('n')) {
+      const bottom = resizeStart.value.fieldY + resizeStart.value.height
+      newY = Math.min(snap(newY), bottom - minSize)
+      newHeight = bottom - newY
+    }
   }
 
   formFieldsStore.moveField(props.field.id, newX, newY)

@@ -14,8 +14,17 @@ export const useDrawingStore = defineStore('drawing', () => {
     gridEnabled.value = !gridEnabled.value
   }
 
+  /**
+   * Turning the magnet on shows the grid (features/0051).
+   *
+   * The two flags are independent, so a field could be snapping to lines nobody
+   * had asked to see — a magnet whose grid is invisible looks like the editor
+   * moving fields on its own. Turning it off leaves the grid alone: somebody who
+   * wants the lines as a guide and no snapping is asking for something coherent.
+   */
   const toggleSnapToGrid = () => {
     snapToGrid.value = !snapToGrid.value
+    if (snapToGrid.value) gridEnabled.value = true
   }
 
   const setActiveDrawingTool = (toolId: string | null) => {

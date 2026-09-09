@@ -141,3 +141,26 @@ export function idsWithinBand(band: Band, rects: Rect[]): string[] {
     )
     .map(rect => rect.id)
 }
+
+/**
+ * Rounds one coordinate onto a grid of `step` (features/0051).
+ *
+ * Pure, and shared on purpose: the editor has two drags — this one's callers are
+ * `useDragAndDrop.ts`, which moves the text and image previews, and
+ * `FormFieldItem.vue`, which moves fields — and two definitions of "snap" would
+ * drift the day one of them learned about an offset or a half-step.
+ *
+ * **The step is the caller's business, and the two callers do not pass the same
+ * one.** The grid is drawn every `gridSize` *canvas* pixels
+ * (`useGridOverlay.ts`), the previews are positioned in canvas pixels, and
+ * fields are stored in base-scale units — so a field's step is
+ * `gridSize / scaleFactor`. Passing `gridSize` for a field puts it on a grid
+ * that coincides with the visible one only at the base zoom.
+ *
+ * A step of zero or less is no grid at all, and returns the value untouched
+ * rather than dividing by it.
+ */
+export function snapToStep(value: number, step: number): number {
+  if (!(step > 0)) return value
+  return Math.round(value / step) * step
+}
