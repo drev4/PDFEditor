@@ -14,10 +14,28 @@ import { logger } from './logger.js'
  * (`src/worker.ts`) runs the exact same function in another process, and
  * duplicating it there is how two copies start disagreeing about what a PDF is.
  *
- * **Everything this module needs, it reads for itself from `formId`.** Nothing
- * is passed in but the id, and that is the load-bearing property rather than a
- * style choice — see `embedFormFields` below.
+ * **Everything this module needs, it reads for itself from `formId`.** No
+ * *data* is passed in — see `embedFormFields` below for why that is
+ * load-bearing rather than a style choice. The one thing a caller may add is
+ * intent, and there is exactly one piece of it (`EmbedOptions.allowEmpty`,
+ * features/0049), because it is the one question the database cannot answer
+ * about itself.
  */
+
+/**
+ * What a caller may say about an embed, beyond which form it is for.
+ *
+ * Deliberately not a field list — `embedFormFields` re-reads those itself, and
+ * the reason is in its own comment. This is intent, not data, so it survives
+ * the trip through the queue without going stale.
+ */
+export interface EmbedOptions {
+  /**
+   * Whether an empty field set means "this form has no fields" rather than
+   * "nobody has read this document yet". See the guard in `embedFormFields`.
+   */
+  allowEmpty?: boolean
+}
 
 /**
  * The read-modify-write itself: reads the form's live fields, embeds them into
@@ -38,8 +56,14 @@ import { logger } from './logger.js'
  * Unlike the old route-level helper this **throws**. A queued job that failed
  * must be allowed to fail so the queue can retry it; the callers below are the
  * ones that decide whether an error is fatal (it never is — see `embedInline`).
+ *
+ * `allowEmpty` is the one thing a caller does say, and only because the database
+ * cannot say it — see the guard below.
  */
-export async function embedFormFields(formId: string): Promise<void> {
+export async function embedFormFields(
+  formId: string,
+  { allowEmpty = false }: EmbedOptions = {}
+): Promise<void> {
   const form = await prisma.form.findUnique({
     where: { id: formId },
     select: { pdfUrl: true }
@@ -56,6 +80,28 @@ export async function embedFormFields(formId: string): Promise<void> {
     where: { formId, deletedAt: null },
     orderBy: { order: 'asc' }
   })
+
+  // **An empty field set only flattens the document when the caller says it is
+  // an answer** (features/0049), and this is what makes it safe for
+  // `embedFieldsInPDF` to treat its list as the whole AcroForm.
+  //
+  // Zero live fields means two completely different things, and the database
+  // cannot tell them apart:
+  //
+  //  - *The author removed them.* The document should lose them too.
+  //  - *Nobody has read the document yet.* Extraction runs on upload and, for a
+  //    form that has never had fields, on the first `GET /api/forms/:id`
+  //    (`syncFieldsFromPDF`). Until then the **document** is the source of truth
+  //    and the database simply does not know. Flattening it here would strip the
+  //    AcroForm the author uploaded, and the sync that was about to read it
+  //    would find nothing — every field they had drawn, gone, with a 200 and no
+  //    error anywhere.
+  //
+  // Only the caller knows which one it is, so only the caller may say. The
+  // routes in `routes/form-fields.ts` are writes *about the field set*, so their
+  // empty list is an answer; `PUT /api/forms/:id` repoints a form at a document
+  // and says nothing about fields, so its empty list is silence.
+  if (fieldsData.length === 0 && !allowEmpty) return
 
   if (!(await pdfStorage().exists(filename))) {
     logger.warn(`PDF not found in storage: ${filename}`)
@@ -107,9 +153,9 @@ export async function embedFormFields(formId: string): Promise<void> {
  * AcroForm is a convenience for whoever downloads the PDF itself
  * (docs/sot/04-backend-patterns.md §5).
  */
-export async function embedInline(formId: string): Promise<void> {
+export async function embedInline(formId: string, options: EmbedOptions = {}): Promise<void> {
   try {
-    await withOrganizationLock(`form-embed:${formId}`, () => embedFormFields(formId))
+    await withOrganizationLock(`form-embed:${formId}`, () => embedFormFields(formId, options))
   } catch (error) {
     logger.error({ err: error }, 'Error embedding fields in PDF')
   }

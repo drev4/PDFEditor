@@ -103,7 +103,7 @@
       <p class="mt-2 text-body text-muted">
         It goes back on the form where it was, and new answers join the
         {{ pendingRestore?.answerCount }} already collected under the same column.
-        Save the form to put it back in the downloadable PDF.
+        The downloadable PDF is updated too.
       </p>
 
       <!--
@@ -233,15 +233,15 @@ const confirmRestore = async () => {
     const restoredField = formFieldsStore.fields.find(f => f.id === restored.id)
     if (restoredField) editorStore.rememberField(restoredField)
 
-    // Says what is still pending on purpose. No individual field write
-    // re-embeds the PDF, so the downloadable document does not have this field
-    // back until the next save, and promising otherwise would be a lie the user
-    // only discovers on download.
+    // This used to tell the author to save the form before the question was
+    // really back, because no individual field write re-embedded the PDF. It
+    // does now (features/0049), so the message says the work is finished
+    // instead of apologising for a defect.
     toast.add({
       severity: 'success',
       summary: 'Field restored',
-      detail: `"${field.label || field.name}" is back on the form. `
-        + 'Save the form to put it back in the PDF.',
+      detail: `"${field.label || field.name}" is back on the form, `
+        + 'and back in the downloadable PDF.',
       life: 5000
     })
   } finally {

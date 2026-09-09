@@ -173,7 +173,7 @@ Who sees an archived field:
 Three consequences worth carrying:
 
 - **A restored field must go back into the editor's own field list, not just the sidebar.** The bulk save reads its removals as *a live field whose id is missing from the payload*, so a field restored on the server and absent from the next save is archived again — with a `200`, and no error for anyone to see.
-- **Restoring does not re-embed the PDF**, like every other individual field write. The document lags until the next bulk save; the editor's toast says so.
+- **Restoring re-embeds the PDF**, like every other write that changes the live field set ([`features/0049`](../../features/0049-every-field-write-re-embeds-the-pdf.md)). It did not until then — the document lagged until the next bulk save, and the editor's toast had to say so.
 - **A name collision is a warning, not a refusal.** `Field.name` has no unique constraint, and refusing to restore over a live field with the same name would strand its answers permanently — the exact outcome soft deletion exists to prevent. The rail warns and the author decides.
 
 Three surfaces show an archived field to its owner now: the rail's **Archived** list, the marked column in the responses table, and the CSV — where the column is deliberately **not** marked, because the header text is a contract with whatever parses the export.
