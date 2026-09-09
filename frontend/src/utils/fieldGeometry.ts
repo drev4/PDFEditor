@@ -86,3 +86,58 @@ export function distributeRects(rects: Rect[], axis: DistributeAxis): Placement[
       : place(rect, rect.x, target - rect.height / 2)
   })
 }
+
+/** A rubber band, in whatever space the caller is working in. */
+export interface Band {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * The band a drag describes, from where it started to where the pointer is.
+ *
+ * Normalised, because dragging up and to the left is as ordinary as dragging
+ * down and to the right, and a negative width selects nothing at all.
+ */
+export function bandBetween(
+  from: { x: number; y: number },
+  to: { x: number; y: number }
+): Band {
+  return {
+    x: Math.min(from.x, to.x),
+    y: Math.min(from.y, to.y),
+    width: Math.abs(to.x - from.x),
+    height: Math.abs(to.y - from.y)
+  }
+}
+
+/**
+ * Which fields a marquee catches: every one it **touches**, not only the ones
+ * it swallows whole.
+ *
+ * Intersection rather than containment is the behaviour every design tool has,
+ * and the difference matters most in the case this feature exists for — thirty
+ * checkboxes in a column, where a band drawn down the middle of them would
+ * catch none of them under a containment rule.
+ *
+ * **This is the one function in this file that is not in stored coordinates.**
+ * It has no opinion about the space; it requires only that the band and the
+ * rectangles are in the *same* one. The editor passes both in overlay pixels,
+ * because that is where a mouse is and where `rotateFieldRect` has already put
+ * the fields — which is also what makes it work unchanged on a turned page.
+ */
+export function idsWithinBand(band: Band, rects: Rect[]): string[] {
+  const right = band.x + band.width
+  const bottom = band.y + band.height
+
+  return rects
+    .filter(rect =>
+      rect.x < right &&
+      rect.x + rect.width > band.x &&
+      rect.y < bottom &&
+      rect.y + rect.height > band.y
+    )
+    .map(rect => rect.id)
+}

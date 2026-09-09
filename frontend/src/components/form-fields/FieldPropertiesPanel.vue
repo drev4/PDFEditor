@@ -66,9 +66,17 @@
           DUPLICATE {{ formFieldsStore.selectedFieldIds.length }} FIELDS
         </button>
         <p class="text-meta text-faint mt-3">
-          Copies are new fields with their own names. Removing fields is still one at a
-          time, from a single field's settings.
+          Copies are new fields with their own names.
         </p>
+
+        <button
+          data-testid="remove-selection"
+          class="w-full mt-4 flex items-center justify-center gap-3 py-4 bg-danger-soft border border-transparent hover:border-danger text-danger rounded-2xl transition-all font-semibold text-meta"
+          @click="showRemoveSelectionConfirm = true"
+        >
+          <i class="pi pi-trash"></i>
+          REMOVE {{ formFieldsStore.selectedFieldIds.length }} FIELDS
+        </button>
       </div>
     </div>
   </div>
@@ -336,6 +344,58 @@
       </div>
     </div>
   </div>
+
+
+  <!--
+    Removing a whole selection (features/0050). Same rule as the single-field
+    dialog above and the same reason it shows no answer count: the split between
+    archived and deleted is the server's answer, taken inside the transaction
+    that removes, and the form is published - a submission can land while the
+    author reads this. What it does say is how many fields are going, because
+    that is the number the author can check against what they selected.
+
+    A root-level sibling rather than a child of the multi-selection branch: the
+    branch is `v-if`/`v-else-if`/`v-else` on the selection, and a dialog living
+    inside one of them would disappear mid-request the moment the fields it is
+    removing left the selection.
+  -->
+  <Dialog
+    :visible="showRemoveSelectionConfirm"
+    modal
+    :closable="false"
+    :draggable="false"
+    :style="{ width: '420px' }"
+    :pt="{ header: { class: 'hidden' } }"
+    @update:visible="showRemoveSelectionConfirm = false"
+  >
+    <div class="pt-1" data-testid="remove-selection-confirm">
+      <div class="flex items-center justify-center w-8 h-8 rounded-input bg-danger-soft text-danger mb-3.5">
+        <i class="pi pi-trash text-[15px]" />
+      </div>
+
+      <h2 class="text-section">Remove {{ pendingSelectionCount }} fields?</h2>
+
+      <p class="mt-2 text-body text-muted">
+        They stop appearing on the form straight away. Any of them that has already
+        collected responses is archived rather than deleted, so its answers and its
+        column in the responses table and the CSV are kept &mdash; you will be told
+        which.
+      </p>
+    </div>
+
+    <template #footer>
+      <div class="flex items-center justify-end gap-2">
+        <Button label="Cancel" text severity="secondary" @click="showRemoveSelectionConfirm = false" />
+        <Button
+          label="Remove fields"
+          severity="danger"
+          data-testid="remove-selection-confirmed"
+          :loading="removingSelection"
+          @click="confirmRemoveSelection"
+        />
+      </div>
+    </template>
+  </Dialog>
 
 </template>
 
@@ -684,6 +744,113 @@ const recordRemovalForUndo = (
     removedIndex === -1 ? null : revivedId,
     'Field removed'
   )
+}
+
+const showRemoveSelectionConfirm = ref(false)
+const removingSelection = ref(false)
+
+/**
+ * How many fields the open dialog is about.
+ *
+ * Frozen when it opens rather than read live: the request empties the selection
+ * as it succeeds, and a heading that counts down to "Remove 0 fields?" while the
+ * button spins is the dialog telling the author the wrong thing at the worst
+ * moment.
+ */
+const pendingSelectionCount = ref(0)
+
+watch(showRemoveSelectionConfirm, open => {
+  if (open) pendingSelectionCount.value = formFieldsStore.selectedFieldIds.length
+})
+
+/**
+ * Removing a whole selection, as one undo entry (features/0050).
+ *
+ * The rule per field is `recordRemovalForUndo`'s, unchanged - it is what keeps
+ * the undo stack from carrying an id the bulk save will reject - but it has to
+ * be applied to the whole set **before** anything is pushed, because one gesture
+ * is one entry:
+ *
+ * - **archived** fields cannot come back locally at all. They are dropped from
+ *   the restored list and every older entry forgets their id, or undoing past
+ *   this point would send an archived id and `400` the entire save.
+ * - **hard-deleted** and never-saved fields come back as new local fields, with
+ *   their dead ids rewritten across the stack.
+ *
+ * Getting this wrong fails far from where it is caused: the bulk save rejects
+ * the **whole** payload over one dead id, so every later save of the form fails
+ * until the page is reloaded.
+ */
+const confirmRemoveSelection = async () => {
+  // A second press while the first request is in flight would send the same ids
+  // twice — the second one arrives after the fields are gone and `400`s the
+  // whole thing, on top of a second undo entry for one gesture.
+  if (removingSelection.value) return
+
+  const ids = [...formFieldsStore.selectedFieldIds]
+  if (ids.length === 0) return
+
+  const fieldsBeforeRemoval = cloneFields(formFieldsStore.fields)
+  removingSelection.value = true
+
+  try {
+    const result = await formFieldsStore.deleteFieldsFromServer(ids)
+    showRemoveSelectionConfirm.value = false
+    if (!result) return
+
+    const archivedIds = new Set(result.archived.map(f => f.id))
+
+    // One pass over the list as it was: archived fields leave it, everything
+    // else stays under a fresh local id.
+    const idSwaps = new Map<string, string>()
+    for (const id of ids) {
+      if (archivedIds.has(id)) continue
+      idSwaps.set(id, isLocalFieldId(id) ? id : createLocalFieldId())
+    }
+
+    for (const id of archivedIds) editorStore.forgetFieldId(id, null)
+    for (const [dead, revived] of idSwaps) {
+      if (dead !== revived) editorStore.forgetFieldId(dead, revived)
+    }
+
+    const restored = fieldsBeforeRemoval
+      .filter(f => !archivedIds.has(f.id))
+      .map(f => (idSwaps.has(f.id) ? { ...f, id: idSwaps.get(f.id)! } : f))
+
+    editorStore.pushFieldsUndo(restored, null, `${ids.length} fields removed`)
+
+    const kept = result.archived.reduce((total, f) => total + f.answerCount, 0)
+    const removedCount = result.deleted.length + result.localOnly.length
+    const archivedCount = result.archived.length
+
+    // One message for a mixed outcome, because the author performed one action.
+    const parts: string[] = []
+    if (removedCount > 0) parts.push(`${removedCount} removed`)
+    if (archivedCount > 0) {
+      parts.push(
+        `${archivedCount} archived, keeping ${kept} ${kept === 1 ? 'response' : 'responses'}`
+      )
+    }
+
+    toast.add({
+      severity: 'success',
+      summary: 'Fields removed',
+      detail: `${parts.join(' · ')}.`,
+      life: 5000
+    })
+  } catch (error) {
+    console.error('Failed to remove the selected fields:', error)
+
+    toast.add({
+      severity: 'error',
+      summary: 'Could not remove the fields',
+      // One transaction on the server, so this is the truth rather than a hope.
+      detail: 'Nothing was changed. Please try again.',
+      life: 4000
+    })
+  } finally {
+    removingSelection.value = false
+  }
 }
 
 const confirmRemoveField = async () => {

@@ -152,6 +152,108 @@ test.describe('PDF Workflow', () => {
     expect(Math.round((await second.boundingBox())!.x)).toBe(Math.round(secondBefore.x));
   });
 
+  /**
+   * The marquee, and the multi-field delete behind it (features/0050).
+   *
+   * This is the only place the real layer stack exists. The band, the hit test
+   * and the request are all covered by unit tests; what needs a browser is that
+   * the overlay actually takes the pointer when the mode is armed and gives it
+   * back afterwards — a `pointer-events` rule is CSS, and jsdom applies none of
+   * it.
+   */
+  test('selects fields with a marquee and removes them in one go', async ({ page }) => {
+    await page.goto('/dashboard/editor');
+    await page.locator('input[type="file"]').first().setInputFiles(FIXTURE_PDF);
+    await expect(page.locator('.pdf-viewer-container')).toBeVisible({ timeout: 30000 });
+
+    // Same trick as the nudge test above: the floating toolbar and the panel sit
+    // over the canvas, so a fixed coordinate is not reliably on the page.
+    const placeFieldBelow = async (minY: number) => {
+      await page.locator('[data-testid="add-field-text"]').first().click();
+
+      const point = await page.evaluate((from) => {
+        const overlay = document.querySelector('.form-fields-overlay');
+        if (!overlay) return null;
+        const box = overlay.getBoundingClientRect();
+        for (let y = Math.max(box.top + 40, from); y < box.bottom - 40; y += 15) {
+          for (let x = box.left + 60; x < box.right - 60; x += 20) {
+            if (document.elementFromPoint(x, y) === overlay) return { x, y };
+          }
+        }
+        return null;
+      }, minY);
+
+      if (!point) throw new Error(`no free point on the page below ${minY}`);
+      await page.mouse.click(point.x, point.y);
+      return point;
+    };
+
+    const fields = page.locator('.form-field-item');
+
+    const firstPoint = await placeFieldBelow(0);
+    await expect(fields).toHaveCount(1);
+    await page.waitForTimeout(2000);
+
+    await placeFieldBelow(firstPoint.y + 90);
+    await expect(fields).toHaveCount(2);
+    await page.waitForTimeout(2000);
+
+    const firstBox = await fields.nth(0).boundingBox();
+    const secondBox = await fields.nth(1).boundingBox();
+    if (!firstBox || !secondBox) throw new Error('a placed field has no box');
+
+    await page.keyboard.press('Escape');
+
+    // Arming the mode is what lets the overlay take the pointer at all.
+    await page.locator('[data-testid="tool-select"]').first().click();
+    await expect(page.locator('[data-testid="select-mode-indicator"]')).toBeVisible();
+
+    const leftEdge = Math.min(firstBox.x, secondBox.x);
+    const rightEdge = Math.max(firstBox.x + firstBox.width, secondBox.x + secondBox.width);
+    const bottomEdge = Math.max(firstBox.y + firstBox.height, secondBox.y + secondBox.height);
+
+    // Where the band **starts** has to be page the overlay actually owns: the
+    // floating toolbar and the properties panel sit over the canvas, and a
+    // `mousedown` on either starts nothing. With the mode armed the overlay is
+    // the topmost element over free page, which is exactly the test for it.
+    //
+    // It also has to be outside the fields on both axes, or the band spans only
+    // part of the column — the drag has two corners and no more. Below and to
+    // the right of both, then, dragging up and to the left: the space above the
+    // fields is where the toolbar lives, so there is nothing free to press there.
+    // Only the start must be on the overlay; the move and the release are
+    // tracked on the window, so the band can end anywhere.
+    const from = await page.evaluate(({ minX, minY }) => {
+      const overlay = document.querySelector('.form-fields-overlay');
+      if (!overlay) return null;
+      const box = overlay.getBoundingClientRect();
+      for (let y = Math.max(minY, box.top + 5); y < box.bottom - 5; y += 8) {
+        for (let x = Math.max(minX, box.left + 5); x < box.right - 5; x += 8) {
+          if (document.elementFromPoint(x, y) === overlay) return { x, y };
+        }
+      }
+      return null;
+    }, { minX: rightEdge + 10, minY: bottomEdge + 10 });
+
+    if (!from) throw new Error('no free page below and right of the fields to start the band on');
+
+    const to = { x: leftEdge - 20, y: firstBox.y - 20 };
+
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await page.mouse.up();
+
+    await expect(page.locator('[data-testid="selection-count"]')).toContainText('2 fields');
+
+    // And the whole selection goes in one confirmed gesture.
+    await page.locator('[data-testid="remove-selection"]').click();
+    await expect(page.locator('[data-testid="remove-selection-confirm"]')).toBeVisible();
+    await page.locator('[data-testid="remove-selection-confirmed"]').click();
+
+    await expect(fields).toHaveCount(0);
+  });
+
   test('should offer a working upload affordance on an empty dashboard', async ({ page }) => {
     const fileInput = page.locator('input[type="file"]').first();
     await expect(fileInput).toBeAttached();

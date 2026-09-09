@@ -90,6 +90,19 @@ export const useFormFieldsStore = defineStore('formFields', () => {
 
   const isAddingField = ref(false)
   const fieldTypeToAdd = ref<FieldType | null>(null)
+
+  /**
+   * Whether the marquee is armed (features/0050).
+   *
+   * It is a **mode** rather than an always-on gesture, and that is the whole
+   * design decision of this feature rather than an implementation detail. The
+   * fields overlay covers the entire page and is `pointer-events: none`
+   * precisely so the text layer underneath keeps the pointer — text selection
+   * and search highlighting live there. A marquee needs the overlay to take the
+   * pointer, so it may only do so while somebody has asked for it, and it must
+   * give it back afterwards.
+   */
+  const isSelectMode = ref(false)
   const currentFormId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -146,7 +159,19 @@ export const useFormFieldsStore = defineStore('formFields', () => {
   const startAddingField = (type: FieldType) => {
     isAddingField.value = true
     fieldTypeToAdd.value = type
+    // The two modes both want the overlay's pointer; whichever was asked for
+    // last wins, rather than both being half-on.
+    isSelectMode.value = false
     setSelection([])
+  }
+
+  /** Arms or disarms the marquee. Placing a field wins over it, and vice versa. */
+  const setSelectMode = (on: boolean) => {
+    isSelectMode.value = on
+    if (on) {
+      isAddingField.value = false
+      fieldTypeToAdd.value = null
+    }
   }
 
   const cancelAddingField = () => {
@@ -510,6 +535,44 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     }, { fallbackMessage: 'Failed to delete field' })
   }
 
+  /**
+   * Removing a whole selection (features/0050).
+   *
+   * Three things it does that a loop over `deleteFieldFromServer` would not.
+   * It sends the server ids in **one** request, so the document is re-embedded
+   * once rather than once per field (features/0049). It leaves the fields that
+   * only ever existed in the browser out of that request, because they have no
+   * row to delete. And it returns the server's split, since the caller has to
+   * build one undo entry and one message out of it — which of these were
+   * archived is not something the browser can work out.
+   */
+  const deleteFieldsFromServer = async (fieldIds: string[]) => {
+    const formId = currentFormId.value
+    if (!formId) {
+      error.value = 'No form selected'
+      return
+    }
+
+    const localOnly = fieldIds.filter(isLocalFieldId)
+    const serverIds = fieldIds.filter(id => !isLocalFieldId(id))
+
+    if (serverIds.length === 0) {
+      localOnly.forEach(deleteField)
+      return { archived: [], deleted: [], localOnly }
+    }
+
+    return useAsyncAction({ loading, error }, async () => {
+      const result = await fieldsService.deleteMany(formId, serverIds)
+
+      // Only after the server has committed. A failed request must leave the
+      // editor showing exactly what the form still has.
+      fieldIds.forEach(deleteField)
+
+      if (result.archived.length > 0) await refreshArchivedFields(formId)
+      return { ...result, localOnly }
+    }, { fallbackMessage: 'Failed to remove the selected fields' })
+  }
+
   // Re-reads the archived list, swallowing its own failure: it is called after
   // a save or a delete that already succeeded, and turning "the sidebar is a
   // little stale" into an error toast would report the wrong thing as broken.
@@ -578,6 +641,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     selectedFieldId,
     selectedFieldIds,
     isAddingField,
+    isSelectMode,
     hasUnsavedChanges,
     markDirty,
     fieldTypeToAdd,
@@ -594,6 +658,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     fieldsByPage,
     startAddingField,
     cancelAddingField,
+    setSelectMode,
     addField,
     updateField,
     deleteField,
@@ -617,6 +682,7 @@ export const useFormFieldsStore = defineStore('formFields', () => {
     saveAllFields,
     saveField,
     deleteFieldFromServer,
+    deleteFieldsFromServer,
     loadArchivedFields,
     restoreArchivedField,
     clearError,

@@ -34,6 +34,21 @@ export interface DeleteFieldResult {
 }
 
 /**
+ * What `POST /forms/:formId/fields/delete` reports (features/0050).
+ *
+ * One answer for the whole set, which is the point: the editor can say
+ * "4 removed, 2 archived, 37 responses kept" instead of narrating six requests.
+ * The split is the server's — a field holding answers is archived, one holding
+ * none is deleted — and it cannot be predicted from the browser.
+ */
+export interface DeleteFieldsResult {
+  /** Kept because they hold answers, with how many each one is keeping. */
+  archived: Array<{ id: string; answerCount: number }>
+  /** Really gone: they held nothing. */
+  deleted: string[]
+}
+
+/**
  * A field the author removed that the server kept because it holds answers
  * (features/0045).
  *
@@ -114,6 +129,20 @@ export const fieldsService = {
    */
   async delete(formId: string, fieldId: string): Promise<DeleteFieldResult> {
     return api.delete<DeleteFieldResult>(`/forms/${formId}/fields/${fieldId}`)
+  },
+
+  /**
+   * Removing several fields in one request (features/0050).
+   *
+   * Not a loop over `delete` above, and the reason is not tidiness: since
+   * features/0049 every field write re-embeds the stored PDF, so deleting a
+   * marquee selection of thirty one at a time would be thirty rewrites of the
+   * same document, one behind another. The server does it in one transaction
+   * and one embed, and an unknown id fails the whole request rather than
+   * leaving a partial deletion.
+   */
+  async deleteMany(formId: string, fieldIds: string[]): Promise<DeleteFieldsResult> {
+    return api.post<DeleteFieldsResult>(`/forms/${formId}/fields/delete`, { fieldIds })
   },
 
   /** The fields of this form that were archived rather than deleted. */
