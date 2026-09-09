@@ -199,6 +199,7 @@ import SearchSpotlight from '../search/SearchSpotlight.vue'
 import FormFieldsOverlay from '../form-fields/FormFieldsOverlay.vue'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { usePDFFieldsLoader } from '@/composables/usePDFFieldsLoader'
+import { BASE_SCALE } from '@/utils/pdfCoordinates'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -278,7 +279,9 @@ const handleTextInput = (event: Event) => {
 // Computed properties
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
 const numPages = computed(() => documentStore.activeDocument?.numPages || 0)
-const scale = computed(() => documentStore.activeDocument?.scale || 1.5)
+// The zoom, whose default is the same number as `BASE_SCALE` — see the note in
+// `document.store.ts`. It is never the divisor for a stored position.
+const scale = computed(() => documentStore.activeDocument?.scale || BASE_SCALE)
 const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
 
 // Navigation methods

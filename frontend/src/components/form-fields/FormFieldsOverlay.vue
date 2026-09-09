@@ -87,7 +87,7 @@
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useFormFieldsStore, cloneFields, type FieldType } from '@/stores/formFields.store'
 import { useEditorStore } from '@/stores/editor.store'
-import { unrotateFieldPoint, unrotatedPageSize, rotateFieldRect } from '@/utils/pdfCoordinates'
+import { BASE_SCALE, unrotateFieldPoint, unrotatedPageSize, rotateFieldRect } from '@/utils/pdfCoordinates'
 import { bandBetween, idsWithinBand, type Band } from '@/utils/fieldGeometry'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
@@ -111,14 +111,6 @@ const previewPosition = ref<{ x: number; y: number } | null>(null)
 
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
 const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
-
-/**
- * Positions are stored in canvas pixels at the base scale with the page
- * upright. The canvas we are drawing on is at the current scale and may be
- * turned, so both have to be divided back out before anything is compared to a
- * stored coordinate.
- */
-const BASE_SCALE = 1.5
 
 /** Stored units -> canvas pixels. */
 const renderScale = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)

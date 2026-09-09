@@ -2,6 +2,7 @@ import { PDFDocument } from 'pdf-lib'
 import type { FormField, FieldType } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
+import { BASE_SCALE } from '@/utils/pdfCoordinates'
 
 export function usePDFFieldsLoader() {
   const documentStore = useDocumentStore()
@@ -18,7 +19,10 @@ export function usePDFFieldsLoader() {
       const form = pdfDoc.getForm()
       const fields = form.getFields()
       const pages = pdfDoc.getPages()
-      const scale = documentStore.activeDocument.scale || 1.5
+      // The base scale, not the zoom (features/0052). This writes **stored**
+      // positions, so extracting while zoomed in used to store every field
+      // scaled by whatever the author happened to be looking through.
+      const scale = BASE_SCALE
 
       console.log(`PDF loaded, found ${fields.length} form fields`)
 
