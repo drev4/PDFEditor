@@ -32,6 +32,7 @@
       :page-height="pageSize.pageHeight"
       :rotation="rotation"
       :scale-factor="scaleFactor"
+      :display-scale="displayScale ?? 1"
     />
 
     <!-- Preview when adding new field -->

@@ -56,9 +56,12 @@ test.describe('PDF Workflow', () => {
     await page.mouse.move(before.x + before.width / 2 + 110, before.y + before.height / 2 + 80, { steps: 8 });
     await page.mouse.up();
 
-    // The overlay is drawn scaled, so a 110px mouse delta is a smaller delta on
-    // screen. What matters is that it moved, and that the undo puts it back
-    // exactly — not how far.
+    // The field follows the pointer now (features/0053): the drag converts the
+    // screen delta through the zoom and the canvas's display ratio, so 110px of
+    // mouse is about 110px of field. This used to measure 46px and the comment
+    // here recorded it as a quirk of the overlay being drawn scaled — it was the
+    // bug. The assertion stays deliberately loose: what it is here to prove is
+    // that the key is bound and that undo puts the field back exactly.
     const after = await field.boundingBox();
     expect(after!.x).toBeGreaterThan(before.x + 20);
 
