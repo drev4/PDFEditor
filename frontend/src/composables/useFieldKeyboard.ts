@@ -123,9 +123,16 @@ export function useFieldKeyboard() {
       return
     }
 
-    if (event.key === 'Escape' && formFieldsStore.selectedFieldIds.length > 0) {
-      endBurst()
-      formFieldsStore.clearSelection()
+    if (event.key === 'Escape') {
+      // Escape also puts the marquee away (features/0050): the mode borrows the
+      // pointer from the PDF's text layer, so there has to be a way out of it
+      // that does not involve finding the toolbar again.
+      if (formFieldsStore.isSelectMode) formFieldsStore.setSelectMode(false)
+
+      if (formFieldsStore.selectedFieldIds.length > 0) {
+        endBurst()
+        formFieldsStore.clearSelection()
+      }
     }
   }
 

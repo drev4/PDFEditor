@@ -21,7 +21,12 @@ import { flushPromises } from '@/test/helpers/test-utils'
  * every other unsaved edit on the form with it.
  */
 vi.mock('@/services/fields', () => ({
-  fieldsService: { checkPattern: vi.fn(), delete: vi.fn() }
+  fieldsService: {
+    checkPattern: vi.fn(),
+    delete: vi.fn(),
+    deleteMany: vi.fn(),
+    listArchived: vi.fn()
+  }
 }))
 vi.mock('@/services/pattern-check', () => ({
   describePattern: vi.fn()
@@ -405,6 +410,86 @@ describe('FieldPropertiesPanel — a selection of fields', () => {
     editorStore.undoLastEdit()
 
     expect(store.fields.map(f => f.position.x)).toEqual([0, 140, 400])
+  })
+
+  /**
+   * Removing a whole selection (features/0050).
+   *
+   * Three things are asserted together because they are one gesture: **one**
+   * request (the server splits archived from deleted inside one transaction and
+   * embeds the document once), **one** undo entry, and the id rule of
+   * features/0047 applied to a set — a hard-deleted field comes back under a new
+   * local id, an archived one does not come back at all.
+   */
+  describe('removing the selection', () => {
+    const archivedId = '550e8400-e29b-41d4-a716-446655440000'
+    const deletedId = '550e8400-e29b-41d4-a716-446655440001'
+
+    const selectTwoSaved = () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      store.fields = [
+        { id: archivedId, type: 'text', name: 'a', label: 'A', required: false, border: false, position: { x: 0, y: 0, width: 100, height: 20, page: 1 } },
+        { id: deletedId, type: 'text', name: 'b', label: 'B', required: false, border: false, position: { x: 140, y: 60, width: 100, height: 20, page: 1 } }
+      ] as never[]
+      store.selectFields([archivedId, deletedId])
+      return store
+    }
+
+    async function removeSelection(wrapper: ReturnType<typeof mountPanel>) {
+      await wrapper.find('[data-testid="remove-selection"]').trigger('click')
+      expect(wrapper.find('[data-testid="remove-selection-confirm"]').exists()).toBe(true)
+      await wrapper.find('[data-testid="remove-selection-confirmed"]').trigger('click')
+      await flushPromises()
+    }
+
+    it('asks before touching anything', async () => {
+      selectTwoSaved()
+      const wrapper = mountPanel()
+
+      await wrapper.find('[data-testid="remove-selection"]').trigger('click')
+
+      expect(fieldsService.deleteMany).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-testid="remove-selection-confirm"]').exists()).toBe(true)
+    })
+
+    it('sends one request for the whole selection', async () => {
+      const store = selectTwoSaved()
+      vi.mocked(fieldsService.deleteMany).mockResolvedValue({
+        archived: [{ id: archivedId, answerCount: 4 }],
+        deleted: [deletedId]
+      })
+      vi.mocked(fieldsService.listArchived).mockResolvedValue([])
+
+      await removeSelection(mountPanel())
+
+      expect(fieldsService.deleteMany).toHaveBeenCalledTimes(1)
+      expect(fieldsService.deleteMany).toHaveBeenCalledWith('form-1', [archivedId, deletedId])
+      expect(store.fields).toHaveLength(0)
+    })
+
+    it('is one undo step, and brings back only what the server really deleted', async () => {
+      const store = selectTwoSaved()
+      const editorStore = useEditorStore()
+      vi.mocked(fieldsService.deleteMany).mockResolvedValue({
+        archived: [{ id: archivedId, answerCount: 4 }],
+        deleted: [deletedId]
+      })
+      vi.mocked(fieldsService.listArchived).mockResolvedValue([])
+
+      await removeSelection(mountPanel())
+
+      expect(editorStore.undoDepth).toBe(1)
+
+      editorStore.undoLastEdit()
+
+      // The archived field stays gone from the editor — its way back is the
+      // rail's Restore, which returns the row with its answers attached. The
+      // hard-deleted one returns as a new local field.
+      expect(store.fields).toHaveLength(1)
+      expect(store.fields[0]?.name).toBe('b')
+      expect(isLocalFieldId(store.fields[0]!.id)).toBe(true)
+    })
   })
 
   it('distributes the selection in one undo step', async () => {

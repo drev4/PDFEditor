@@ -52,6 +52,16 @@ const bulkFieldSchema = createFieldSchema.extend({
   id: z.string().uuid().optional()
 })
 
+// What a multi-field deletion accepts (features/0050).
+//
+// The cap is not ceremony: every id in here becomes a row lock held until the
+// transaction commits, and an unbounded list is an unbounded lock. Two hundred
+// is far above any real selection on one page and far below anything that would
+// hold the table.
+const deleteFieldsSchema = z.object({
+  fieldIds: z.array(z.string().uuid()).min(1).max(200)
+})
+
 const checkPatternSchema = z.object({
   pattern: z.string()
 })
@@ -209,6 +219,113 @@ formFieldsRouter.post('/:formId/fields/:fieldId/restore', authenticate, asyncHan
   await requestEmbed(formId, { allowEmpty: true })
 
   res.json({ field })
+}))
+
+// POST /api/forms/:formId/fields/delete - Remove several fields at once
+//
+// The gesture behind it is a marquee selection and one press of Delete
+// (features/0050). It exists rather than the client looping over the individual
+// `DELETE` for one reason that only became true with features/0049: **every
+// field write re-embeds the document**, so thirty deletions would be thirty
+// read-modify-writes of the same PDF, serialised one behind another by the
+// per-form lock while the author waits. Here it is one transaction and one
+// embed.
+//
+// **Declared above the `/:formId/fields/:fieldId` routes on purpose**, the same
+// rule `POST /fields/check-pattern` and `GET /fields/archived` follow: a static
+// segment underneath a family of parameterised ones is where shadowing happens.
+//
+// The rule per field is features/0044's, unchanged and deliberately not
+// simplified: a field holding answers is archived, a field holding none is
+// really deleted. What changes is that the caller gets **one** answer for the
+// whole set, so the editor can say "4 removed, 2 archived, 37 responses kept"
+// instead of narrating six requests.
+formFieldsRouter.post('/:formId/fields/delete', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
+  const formId = req.params.formId as string
+
+  await verifyFormOwnership(req, formId)
+
+  const validation = deleteFieldsSchema.safeParse(req.body)
+  if (!validation.success) {
+    return res.status(400).json({
+      error: 'Validation error',
+      details: validation.error.errors
+    })
+  }
+
+  const requestedIds = [...new Set(validation.data.fieldIds)]
+
+  const liveIds = new Set(
+    (await prisma.field.findMany({
+      where: { formId, deletedAt: null },
+      select: { id: true }
+    })).map(f => f.id)
+  )
+
+  // An id that is not a live field of this form fails the **whole** request,
+  // exactly as it does in the bulk save. Skipping it quietly would let a
+  // confused client believe it had deleted something that is still on the form,
+  // and an already-archived field is not something this route may reach.
+  const unknownIds = requestedIds.filter(id => !liveIds.has(id))
+  if (unknownIds.length > 0) {
+    return res.status(400).json({
+      error: 'Validation error',
+      details: { message: 'Unknown field id for this form', fieldIds: unknownIds }
+    })
+  }
+
+  // Sorted so two concurrent requests over overlapping sets take the row locks
+  // in the same order and cannot deadlock each other - the bulk save sorts for
+  // the same reason.
+  const targetIds = [...requestedIds].sort()
+
+  const { archived, deleted } = await prisma.$transaction(async tx => {
+    // The lock goes **before** the count, and taking it afterwards restores the
+    // race in full. Inserting an `Answer` takes `FOR KEY SHARE` on the field it
+    // references, which conflicts with this: a submission arriving while we
+    // decide either lands first - and we see its answer, and archive - or waits
+    // until we commit and then fails its foreign key. Counting first leaves the
+    // window where a response is accepted with a 201 and its answer is cascaded
+    // away a moment later.
+    await tx.$queryRaw`
+      SELECT id FROM "fields" WHERE id IN (${Prisma.join(targetIds)}) FOR UPDATE
+    `
+
+    // One query for the whole set rather than one per field: the counts are
+    // what the editor reports back to the author, so they have to come from
+    // inside this transaction, after the lock.
+    const counts = await tx.answer.groupBy({
+      by: ['fieldId'],
+      where: { fieldId: { in: targetIds } },
+      _count: { _all: true }
+    })
+
+    const answerCounts = new Map(counts.map(row => [row.fieldId, row._count._all]))
+
+    const toArchive = targetIds.filter(id => (answerCounts.get(id) ?? 0) > 0)
+    const toDelete = targetIds.filter(id => (answerCounts.get(id) ?? 0) === 0)
+
+    if (toDelete.length > 0) {
+      await tx.field.deleteMany({ where: { id: { in: toDelete } } })
+    }
+
+    if (toArchive.length > 0) {
+      await tx.field.updateMany({
+        where: { id: { in: toArchive } },
+        data: { deletedAt: new Date() }
+      })
+    }
+
+    return {
+      archived: toArchive.map(id => ({ id, answerCount: answerCounts.get(id) ?? 0 })),
+      deleted: toDelete
+    }
+  })
+
+  // After the commit, never inside it (features/0049).
+  await requestEmbed(formId, { allowEmpty: true })
+
+  res.json({ archived, deleted })
 }))
 
 // PUT /api/forms/:formId/fields/:fieldId - Update field
