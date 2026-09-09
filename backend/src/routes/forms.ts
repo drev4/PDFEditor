@@ -13,6 +13,7 @@ import { pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
 import { assertUploadBelongsTo } from '../services/uploads.js'
 import { pdfStorage } from '../services/pdf-storage.js'
 import { collectOrphanDocuments, keysReferencedBy } from '../services/pdf-gc.js'
+import { requestEmbed } from '../services/embed-queue.js'
 import { logger } from '../services/logger.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 
@@ -251,9 +252,18 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
   //    one upload, because an upload is not consumed by being used
   //    (`services/uploads.ts`), so only `collectOrphanDocuments` may decide —
   //    it asks whether any *surviving* form still references the key.
-  const replaced = data.pdfUrl !== undefined && pdfFilenameFrom(data.pdfUrl) !== pdfFilenameFrom(existing.pdfUrl)
-    ? keysReferencedBy([existing])
-    : []
+  //
+  // The **condition** is its own name because two different things need it and
+  // they are not the same question (features/0049): what to collect, and
+  // whether to re-embed. `replaced` is empty for a form that had no document at
+  // all, because there is nothing to orphan — but that form still needs its
+  // fields embedded into the document it just gained. Deriving the embed from
+  // `replaced.length` would skip exactly that case, silently.
+  const documentChanged =
+    data.pdfUrl !== undefined &&
+    pdfFilenameFrom(data.pdfUrl) !== pdfFilenameFrom(existing.pdfUrl)
+
+  const replaced = documentChanged ? keysReferencedBy([existing]) : []
 
   // Publishing is what the plan meters, not creating — see
   // `services/entitlements.ts`. This route can publish too, because
@@ -285,6 +295,17 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
   // and fixable. `collectOrphanDocuments` never throws, so a storage outage
   // cannot turn the author's save into a `500`.
   if (replaced.length > 0) await collectOrphanDocuments(replaced)
+
+  // The editor's save is an upload followed by this repoint, so without this
+  // the bytes the author just saved carried whatever AcroForm their original
+  // file happened to have, and the form's own fields reached the document only
+  // at the next bulk save (features/0049).
+  //
+  // Gated on the document rather than on the request: this route also takes the
+  // title, the description and the status, and rewriting the whole PDF because
+  // somebody fixed a typo is work nobody asked for — a queued job per rename,
+  // on a deployment with a worker.
+  if (documentChanged) await requestEmbed(id)
 
   res.json({ form: toApiForm(form) })
 }))

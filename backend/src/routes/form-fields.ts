@@ -114,6 +114,12 @@ formFieldsRouter.post('/:formId/fields', authenticate, asyncHandler(async (req: 
     data: { formId, ...validation.data }
   })
 
+  // Every write that changes the live field set rewrites the stored PDF, not
+  // just the bulk save (features/0049). Placement is the bulk save's: after the
+  // write, awaited, best-effort — `requestEmbed` decides where the work runs
+  // and swallows or retries its own failures, so nothing below depends on it.
+  await requestEmbed(formId, { allowEmpty: true })
+
   res.status(201).json({ field })
 }))
 
@@ -172,9 +178,10 @@ formFieldsRouter.get('/:formId/fields/archived', authenticate, asyncHandler(asyn
 // submission can do is land on a field that becomes live a moment later, which
 // is the outcome either ordering produces.
 //
-// It does not call `requestEmbed` either. No individual field write does, so
-// the stored PDF's AcroForm lags until the next bulk save — the asymmetry is
-// filed in docs/BACKLOG.md, and fixing it on this one route would deepen it.
+// It does call `requestEmbed`, like every other write that changes the live
+// field set (features/0049). It did not until that feature, and neither did the
+// individual create, update or delete: the stored PDF's AcroForm lagged behind
+// the database until somebody happened to run a bulk save.
 formFieldsRouter.post('/:formId/fields/:fieldId/restore', authenticate, asyncHandler(async (req: AuthRequest, res, next) => {
   const formId = req.params.formId as string
   const fieldId = req.params.fieldId as string
@@ -195,6 +202,11 @@ formFieldsRouter.post('/:formId/fields/:fieldId/restore', authenticate, asyncHan
     where: { id: fieldId },
     data: { deletedAt: null }
   })
+
+  // The restored field goes back into the document too (features/0049). Until
+  // it did, the editor's toast had to tell the author to save the form before
+  // the question was really back — which was true, and was the bug.
+  await requestEmbed(formId, { allowEmpty: true })
 
   res.json({ field })
 }))
@@ -218,6 +230,10 @@ formFieldsRouter.put('/:formId/fields/:fieldId', authenticate, asyncHandler(asyn
     where: { id: fieldId },
     data: validation.data
   })
+
+  // A rename, a retype or a move changes what the AcroForm must say as surely
+  // as a create does (features/0049).
+  await requestEmbed(formId, { allowEmpty: true })
 
   res.json({ field })
 }))
@@ -265,6 +281,13 @@ formFieldsRouter.delete('/:formId/fields/:fieldId', authenticate, asyncHandler(a
     await tx.field.delete({ where: { id: fieldId } })
     return { archived: false, answerCount }
   })
+
+  // **Outside the transaction, and that is not a style choice**
+  // (features/0049). `embedFormFields` re-reads the fields through the global
+  // `prisma` client, which cannot see an uncommitted transaction — called
+  // inside, it would embed the field set this request just removed and leave
+  // the document describing exactly the state the author deleted.
+  await requestEmbed(formId, { allowEmpty: true })
 
   // The caller is told which of the two happened and how many responses were at
   // stake, because the editor cannot know either before asking: the form is
@@ -393,7 +416,7 @@ formFieldsRouter.post('/:formId/fields/bulk', authenticate, asyncHandler(async (
   // when `REDIS_URL` is set, inline and locked when it is not (features/0017).
   // Either way it is best-effort and the response does not depend on it - the
   // fields are already committed, which is the record that matters.
-  await requestEmbed(formId)
+  await requestEmbed(formId, { allowEmpty: true })
 
   res.json({ fields: savedFields, archived })
 }))
