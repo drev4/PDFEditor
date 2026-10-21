@@ -68,6 +68,12 @@ const props = defineProps<{
   pageHeight: number
   rotation: number
   scaleFactor: number
+  /**
+   * The ratio the canvas is *drawn* at, `canvas.clientWidth / canvas.width`
+   * (`PDFViewer.vue`). The overlay applies it as one `transform: scale(...)`, so
+   * it is between this component's pixels and the pointer's (features/0053).
+   */
+  displayScale?: number
 }>()
 
 const formFieldsStore = useFormFieldsStore()
@@ -114,6 +120,29 @@ const commitGesture = (label: string, changed: boolean) => {
   if (!before || !changed) return
   editorStore.pushFieldsUndo(before, formFieldsStore.selectedFieldId, label)
 }
+
+/**
+ * What a pointer movement is worth in stored units (features/0053).
+ *
+ * A field is drawn at `stored × scaleFactor` inside an overlay that is then
+ * scaled by `displayScale`, so one screen pixel is `1 / (scaleFactor ×
+ * displayScale)` stored ones. `onDrag` and `onResize` used to add the screen
+ * delta straight to a stored coordinate: at the default zoom in a wide window
+ * both factors are 1 and it was exact, which is why it went unnoticed — zoomed
+ * in the field crawled behind the cursor, and in a narrow window it ran ahead.
+ *
+ * **Both factors, not just the zoom.** `scaleFactor` is the one this component
+ * already had, and using it alone leaves the drag wrong in exactly the
+ * configuration most people use — default zoom, narrow window — while looking
+ * fixed to anybody testing by zooming.
+ *
+ * A zero or missing factor means "not measured yet"; dividing by it would send
+ * every field to `Infinity`, so it falls back to 1.
+ */
+const pointerToStored = computed(() => {
+  const drawn = props.scaleFactor * (props.displayScale ?? 1)
+  return drawn > 0 ? 1 / drawn : 1
+})
 
 const isSelected = computed(() => formFieldsStore.isFieldSelected(props.field.id))
 
@@ -261,8 +290,10 @@ const onMouseDown = (e: MouseEvent) => {
 const onDrag = (e: MouseEvent) => {
   if (!isDragging.value) return
 
-  const dx = e.clientX - dragStart.value.x
-  const dy = e.clientY - dragStart.value.y
+  // Screen pixels to stored ones, once, before anything downstream — the edge
+  // clamp, the grid snap and the per-field offsets all work in stored units.
+  const dx = (e.clientX - dragStart.value.x) * pointerToStored.value
+  const dy = (e.clientY - dragStart.value.y) * pointerToStored.value
 
   // The delta is clamped, not each field: stopping one field at the edge while
   // the rest keep going would deform the layout the author lined up.
@@ -334,8 +365,11 @@ const startResize = (e: MouseEvent, handle: string) => {
 const onResize = (e: MouseEvent) => {
   if (!isResizing.value || !resizeHandle.value) return
 
-  const dx = e.clientX - resizeStart.value.x
-  const dy = e.clientY - resizeStart.value.y
+  // Converted before the `minSize` clamp below, which is 30 **stored** pixels:
+  // clamping a screen delta against a stored minimum is the same mistake in a
+  // different place (features/0053).
+  const dx = (e.clientX - resizeStart.value.x) * pointerToStored.value
+  const dy = (e.clientY - resizeStart.value.y) * pointerToStored.value
 
   let newWidth = resizeStart.value.width
   let newHeight = resizeStart.value.height

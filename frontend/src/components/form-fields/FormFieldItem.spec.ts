@@ -86,6 +86,89 @@ describe('FormFieldItem', () => {
   })
 
   /**
+   * A drag follows the pointer (features/0053).
+   *
+   * `onDrag` used to add the **screen** delta straight to a **stored**
+   * coordinate. They differ by two factors — the zoom over the base scale
+   * (`scaleFactor`) and the ratio the canvas is drawn at (`displayScale`) — so a
+   * field crawled behind the cursor when zoomed in and ran ahead of it in a
+   * narrow window. Both are 1 at the default zoom in a wide window, which is why
+   * it survived this long.
+   *
+   * These were written before the fix. Against `develop` the field moved by the
+   * raw screen delta in every one of them.
+   */
+  describe('the delta is in screen pixels and the position is not', () => {
+    const dragBy = async (
+      wrapper: ReturnType<typeof mountItem>,
+      dx: number,
+      dy: number
+    ) => {
+      await wrapper.trigger('mousedown', { clientX: 100, clientY: 100 })
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 + dx, clientY: 100 + dy }))
+      document.dispatchEvent(new MouseEvent('mouseup'))
+    }
+
+    const moved = () => store.fields.find(f => f.id === 'field-1')!.position
+
+    it('moves half as far in stored units when the page is drawn at twice the scale', async () => {
+      await dragBy(mountItem({ scaleFactor: 2 }), 40, 20)
+
+      expect(moved().x).toBe(120)
+      expect(moved().y).toBe(60)
+    })
+
+    it('moves twice as far when the canvas is drawn at half its pixels', async () => {
+      await dragBy(mountItem({ displayScale: 0.5 }), 40, 20)
+
+      expect(moved().x).toBe(180)
+      expect(moved().y).toBe(90)
+    })
+
+    it('composes the two factors', async () => {
+      // Twice the scale drawn at half size is one screen pixel per stored pixel.
+      await dragBy(mountItem({ scaleFactor: 2, displayScale: 0.5 }), 40, 20)
+
+      expect(moved().x).toBe(140)
+      expect(moved().y).toBe(70)
+    })
+
+    it('falls back to 1 rather than dividing by a missing factor', async () => {
+      await dragBy(mountItem({ scaleFactor: 0 }), 40, 20)
+
+      expect(Number.isFinite(moved().x)).toBe(true)
+      expect(moved().x).toBe(140)
+    })
+
+    it('maps a resize delta too, and still refuses to go under the minimum', async () => {
+      store.selectField('field-1')
+      const wrapper = mountItem({ scaleFactor: 2 })
+
+      const handle = wrapper.find('.resize-handle.e')
+      expect(handle.exists()).toBe(true)
+
+      await handle.trigger('mousedown', { clientX: 100, clientY: 100 })
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 140, clientY: 100 }))
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      // 40 screen pixels at twice the scale is 20 stored ones.
+      expect(moved().width).toBe(220)
+    })
+
+    it('clamps the resize against the minimum in stored units', async () => {
+      store.selectField('field-1')
+      const wrapper = mountItem({ scaleFactor: 2 })
+
+      await wrapper.find('.resize-handle.e').trigger('mousedown', { clientX: 100, clientY: 100 })
+      // Far enough left to take the width well below the 30-pixel minimum.
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: -900, clientY: 100 }))
+      document.dispatchEvent(new MouseEvent('mouseup'))
+
+      expect(moved().width).toBe(30)
+    })
+  })
+
+  /**
    * Snap to grid (features/0051).
    *
    * The toggle existed and did nothing to a field: the magnet lives in
@@ -135,12 +218,16 @@ describe('FormFieldItem', () => {
       const drawing = useDrawingStore()
       drawing.snapToGrid = true
 
-      // At twice the base scale a visible line is every 10 stored units, so
-      // (147, 63) rounds to (150, 60) rather than to (140, 60).
+      // At twice the base scale a visible line is every **10** stored units, so
+      // the step is what this pins down. The drop point moved with
+      // features/0053: 47 screen pixels at that scale is 23.5 stored ones, so
+      // the field is at (123.5, 56.5) and rounds to (120, 60). Snapping the
+      // stored value to `gridSize` itself would put it on 140/60 — a grid that
+      // is not the one on the screen.
       await dragTo(mountItem({ scaleFactor: 2 }), { x: 147, y: 113 })
 
       const moved = store.fields.find(f => f.id === 'field-1')
-      expect(moved?.position.x).toBe(150)
+      expect(moved?.position.x).toBe(120)
       expect(moved?.position.y).toBe(60)
     })
 
