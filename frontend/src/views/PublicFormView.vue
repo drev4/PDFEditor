@@ -151,7 +151,7 @@
           <div class="flex items-center justify-center w-3.5 h-3.5 rounded-chip bg-ink text-white flex-shrink-0">
             <i class="pi pi-file text-[8px]" />
           </div>
-          <span class="text-micro text-muted">Made with VuePDF</span>
+          <span class="text-micro text-muted">Made with DocAIFlow</span>
         </div>
       </footer>
 

@@ -120,9 +120,6 @@
           class="flex-1"
         />
       </div>
-
-      <!-- Toast for copy confirmation -->
-      <Toast position="top-center" />
     </div>
   </Dialog>
 </template>
@@ -134,7 +131,6 @@ import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputSwitch from 'primevue/inputswitch'
-import Toast from 'primevue/toast'
 import { formsService, type Form } from '@/services/forms'
 
 interface Props {

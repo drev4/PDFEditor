@@ -34,7 +34,6 @@ src/test/
 - `createMockPDFFile()` - Create mock PDF File objects
 - `createMockPDFDocument()` - Create mock PDFDocument for stores
 - `createMockSearchMatches()` - Create mock search results
-- `createMockEditAction()` - Create mock edit actions
 - `createMockCanvas()` - Create mock canvas element
 - `flushPromises()` - Wait for async operations
 

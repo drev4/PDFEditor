@@ -116,7 +116,7 @@ Three properties of it are easy to get wrong.
 | `RefreshToken.user` → `User` | `Cascade` | Deleting a user deletes their sessions. Correct and uncontroversial: this table holds no customer-produced data, only credentials that are worthless once the account is gone. |
 | `Subscription.organization` → `Organization` | `Cascade` | Deleting an organization deletes its billing record. **This does not cancel anything at Stripe** — Stripe is a separate system and no cascade here can reach it. That is still true of the cascade, so [`features/0029`](../../features/0029-account-deletion-and-real-erasure.md) does the cancelling **above** it: `cancelSubscriptionsForOrganizations` in `services/stripe.ts` runs *before* the transaction, and a failure there abandons the deletion with a `502`. The ordering is the point — cancelling after the delete would leave a live subscription that no row in this database can name. Deleting an `organizations` row directly in the database still bills for ever. |
 | `StripeEvent` → *(nothing)* | — | **Has no relation at all, deliberately.** Tying it to an organization would mean deleting an organization deletes the record that its events were already processed, and a redelivery after that would be reprocessed as new. |
-| **`Answer.field` → `Field`** | **`Cascade`** | Deleting a field destroys every answer ever given to it, across all past responses. Only two write paths can fire it, and one of them refuses to — see below. |
+| **`Answer.field` → `Field`** | **`Cascade`** | Deleting a field destroys every answer ever given to it, across all past responses. Two write paths can fire it and **neither does any more** — since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md) both archive a field that holds answers, and both really delete one that holds none. See below. |
 
 ### What no cascade can reach: the stored document
 
@@ -124,24 +124,34 @@ A cascade deletes rows, and an uploaded PDF is not a row. Until [`features/0029`
 
 `services/pdf-gc.ts` is now the only module that calls `remove()`, and two properties of it belong here rather than in the code alone.
 
-**A key is not owned by the form that points at it.** Two forms may reference one key: the editor's save path repoints a form at a new document without deleting the old one, and nothing stops a member building a second form on the same upload. So the collector asks *"does any surviving form still reference this key"*, never *"which key did this form have"* — the second question, asked as `remove(pdfFilenameFrom(form.pdfUrl))`, destroys a living form's document, and `tests/integration/account-deletion.spec.ts` fails when it is asked that way.
+**A key is not owned by the form that points at it.** Two forms may reference one key: nothing stops a member building a second form on the same upload, and until [`features/0046`](../../features/0046-editor-save-collects-the-replaced-document.md) the editor's save path abandoned one on every save, repointing the form at a new document without deleting the old. So the collector asks *"does any surviving form still reference this key"*, never *"which key did this form have"* — the second question, asked as `remove(pdfFilenameFrom(form.pdfUrl))`, destroys a living form's document, and `tests/integration/account-deletion.spec.ts` fails when it is asked that way.
 
 **[`features/0039`](../../features/0039-uploads-belong-to-an-organization.md) narrowed who can create that alias and did not remove aliasing**, so the question is unchanged and must stay unchanged. Until it, `Form.pdfUrl` was an unconstrained client-supplied string and the two forms need not even have shared an organization — which made this collector's conservatism the only thing standing between a stranger's row and another tenant's document, and made the reverse true as well: **a stranger's dangling reference pinned a victim's document alive against the victim's own deletion request.** A `pdfUrl` must now name an `Upload` belonging to the acting organization, which closes the cross-tenant case; same-organization aliasing is still real, which is why the collector is still asked the same question. `tests/integration/upload-ownership.spec.ts` asserts both halves.
 
 **Rows first, bytes second.** Removal runs after the deleting transaction commits, never inside it. A rollback after the bytes are gone destroys a living form's document and is unrecoverable; a commit followed by a failed removal leaves an orphan, which is logged and fixable. Only one of the two failures can be undone, so the code is arranged so that it is the one that can happen.
 
-That last row is not wrong on its own; it is only ever as safe as the write paths that can trigger it. There are exactly two:
+**Three call sites, not one, and deletion is only two of them.** `DELETE /api/forms/:id` and account deletion collect what the vanished rows referenced; since [`features/0046`](../../features/0046-editor-save-collects-the-replaced-document.md) `PUT /api/forms/:id` collects the document a **repoint** replaced — the editor's save uploads edited bytes and moves the form onto them, which before that left one abandoned object per save. The ordering rule matters more here than at a delete, because the row survives: collecting *before* the update finds the form still pointing at the old key, so `stillReferenced` answers `true` and nothing is removed — a silent no-op that looks like working code and passes any test that only asserts the save succeeded. Nothing beyond the current document is retained: the previous version is gone once the save commits, which is a deliberate refusal to grow a version history as a side effect of a collector.
+
+That last row is not wrong on its own; it is only ever as safe as the write paths that can trigger it. There are exactly two, and **they now agree**:
 
 | Write path | Behaviour | Answers |
 |---|---|---|
 | `POST /forms/:formId/fields/bulk` — the editor's save | A diff keyed on `Field.id`. A removed field that has answers is **soft-deleted**, never deleted. | Never destroyed |
-| `DELETE /forms/:formId/fields/:fieldId` — the individual delete | Hard `delete`, cascading to answers | **Destroyed.** Deliberate for now: an explicit act by the user aimed at that field, not a side effect of saving. Tracked in [`docs/BACKLOG.md`](../BACKLOG.md) to move to soft delete too. |
+| `DELETE /forms/:formId/fields/:fieldId` — the individual delete | Same rule since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md): archived when it holds answers, deleted when it holds none. | Never destroyed |
+
+Three things about that agreement are worth keeping, because each of them is a way to get it wrong.
+
+**The lock comes before the count, in both.** A count taken before `SELECT … FOR UPDATE` restores the race in full: inserting an `Answer` takes `FOR KEY SHARE` on the field it references, so a submission arriving between the count and the delete is accepted with a `201` and has its answer cascaded away a moment later. The integration test for the individual path fires both requests through one `Promise.all`, and **it was run against the unfixed handler and seen to reproduce exactly that** — a `201` with no answer behind it.
+
+**Archiving unconditionally would be the wrong fix.** A field holding no answers is really deleted, or every field placed and discarded while designing a form leaves a permanent row and the responses table grows columns nobody ever filled.
+
+**The old behaviour was defended by an argument about the user, and the interface did not support it.** [`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md) left the cascade in place as "an explicit act by the user rather than a side effect of saving", and said to revisit it once soft delete existed. By then the editor's whole confirmation was a `window.confirm` that named the field and never mentioned responses, so nothing about the act was informed. The dialog that replaced it says what happens to collected responses, and the toast afterwards reports what the server actually did — which is the only place the count can honestly come from, since the form is published and can take a submission while the author reads.
 
 ### The `deletedAt` lifecycle
 
 `Field.deletedAt` exists so that removing a question from a form does not destroy the answers already given to it.
 
-A field is **archived** (`deletedAt` set) by exactly one code path: the bulk save, when the field is absent from the payload *and* at least one `Answer` references it. A removed field with no answers is hard-deleted, because there is nothing to protect.
+A field is **archived** (`deletedAt` set) by two code paths, which apply the same rule: the bulk save, when the field is absent from the payload *and* at least one `Answer` references it, and the individual `DELETE` since [`features/0044`](../../features/0044-field-delete-archives-its-answers.md). A removed field with no answers is hard-deleted by either, because there is nothing to protect.
 
 Who sees an archived field:
 
@@ -155,8 +165,18 @@ Who sees an archived field:
 | `GET /forms/:id/responses` (`fields` in the payload) | **Included** | Its answers are in these responses and need a labelled column |
 | `GET /forms/:id/responses/export` (CSV) | **Included** | A historical row keeps its column and its original label |
 | `scripts/migrate-existing-forms.ts` | Hidden | Re-embedding it would put it back on the PDF |
+| `GET /forms/:formId/fields/archived` | **The only ones** | The editor rail's Archived list — the one place an author can see what was kept ([`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md)) |
+| `GET /organizations/export` | **Included**, with `archivedAt` | The export is the record of everything held |
 
-There is no un-archive path, and no UI that lists archived fields. A field is archived silently to the form and visibly to the responses; the editor tells the user it happened via the `archived` array the endpoint returns (see [06-api-reference](./06-api-reference.md)).
+**There is an un-archive path** since [`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md): `POST /forms/:formId/fields/:fieldId/restore` clears `deletedAt` and hands back the whole row. It exists because the alternative was permanent: placing a replacement field mints a **new id**, so the old answers stay on the old id and the CSV grows two columns for one question that nothing can ever join. Stable field ids ([`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md)) are what make recovery possible at all.
+
+Three consequences worth carrying:
+
+- **A restored field must go back into the editor's own field list, not just the sidebar.** The bulk save reads its removals as *a live field whose id is missing from the payload*, so a field restored on the server and absent from the next save is archived again — with a `200`, and no error for anyone to see.
+- **Restoring re-embeds the PDF**, like every other write that changes the live field set ([`features/0049`](../../features/0049-every-field-write-re-embeds-the-pdf.md)). It did not until then — the document lagged until the next bulk save, and the editor's toast had to say so.
+- **A name collision is a warning, not a refusal.** `Field.name` has no unique constraint, and refusing to restore over a live field with the same name would strand its answers permanently — the exact outcome soft deletion exists to prevent. The rail warns and the author decides.
+
+Three surfaces show an archived field to its owner now: the rail's **Archived** list, the marked column in the responses table, and the CSV — where the column is deliberately **not** marked, because the header text is a contract with whatever parses the export.
 
 One consequence worth knowing: `GET /forms/:id` re-extracts fields from the PDF when a form has none. That guard counts archived fields too, so a form edited down to zero live fields does not resurrect them as new rows.
 

@@ -14,10 +14,14 @@
   <div
     ref="overlayRef"
     class="form-fields-overlay"
-    :class="{ 'adding-mode': formFieldsStore.isAddingField }"
+    :class="{
+      'adding-mode': formFieldsStore.isAddingField,
+      'select-mode': formFieldsStore.isSelectMode
+    }"
     :style="overlayStyle"
     @click="handleOverlayClick"
     @mousemove="handleMouseMove"
+    @mousedown="startMarquee"
   >
     <!-- Existing Fields -->
     <FormFieldItem
@@ -28,6 +32,7 @@
       :page-height="pageSize.pageHeight"
       :rotation="rotation"
       :scale-factor="scaleFactor"
+      :display-scale="displayScale ?? 1"
     />
 
     <!-- Preview when adding new field -->
@@ -46,6 +51,28 @@
       <span>Click to place</span>
     </div>
 
+    <!-- The rubber band itself, drawn in the overlay's own pixels. -->
+    <div
+      v-if="marquee"
+      class="marquee"
+      data-testid="marquee-band"
+      :style="{
+        left: `${marquee.x}px`,
+        top: `${marquee.y}px`,
+        width: `${marquee.width}px`,
+        height: `${marquee.height}px`
+      }"
+    ></div>
+
+    <!-- Select mode indicator -->
+    <div v-if="formFieldsStore.isSelectMode" class="adding-indicator" data-testid="select-mode-indicator">
+      <span>Drag to select fields</span>
+      <button @click.stop="formFieldsStore.setSelectMode(false)">
+        <i class="pi pi-times"></i>
+        Done
+      </button>
+    </div>
+
     <!-- Adding mode indicator -->
     <div v-if="formFieldsStore.isAddingField" class="adding-indicator">
       <span>Placing: {{ getFieldTypeLabel(formFieldsStore.fieldTypeToAdd!) }}</span>
@@ -58,9 +85,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
-import { unrotateFieldPoint, unrotatedPageSize } from '@/utils/pdfCoordinates'
+import { ref, computed, onBeforeUnmount } from 'vue'
+import { useFormFieldsStore, cloneFields, type FieldType } from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
+import { BASE_SCALE, unrotateFieldPoint, unrotatedPageSize, rotateFieldRect } from '@/utils/pdfCoordinates'
+import { bandBetween, idsWithinBand, type Band } from '@/utils/fieldGeometry'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormManagement } from '@/composables/useFormManagement'
 import { useToast } from 'primevue/usetoast'
@@ -73,6 +102,7 @@ const props = defineProps<{
 }>()
 
 const formFieldsStore = useFormFieldsStore()
+const editorStore = useEditorStore()
 const documentStore = useDocumentStore()
 const { autoInitializeForm } = useFormManagement()
 const toast = useToast()
@@ -82,14 +112,6 @@ const previewPosition = ref<{ x: number; y: number } | null>(null)
 
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
 const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
-
-/**
- * Positions are stored in canvas pixels at the base scale with the page
- * upright. The canvas we are drawing on is at the current scale and may be
- * turned, so both have to be divided back out before anything is compared to a
- * stored coordinate.
- */
-const BASE_SCALE = 1.5
 
 /** Stored units -> canvas pixels. */
 const renderScale = computed(() => (documentStore.activeDocument?.scale || BASE_SCALE) / BASE_SCALE)
@@ -158,6 +180,87 @@ const getFieldTypeLabel = (type: FieldType) => {
   return labels[type]
 }
 
+/**
+ * The marquee (features/0050).
+ *
+ * Everything here is in the overlay's **own** pixels — the space the fields are
+ * laid out in — never in screen pixels. The overlay is drawn with one
+ * `scale(displayScale)` transform, so `getBoundingClientRect` reports a box that
+ * is usually smaller than the pixels inside it; dividing the pointer back out is
+ * what stops the band drifting further from the cursor the narrower the window
+ * gets. `handleOverlayClick` below does the same division for the same reason.
+ *
+ * The fields are hit-tested where they are **drawn**, through the same
+ * `rotateFieldRect` that positions them, which is what makes the marquee work
+ * unchanged on a turned page — selecting is safe there even though moving is
+ * not (`canEditGeometry`).
+ */
+const marquee = ref<Band | null>(null)
+const marqueeStart = ref<{ x: number; y: number } | null>(null)
+
+const overlayPoint = (e: MouseEvent) => {
+  const rect = overlayRef.value!.getBoundingClientRect()
+  const display = props.displayScale ?? 1
+  return {
+    x: (e.clientX - rect.left) / display,
+    y: (e.clientY - rect.top) / display
+  }
+}
+
+/** Where each field of this page is drawn, in overlay pixels. */
+const drawnRects = () =>
+  currentPageFields.value.map(field => {
+    const rect = rotateFieldRect(
+      field.position,
+      pageSize.value.pageWidth,
+      pageSize.value.pageHeight,
+      rotation.value,
+      scaleFactor.value
+    )
+    return { id: field.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })
+
+const startMarquee = (e: MouseEvent) => {
+  // Only in select mode, only the primary button, and never over a field — the
+  // field's own `mousedown` stops the event before it reaches here, which is
+  // what keeps dragging a field working while the mode is on.
+  if (!formFieldsStore.isSelectMode || e.button !== 0 || !overlayRef.value) return
+
+  e.preventDefault()
+  marqueeStart.value = overlayPoint(e)
+  marquee.value = bandBetween(marqueeStart.value, marqueeStart.value)
+
+  // Bound on the window rather than the overlay: a band dragged past the edge of
+  // the page must keep tracking, and it must end even if the button comes up
+  // somewhere else entirely — otherwise the band is left painted on screen.
+  window.addEventListener('mousemove', onMarqueeMove)
+  window.addEventListener('mouseup', endMarquee, { once: true })
+}
+
+const onMarqueeMove = (e: MouseEvent) => {
+  if (!marqueeStart.value || !overlayRef.value) return
+  marquee.value = bandBetween(marqueeStart.value, overlayPoint(e))
+}
+
+const endMarquee = () => {
+  window.removeEventListener('mousemove', onMarqueeMove)
+
+  const band = marquee.value
+  marquee.value = null
+  marqueeStart.value = null
+  if (!band) return
+
+  // A band that caught nothing clears the selection: it is the same gesture as
+  // clicking empty page, and leaving the previous selection standing would make
+  // the next align or delete act on fields the author had just tried to
+  // deselect.
+  formFieldsStore.selectFields(idsWithinBand(band, drawnRects()))
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mousemove', onMarqueeMove)
+})
+
 const handleMouseMove = (e: MouseEvent) => {
   if (!formFieldsStore.isAddingField || !overlayRef.value) {
     previewPosition.value = null
@@ -178,10 +281,20 @@ const handleMouseMove = (e: MouseEvent) => {
 
 const handleOverlayClick = async (e: MouseEvent) => {
   if (!formFieldsStore.isAddingField || !formFieldsStore.fieldTypeToAdd || !overlayRef.value) {
+    // In select mode the marquee has already decided what is selected, and a
+    // mouseup produces a click: clearing here would undo every band the moment
+    // the button came back up (features/0050). A band that caught nothing has
+    // cleared the selection itself.
+    if (formFieldsStore.isSelectMode) return
+
     // If not adding, deselect current field
     formFieldsStore.selectField(null)
     return
   }
+
+  // Placing a field selects it, and the wrapper behind this overlay clears the
+  // selection on any click that reaches it — so this one must not.
+  e.stopPropagation()
 
   // `getBoundingClientRect` reports the *visual* box, so a click inside a
   // scaled element has to be divided back out to element-local pixels.
@@ -223,6 +336,9 @@ const handleOverlayClick = async (e: MouseEvent) => {
   const uniqueName = formFieldsStore.generateUniqueFieldName(fieldType)
   const fieldNumber = uniqueName.split('_')[1] || '1'
 
+  // Captured before the field exists, so undo takes the placement back.
+  const fieldsBeforePlacement = cloneFields(formFieldsStore.fields)
+
   const newField = formFieldsStore.addField({
     type: fieldType,
     name: uniqueName,
@@ -244,6 +360,7 @@ const handleOverlayClick = async (e: MouseEvent) => {
   // be stored for any of this to mean anything — see useFormManagement.
   try {
     await autoInitializeForm()
+    editorStore.pushFieldsUndo(fieldsBeforePlacement, null, 'Field placed')
     formFieldsStore.markDirty()
   } catch (error) {
     console.error('Failed to prepare the form:', error)
@@ -272,6 +389,25 @@ const handleOverlayClick = async (e: MouseEvent) => {
 .form-fields-overlay.adding-mode {
   pointer-events: auto;
   cursor: crosshair;
+}
+
+/*
+  The one state in which this overlay takes the pointer for selection, and it
+  has to be given back: `.text-layer` underneath owns the PDF's selectable text
+  and everything the search highlights, and an overlay that took the pointer
+  permanently would take both away from the whole canvas for everybody who never
+  draws a marquee (features/0050).
+*/
+.form-fields-overlay.select-mode {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.marquee {
+  position: absolute;
+  border: 1px solid var(--p-primary-color, #2a45b8);
+  background: rgba(42, 69, 184, 0.12);
+  pointer-events: none;
 }
 
 .form-fields-overlay :deep(.form-field-item) {

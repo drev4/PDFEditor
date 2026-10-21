@@ -235,7 +235,7 @@ const handleSubmit = async () => {
     toast.add({
       severity: 'success',
       summary: 'Account created!',
-      detail: 'Welcome to VuePDF Forms',
+      detail: 'Welcome to DocAIFlow',
       life: 3000
     })
 

@@ -4,6 +4,7 @@ import { app } from '../src/app'
 import { prisma } from '../src/services/db'
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended'
 import { mockCallerMembership } from './mock-caller.js'
+import { passThroughTransactionOnly } from './mock-transaction.js'
 import { PrismaClient } from '@prisma/client'
 
 // Mock Prisma
@@ -110,21 +111,136 @@ describe('Fields Routes', () => {
     })
   })
 
+  // Mocked level: the two status codes and the shape of the answer. **Whether
+  // anything is destroyed is a database question** — `Answer.field` is
+  // `onDelete: Cascade`, and a mock cannot express a cascade or the
+  // `SELECT … FOR UPDATE` that decides the race. Both are asserted in
+  // tests/integration/field-delete-archives.spec.ts against a real PostgreSQL
+  // (features/0044).
   describe('DELETE /api/forms/:formId/fields/:fieldId', () => {
-    it('should delete a field', async () => {
+    beforeEach(() => {
+      passThroughTransactionOnly(prismaMock)
       prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
       prismaMock.field.findFirst.mockResolvedValue({
         id: 'field-1',
         formId: 'form-1',
         ...mockFieldData
       } as any)
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 'field-1' }] as any)
+    })
+
+    it('deletes a field that holds no answers', async () => {
+      prismaMock.answer.count.mockResolvedValue(0)
       prismaMock.field.delete.mockResolvedValue({} as any)
 
       const res = await request(app)
         .delete('/api/forms/form-1/fields/field-1')
 
       expect(res.status).toBe(200)
-      expect(res.body.message).toBe('Field deleted')
+      expect(res.body).toMatchObject({ message: 'Field deleted', archived: false, answerCount: 0 })
+      expect(prismaMock.field.delete).toHaveBeenCalledWith({ where: { id: 'field-1' } })
+    })
+
+    it('archives a field that holds answers, and reports how many', async () => {
+      prismaMock.answer.count.mockResolvedValue(4)
+      prismaMock.field.update.mockResolvedValue({} as any)
+
+      const res = await request(app)
+        .delete('/api/forms/form-1/fields/field-1')
+
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ message: 'Field archived', archived: true, answerCount: 4 })
+      expect(prismaMock.field.delete).not.toHaveBeenCalled()
+      expect(prismaMock.field.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'field-1' } })
+      )
+    })
+  })
+
+  describe('GET /api/forms/:formId/fields/archived', () => {
+    beforeEach(() => {
+      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+    })
+
+    it('returns the archived fields with the answers each one keeps', async () => {
+      prismaMock.field.findMany.mockResolvedValue([
+        { id: 'field-9', formId: 'form-1', label: 'Old question', deletedAt: new Date(), _count: { answers: 3 } }
+      ] as any)
+
+      const res = await request(app).get('/api/forms/form-1/fields/archived')
+
+      expect(res.status).toBe(200)
+      expect(res.body.fields).toHaveLength(1)
+      expect(res.body.fields[0]).toMatchObject({ id: 'field-9', answerCount: 3 })
+      // `_count` is an implementation detail of the query, not part of the
+      // contract: it is flattened into `answerCount` before it leaves.
+      expect(res.body.fields[0]).not.toHaveProperty('_count')
+      expect(prismaMock.field.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { formId: 'form-1', deletedAt: { not: null } } })
+      )
+    })
+
+    it('is 404 when the form is not the callers form', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(null)
+
+      const res = await request(app).get('/api/forms/form-1/fields/archived')
+
+      expect(res.status).toBe(404)
+    })
+
+    /**
+     * `archived` is a static segment sitting under the `/:formId/fields/:fieldId`
+     * family. There is no `GET` in that family today, and this is what says so
+     * the day somebody adds one — the same guard `check-pattern` carries below.
+     */
+    it('is not shadowed by the parameterised field routes', async () => {
+      prismaMock.field.findMany.mockResolvedValue([] as any)
+
+      const res = await request(app).get('/api/forms/form-1/fields/archived')
+
+      expect(res.status).toBe(200)
+      expect(res.body).toHaveProperty('fields')
+    })
+  })
+
+  describe('POST /api/forms/:formId/fields/:fieldId/restore', () => {
+    beforeEach(() => {
+      prismaMock.form.findFirst.mockResolvedValue(mockForm as any)
+    })
+
+    it('clears deletedAt and returns the whole row', async () => {
+      prismaMock.field.findFirst.mockResolvedValue({ id: 'field-9', formId: 'form-1', deletedAt: new Date() } as any)
+      prismaMock.field.update.mockResolvedValue({ id: 'field-9', formId: 'form-1', deletedAt: null } as any)
+
+      const res = await request(app).post('/api/forms/form-1/fields/field-9/restore')
+
+      expect(res.status).toBe(200)
+      expect(res.body.field).toMatchObject({ id: 'field-9', deletedAt: null })
+      expect(prismaMock.field.update).toHaveBeenCalledWith({
+        where: { id: 'field-9' },
+        data: { deletedAt: null }
+      })
+    })
+
+    it('looks only for an archived field, never a live one', async () => {
+      prismaMock.field.findFirst.mockResolvedValue(null)
+
+      const res = await request(app).post('/api/forms/form-1/fields/field-1/restore')
+
+      expect(res.status).toBe(404)
+      expect(prismaMock.field.findFirst).toHaveBeenCalledWith({
+        where: { id: 'field-1', formId: 'form-1', deletedAt: { not: null } }
+      })
+      expect(prismaMock.field.update).not.toHaveBeenCalled()
+    })
+
+    it('is 404 when the form is not the callers form', async () => {
+      prismaMock.form.findFirst.mockResolvedValue(null)
+
+      const res = await request(app).post('/api/forms/form-1/fields/field-9/restore')
+
+      expect(res.status).toBe(404)
+      expect(prismaMock.field.update).not.toHaveBeenCalled()
     })
   })
 

@@ -78,7 +78,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Field } from '@/services/forms'
-import { rotateFieldRect } from '@/utils/pdfCoordinates'
+import { BASE_SCALE, rotateFieldRect } from '@/utils/pdfCoordinates'
 
 const props = defineProps<{
   field: Field
@@ -95,13 +95,14 @@ defineEmits<{
   (e: 'update:modelValue', value: any): void
 }>()
 
-// Default base scale if fields were saved at 1.5 (as per PDFViewer defaults)
-const BASE_SCALE = props.baseScale || 1.5
+// The scale a position was stored at, which the caller may override for a
+// document that was not (features/0052).
+const baseScale = props.baseScale || BASE_SCALE
 
 const fieldStyle = computed(() => {
   // Canvas pixels. The overlay carries the display ratio for everything inside
   // it, so this must not apply it a second time.
-  const scaleFactor = props.scale / BASE_SCALE
+  const scaleFactor = props.scale / baseScale
   const { x, y, width, height } = props.field.position
 
   // The page's upright size in stored units, which rotation is measured

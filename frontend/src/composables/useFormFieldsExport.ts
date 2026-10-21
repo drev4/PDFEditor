@@ -13,7 +13,6 @@ export function useFormFieldsExport() {
     }
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
-    const scale = documentStore.activeDocument.scale || 1.5
 
     const fields: EmbedField[] = formFieldsStore.fields.map(field => ({
       type: field.type,
@@ -25,7 +24,9 @@ export function useFormFieldsExport() {
       options: field.options
     }))
 
-    await embedFieldsInPDF(pdfDoc, fields, scale)
+    // No scale: a stored position has one in it already, and this used to pass
+    // the **zoom** (features/0052).
+    await embedFieldsInPDF(pdfDoc, fields)
 
     return await pdfDoc.save()
   }

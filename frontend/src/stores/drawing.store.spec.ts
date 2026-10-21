@@ -79,3 +79,32 @@ describe('DrawingStore', () => {
     })
   })
 })
+
+/**
+ * A magnet whose grid is invisible looks like the editor moving fields on its
+ * own, so arming it shows the lines (features/0051).
+ */
+describe('snap to grid shows the grid', () => {
+  beforeEach(() => setupPinia())
+
+  it('turns the grid on when the magnet is armed', () => {
+    const store = useDrawingStore()
+    expect(store.gridEnabled).toBe(false)
+
+    store.toggleSnapToGrid()
+
+    expect(store.snapToGrid).toBe(true)
+    expect(store.gridEnabled).toBe(true)
+  })
+
+  it('leaves the grid alone when the magnet is disarmed', () => {
+    const store = useDrawingStore()
+    store.toggleSnapToGrid()
+
+    store.toggleSnapToGrid()
+
+    expect(store.snapToGrid).toBe(false)
+    // Lines as a guide with no snapping is a coherent thing to want.
+    expect(store.gridEnabled).toBe(true)
+  })
+})

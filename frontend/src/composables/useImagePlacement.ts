@@ -49,8 +49,9 @@ export function useImagePlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
     if (!editorStore.imagePreview || !documentStore.activeDocument?.arrayBuffer) return
 
     try {
-      // Save snapshot before making changes
-      await editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
+      // The document as it is before the edit. Saving a snapshot *is* pushing
+      // the undo entry (features/0047).
+      editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer, 'Image')
 
       const { PDFDocument: PDFLib } = await import('pdf-lib')
       const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
@@ -143,13 +144,6 @@ export function useImagePlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
       ) as ArrayBuffer
 
       documentStore.activeDocument.arrayBuffer = newArrayBuffer
-
-      editorStore.addEditAction({
-        type: 'image',
-        page: currentPageIndex + 1,
-        data: { fileName: imageFile.name },
-        timestamp: Date.now()
-      })
 
       // Reset flip state
       flipHorizontal.value = false

@@ -27,6 +27,17 @@ export interface Field {
   }
   order: number
   createdAt: string
+  /**
+   * Non-null means **archived**: the author removed the question and the server
+   * kept the row because it holds answers.
+   *
+   * Optional because most payloads carry only live fields, where it is always
+   * `null` and means nothing. The one that matters is
+   * `GET /forms/:id/responses`, which returns archived fields deliberately so
+   * their answers keep a labelled column — this is what lets that screen say
+   * which columns are no longer collected (features/0045).
+   */
+  deletedAt?: string | null
 }
 
 export interface Form {

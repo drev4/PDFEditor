@@ -172,6 +172,29 @@ export class PDFProcessor {
 
       logger.info(`Embedding ${fields.length} fields into PDF`)
 
+      // The AcroForm is replaced by this list, not added to (features/0049).
+      //
+      // It used to remove only a field of the *same name*, just before
+      // recreating it, so a field the caller no longer lists survived for ever:
+      // a deleted question stayed in the downloadable document, and a renamed
+      // one appeared **twice** — once under each name. That was invisible while
+      // only the bulk save embedded, because a rename through the properties
+      // panel never reached the PDF at all; the moment every write embeds, it
+      // is the difference between converging on the database and accumulating
+      // every name a field has ever had.
+      //
+      // Removing all of them up front rather than diffing keeps one code path:
+      // every field in `fields` is re-added below, so a survivor would only be
+      // removed and recreated anyway.
+      //
+      // What protects a PDF whose fields the database has not learned yet is
+      // the caller: `services/pdf-embed.ts` does not embed at all until the form
+      // has field rows, because before that the document is the source of truth
+      // and this would flatten it.
+      for (const existing of form.getFields()) {
+        form.removeField(existing)
+      }
+
       for (const field of fields) {
         const pageIndex = field.position.page - 1
         const page = pages[pageIndex]
@@ -179,17 +202,6 @@ export class PDFProcessor {
         if (!page) {
           logger.warn(`  -> Page ${field.position.page} not found for field "${field.name}", skipping`)
           continue
-        }
-
-        // Check if field already exists and remove it to avoid duplicates
-        try {
-          const existingField = form.getFieldMaybe(field.name)
-          if (existingField) {
-            logger.info(`  -> Removing existing field "${field.name}" before recreating`)
-            form.removeField(existingField)
-          }
-        } catch (e) {
-          // Field doesn't exist, which is fine
         }
 
         const pageHeight = page.getHeight()

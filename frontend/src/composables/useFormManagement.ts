@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useFormsStore } from '@/stores/forms.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useDocumentStore } from '@/stores/document.store'
+import { useEditorStore } from '@/stores/editor.store'
 import { uploadService, type UploadProgress } from '@/services/upload'
 
 /**
@@ -73,6 +74,9 @@ export function useFormManagement() {
     documentStore.documents.forEach(doc => documentStore.closeDocument(doc.id))
     formFieldsStore.clearFields()
     formFieldsStore.setCurrentForm(null)
+    // Undo belongs to a session too. An entry kept across a close would offer
+    // to restore one document's bytes, or one form's fields, into the next.
+    useEditorStore().clearUndoHistory()
     documentStore.markSaved()
   }
 
@@ -265,9 +269,11 @@ export function useFormManagement() {
    *    extracted from the uploaded file, which is right when the user picks a
    *    new PDF and wrong here: these bytes already carry the embedded AcroForm,
    *    so re-saving them would duplicate every field.
-   *  - It does not delete the previous file. Nothing else has been shown to be
-   *    unreferenced by it, and an orphaned upload is cheaper than a form whose
-   *    PDF has gone.
+   *  - It does not delete the previous file, and must not try to. The server
+   *    collects it on the repoint (features/0046): `PUT /api/forms/:id` removes
+   *    the document it replaced once no surviving form references it. That
+   *    question can only be answered where the other forms are, so this client
+   *    neither asks it nor names bytes to destroy.
    */
   async function persistEditedDocument(): Promise<string | undefined> {
     const document = documentStore.activeDocument

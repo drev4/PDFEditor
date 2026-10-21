@@ -225,8 +225,6 @@
       @discard="handleLeaveDiscard"
       @cancel="handleLeaveCancel"
     />
-
-    <Toast position="top-right" />
   </div>
 </template>
 
@@ -237,7 +235,6 @@ import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import ProgressSpinner from 'primevue/progressspinner'
-import Toast from 'primevue/toast'
 import { useAuthStore } from '@/stores/auth.store'
 import { useDocumentStore } from '@/stores/document.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
@@ -252,6 +249,8 @@ import BrandMark from '@/components/ui/BrandMark.vue'
 import UnsavedChangesDialog from '@/components/ui/UnsavedChangesDialog.vue'
 import { useAppNav } from '@/composables/useAppNav'
 import { useDownloadPDF } from '@/composables/useDownloadPDF'
+import { useEditorUndo } from '@/composables/useEditorUndo'
+import { useFieldKeyboard } from '@/composables/useFieldKeyboard'
 import FieldPropertiesPanel from '@/components/form-fields/FieldPropertiesPanel.vue'
 
 const authStore = useAuthStore()
@@ -318,6 +317,39 @@ const warnOnUnload = (event: BeforeUnloadEvent) => {
 
 onMounted(() => window.addEventListener('beforeunload', warnOnUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', warnOnUnload))
+
+/**
+ * Ctrl/Cmd+Z, the key people reach for before they look for a button.
+ *
+ * It is bound on the window rather than on the canvas because a field is
+ * dragged with the mouse and nothing in the editor holds focus afterwards.
+ * **Typing is exempt**: inside an input, a textarea or a contenteditable the
+ * browser's own undo is the right one, and stealing the key there would make
+ * the properties panel unable to take back a keystroke.
+ */
+const { undo: undoEdit } = useEditorUndo()
+
+/**
+ * The rest of the editor's keyboard (features/0048): the arrow keys, `Ctrl+D`
+ * and Escape. Instantiated **once**, here, because it holds the open-nudge
+ * gesture that keeps a burst of presses to one undo entry.
+ */
+useFieldKeyboard()
+
+const onEditorKeydown = (event: KeyboardEvent) => {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+  if (event.key !== 'z' && event.key !== 'Z') return
+
+  const target = event.target as HTMLElement | null
+  const tag = target?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return
+
+  event.preventDefault()
+  undoEdit()
+}
+
+onMounted(() => window.addEventListener('keydown', onEditorKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onEditorKeydown))
 
 /**
  * Every in-app navigation out of the editor, whichever control started it —

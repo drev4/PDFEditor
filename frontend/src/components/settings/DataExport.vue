@@ -95,6 +95,6 @@ async function download() {
  */
 function filename(): string {
   const slug = organizationStore.activeOrganization?.slug ?? 'organization'
-  return `vuepdf-export-${slug}-${new Date().toISOString().slice(0, 10)}.json`
+  return `docaiflow-export-${slug}-${new Date().toISOString().slice(0, 10)}.json`
 }
 </script>

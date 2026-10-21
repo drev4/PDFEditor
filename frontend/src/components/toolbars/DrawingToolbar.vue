@@ -17,8 +17,9 @@
       <button
         v-for="tool in tools"
         :key="tool.id"
-        :class="{ 'active': activeTool === tool.id }"
+        :class="{ 'active': tool.id === 'select' ? formFieldsStore.isSelectMode : activeTool === tool.id }"
         :title="tool.label"
+        :data-testid="`tool-${tool.id}`"
         @click="selectTool(tool.id)"
       >
         <i :class="tool.icon"></i>
@@ -61,6 +62,10 @@ const formFieldsStore = useFormFieldsStore()
 
 // Tool definitions
 const tools = [
+  // Arms the marquee (features/0050). It sits with the general tools rather
+  // than the field ones because it places nothing — it is how the pointer is
+  // borrowed from the text layer for as long as somebody is selecting.
+  { id: 'select', label: 'Select', icon: 'pi pi-stop', group: 'general' },
   { id: 'search', label: 'Search', icon: 'pi pi-search', group: 'general' },
   { id: 'text', label: 'Text', icon: 'pi pi-pencil', group: 'general' },
   { id: 'image', label: 'Image', icon: 'pi pi-image', group: 'general' }
@@ -121,6 +126,15 @@ const selectFieldTool = (tool: { id: string; fieldType: FieldType }) => {
 const selectTool = (toolId: string) => {
   activeTool.value = toolId
   formFieldsStore.cancelAddingField()
+
+  // Select is a mode rather than an action, so pressing it again turns it off —
+  // the same way an armed field type disarms itself above.
+  if (toolId === 'select') {
+    formFieldsStore.setSelectMode(!formFieldsStore.isSelectMode)
+    return
+  }
+
+  formFieldsStore.setSelectMode(false)
   emit('select-tool', toolId)
 }
 

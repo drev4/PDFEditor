@@ -333,7 +333,7 @@ Two things this does not tell you. It says nothing about whether the export was 
 
 ## Orphaned PDFs
 
-Deleting a form or an account removes its stored document ([`features/0029`](../../features/0029-account-deletion-and-real-erasure.md)), and `services/pdf-gc.ts` is the only module that may do it. **Removal happens after the database transaction commits and never throws**, so the failure mode is a document left behind rather than a deletion that half-happened. The line to look for is:
+Deleting a form or an account removes its stored document ([`features/0029`](../../features/0029-account-deletion-and-real-erasure.md)), and so does repointing a form at a different one ([`features/0046`](../../features/0046-editor-save-collects-the-replaced-document.md) — the editor's save). `services/pdf-gc.ts` is the only module that may do it. **Removal happens after the database transaction commits and never throws**, so the failure mode is a document left behind rather than a deletion that half-happened. The line to look for is:
 
 ```
 Could not remove stored PDF; it is now orphaned
@@ -341,7 +341,7 @@ Could not remove stored PDF; it is now orphaned
 
 It carries the `key`. What to do: confirm no form still references it — `SELECT id FROM forms WHERE pdf_url LIKE '%<key>%'` should return nothing — then delete the object from the bucket (or `uploads/pdfs/` under the `local` driver), together with its `<key>-backup.pdf` sibling if one exists. The ordering is deliberate and worth keeping when doing it by hand: the reversible failure is bytes left behind, and the unrecoverable one is bytes removed while a live form still points at them.
 
-Note that this only covers documents whose form was deleted. Two other sources of orphans exist and are filed in [`docs/BACKLOG.md`](../BACKLOG.md): the editor's save path, which repoints a form at a new document without removing the old one, and any object written before this feature existed.
+**The editor's save path used to be a second, permanent source of these** and is not any more ([`features/0046`](../../features/0046-editor-save-collects-the-replaced-document.md)): every save uploaded new bytes and repointed the form, leaving the previous object behind for ever. What it left behind before that fix is still there, and so is any object written before `pdf-gc.ts` existed at all. Both are historical, both are unreachable — no form can point at them again — and finding them needs a sweep comparing the keys in the bucket against `SELECT pdf_url FROM forms`, which does not exist and is filed in [`docs/BACKLOG.md`](../BACKLOG.md).
 
 ## Database migrations
 

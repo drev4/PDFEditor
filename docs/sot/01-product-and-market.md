@@ -2,7 +2,7 @@
 
 ## What the product is
 
-**VuePDF Forms** turns a PDF into a fillable online form and collects structured answers from it.
+**DocAIFlow** turns a PDF into a fillable online form and collects structured answers from it.
 
 The user uploads a PDF, places interactive fields on the page with a canvas editor (text, textarea, checkbox, radio, dropdown), publishes it behind a public link that needs no login, and collects responses that can be read in a dashboard or exported to CSV.
 
@@ -50,7 +50,7 @@ Starting hypothesis for tiers:
 
 | Tier | Shape | Purpose |
 |---|---|---|
-| Free | One published form, capped responses per month, "Made with VuePDF" on the public form | Acquisition, and the branding is the distribution channel |
+| Free | One published form, capped responses per month, "Made with DocAIFlow" on the public form | Acquisition, and the branding is the distribution channel |
 | Pro | Unlimited forms, no branding, higher response cap, CSV export | The B2C conversion target |
 | Team | Pro plus multiple members, roles, higher volume, API and webhooks | The B2B conversion target |
 

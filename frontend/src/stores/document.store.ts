@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { PDFDocument } from '@/types/pdf'
+import { BASE_SCALE } from '@/utils/pdfCoordinates'
 
 export const useDocumentStore = defineStore('document', () => {
   // State
@@ -52,7 +53,10 @@ export const useDocumentStore = defineStore('document', () => {
         arrayBuffer,
         numPages: 0,
         currentPage: 1,
-        scale: 1.5,
+        // The **zoom** a document opens at. It happens to equal `BASE_SCALE`,
+        // the scale positions are stored at, and that coincidence is why
+        // confusing the two stayed invisible for so long (features/0052).
+        scale: BASE_SCALE,
         rotation: 0,
         snapshots: []
       }

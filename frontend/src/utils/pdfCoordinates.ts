@@ -1,3 +1,27 @@
+/**
+ * The scale a field's position is **stored** at (features/0052).
+ *
+ * Every position in the database is canvas pixels at this scale with the page
+ * upright, and it is the number both embedders divide by to reach PDF points.
+ * It was written as a bare `1.5` in nine places across the two workspaces
+ * before this constant existed, and the two embedders had already drifted apart
+ * — see `pdfFieldEmbedder.ts`.
+ *
+ * **It is not the zoom.** `documentStore.activeDocument.scale` is what the
+ * author is looking through, moves with the zoom buttons between 0.5 and 3, and
+ * is used as `scale / BASE_SCALE` to draw. The two are called "scale"
+ * everywhere in this code and happen to be equal by default, which is exactly
+ * why mistaking one for the other is invisible until somebody zooms.
+ *
+ * The backend has its own copy, `DEFAULT_SCALE` in `services/pdf-processor.ts`:
+ * `backend/` and `frontend/` are separate workspaces with no shared package,
+ * and inventing one for a single number is worse than a comment in each. They
+ * are pinned to each other by the worked example in
+ * `backend/tests/pdf-processor.spec.ts` and `utils/pdfFieldEmbedder.spec.ts`,
+ * which assert the same rectangle.
+ */
+export const BASE_SCALE = 1.5
+
 export interface CanvasCoordinates {
   x: number
   y: number

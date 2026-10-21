@@ -1,7 +1,7 @@
 import type { Job, Queue, Worker } from 'bullmq'
 import { envInt } from '../config/env.js'
 import { connectRedis, isRedisConfigured, keyPrefix, type Redis } from './redis.js'
-import { embedFormFields, embedInline } from './pdf-embed.js'
+import { embedFormFields, embedInline, type EmbedOptions } from './pdf-embed.js'
 import { logger } from './logger.js'
 
 /**
@@ -41,7 +41,7 @@ const QUEUE_NAME = 'pdf-embed'
 
 export interface EmbedJobData {
   /**
-   * The only thing in the payload, and deliberately so.
+   * The form to embed, and the only *data* in the payload — deliberately so.
    *
    * A payload carrying the field list is a payload that was stale before the
    * worker picked it up: the job may run seconds after the save that queued it,
@@ -49,6 +49,16 @@ export interface EmbedJobData {
    * from this id when it runs (features/0016, trap 2).
    */
   formId: string
+
+  /**
+   * Whether an empty field set is an answer or silence (features/0049).
+   *
+   * This one travels because it is **intent, not data**: it says what kind of
+   * write asked for the embed, which does not change while the job waits. The
+   * rule the field list breaks — anything that can go stale must be re-read —
+   * does not apply to it.
+   */
+  allowEmpty?: boolean
 }
 
 /** Whether this process has a queue behind it at all. */
@@ -101,7 +111,7 @@ async function embedQueue() {
  * an address that black-holes and asserts the save still answers and the PDF is
  * still embedded.
  */
-export async function requestEmbed(formId: string): Promise<void> {
+export async function requestEmbed(formId: string, options: EmbedOptions = {}): Promise<void> {
   if (isEmbedQueueEnabled()) {
     try {
       await withDeadline(async () => {
@@ -109,7 +119,7 @@ export async function requestEmbed(formId: string): Promise<void> {
 
         // **No fixed job id, and that is not an oversight** - see `withFormLock`
         // below for the reasoning, and for what serialises these instead.
-        await queue.add('embed', { formId }, {
+        await queue.add('embed', { formId, allowEmpty: options.allowEmpty }, {
           attempts: envInt('EMBED_JOB_ATTEMPTS', 5),
           backoff: { type: 'exponential', delay: 1000 },
           removeOnComplete: 100,
@@ -131,7 +141,7 @@ export async function requestEmbed(formId: string): Promise<void> {
     }
   }
 
-  await embedInline(formId)
+  await embedInline(formId, options)
 }
 
 /** How long the request path will wait on Redis before giving up on it. */
@@ -375,7 +385,9 @@ export async function createEmbedWorker(): Promise<EmbedWorkerHandle> {
       const { formId } = job.data
       if (!formId) throw new Error(`Embed job ${job.id} has no formId`)
 
-      await withFormLock(locks, formId, () => embedFormFields(formId))
+      await withFormLock(locks, formId, () =>
+        embedFormFields(formId, { allowEmpty: job.data.allowEmpty })
+      )
     },
     {
       connection,

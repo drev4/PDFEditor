@@ -33,8 +33,9 @@ export function useTextPlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
     }
 
     try {
-      // Save snapshot before making changes
-      await editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
+      // The document as it is before the edit. Saving a snapshot *is* pushing
+      // the undo entry (features/0047).
+      editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer, 'Text')
 
       const { PDFDocument: PDFLib, rgb, StandardFonts } = await import('pdf-lib')
       const pdfDoc = await PDFLib.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
@@ -86,13 +87,6 @@ export function useTextPlacement(canvasRef: Ref<HTMLCanvasElement | null>) {
       ) as ArrayBuffer
 
       documentStore.activeDocument.arrayBuffer = newArrayBuffer
-
-      editorStore.addEditAction({
-        type: 'text',
-        page: currentPageIndex + 1,
-        data: { text: textPreview.text },
-        timestamp: Date.now()
-      })
 
       editorStore.clearTextPreview()
       documentStore.triggerPDFReload()

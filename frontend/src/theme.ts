@@ -2,7 +2,7 @@ import { definePreset } from '@primevue/themes'
 import Aura from '@primevue/themes/aura'
 
 /**
- * The VuePDF Forms preset.
+ * The DocAIFlow preset.
  *
  * The design canvas is explicit that this is a token change, not a component
  * migration: *"Tailwind's default palette is replaced; PrimeVue Aura keeps the

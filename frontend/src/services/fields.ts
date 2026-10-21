@@ -24,6 +24,43 @@ export interface CreateFieldData {
 
 export interface UpdateFieldData extends Partial<CreateFieldData> {}
 
+/** What `DELETE /forms/:formId/fields/:fieldId` reports (features/0044). */
+export interface DeleteFieldResult {
+  message: string
+  /** `true` when the field held answers and was archived instead of deleted. */
+  archived: boolean
+  /** How many answers it held, and therefore how many were kept. */
+  answerCount: number
+}
+
+/**
+ * What `POST /forms/:formId/fields/delete` reports (features/0050).
+ *
+ * One answer for the whole set, which is the point: the editor can say
+ * "4 removed, 2 archived, 37 responses kept" instead of narrating six requests.
+ * The split is the server's — a field holding answers is archived, one holding
+ * none is deleted — and it cannot be predicted from the browser.
+ */
+export interface DeleteFieldsResult {
+  /** Kept because they hold answers, with how many each one is keeping. */
+  archived: Array<{ id: string; answerCount: number }>
+  /** Really gone: they held nothing. */
+  deleted: string[]
+}
+
+/**
+ * A field the author removed that the server kept because it holds answers
+ * (features/0045).
+ *
+ * `answerCount` is the server's, not a count of what the responses screen
+ * happens to have loaded: that screen holds one page of submissions, and the
+ * number worth showing is how many answers this field is keeping in total.
+ */
+export interface ArchivedField extends Field {
+  deletedAt: string
+  answerCount: number
+}
+
 /**
  * The bulk save is the only endpoint that accepts an `id`. Sending back the id
  * the server gave us is what makes a save a diff instead of a delete-and-
@@ -81,8 +118,51 @@ export const fieldsService = {
     return response.field
   },
 
-  async delete(formId: string, fieldId: string): Promise<void> {
-    await api.delete(`/forms/${formId}/fields/${fieldId}`)
+  /**
+   * Removing one field.
+   *
+   * The result is returned rather than discarded because only the server knows
+   * which of the two things happened: a field holding answers is archived and a
+   * field holding none is deleted (features/0044), and the caller cannot know
+   * the count beforehand — the form is published and can take a submission
+   * while the author reads the confirmation.
+   */
+  async delete(formId: string, fieldId: string): Promise<DeleteFieldResult> {
+    return api.delete<DeleteFieldResult>(`/forms/${formId}/fields/${fieldId}`)
+  },
+
+  /**
+   * Removing several fields in one request (features/0050).
+   *
+   * Not a loop over `delete` above, and the reason is not tidiness: since
+   * features/0049 every field write re-embeds the stored PDF, so deleting a
+   * marquee selection of thirty one at a time would be thirty rewrites of the
+   * same document, one behind another. The server does it in one transaction
+   * and one embed, and an unknown id fails the whole request rather than
+   * leaving a partial deletion.
+   */
+  async deleteMany(formId: string, fieldIds: string[]): Promise<DeleteFieldsResult> {
+    return api.post<DeleteFieldsResult>(`/forms/${formId}/fields/delete`, { fieldIds })
+  },
+
+  /** The fields of this form that were archived rather than deleted. */
+  async listArchived(formId: string): Promise<ArchivedField[]> {
+    const response = await api.get<{ fields: ArchivedField[] }>(`/forms/${formId}/fields/archived`)
+    return response.fields ?? []
+  },
+
+  /**
+   * Brings an archived field back to life.
+   *
+   * The **whole row** comes back, not an acknowledgement, and the caller must
+   * put it into the editor's field list. The bulk save reads removals as "a
+   * live field whose id is missing from the payload", so a restored field left
+   * out of that list is archived again by the very next save — silently, with
+   * no error for the user to see.
+   */
+  async restore(formId: string, fieldId: string): Promise<Field> {
+    const response = await api.post<FieldResponse>(`/forms/${formId}/fields/${fieldId}/restore`, {})
+    return response.field
   },
 
   async bulkSave(formId: string, fields: BulkFieldData[]): Promise<BulkSaveResult> {

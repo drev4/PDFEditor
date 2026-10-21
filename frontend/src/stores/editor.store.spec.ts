@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useEditorStore } from './editor.store'
 import { useDocumentStore } from './document.store'
 import { setupPinia } from '../test/helpers/pinia-setup'
-import { createMockPDFFile, createMockEditAction, createMockPDFDocument } from '../test/helpers/test-utils'
+import { createMockPDFFile, createMockPDFDocument } from '../test/helpers/test-utils'
 
 // Mock composables
 vi.mock('@/composables/usePDFRendering', () => ({
@@ -19,14 +19,18 @@ vi.mock('@/composables/usePDFRendering', () => ({
 }))
 
 // Mock Snapshots Store
-const mockAddSnapshot = vi.fn()
-const mockGetLatestSnapshot = vi.fn().mockReturnValue(new ArrayBuffer(10))
+const mockAddSnapshot = vi.fn().mockReturnValue('snapshot-1')
+const mockGetSnapshotById = vi.fn().mockReturnValue(new ArrayBuffer(10))
+const mockRemoveSnapshotById = vi.fn()
 const mockSnapshots: any[] = []
 
 vi.mock('./snapshots.store', () => ({
   useDocumentSnapshotsStore: () => ({
     addSnapshot: mockAddSnapshot,
-    getLatestSnapshot: mockGetLatestSnapshot,
+    getSnapshotById: mockGetSnapshotById,
+    removeSnapshotById: mockRemoveSnapshotById,
+    getSnapshotsCount: () => mockSnapshots.length,
+    clearSnapshots: vi.fn(),
     snapshots: mockSnapshots
   })
 }))
@@ -35,6 +39,8 @@ describe('EditorStore', () => {
   beforeEach(() => {
     setupPinia()
     vi.clearAllMocks()
+    mockAddSnapshot.mockReturnValue('snapshot-1')
+    mockGetSnapshotById.mockReturnValue(new ArrayBuffer(10))
     mockSnapshots.length = 0
   })
 
@@ -263,20 +269,6 @@ describe('EditorStore', () => {
     })
   })
 
-  describe('Edit History', () => {
-    it('agrega acciones al historial', () => {
-      const store = useEditorStore()
-
-      expect(store.editHistory).toHaveLength(0)
-
-      store.addEditAction(createMockEditAction('text'))
-      expect(store.editHistory).toHaveLength(1)
-
-      store.addEditAction(createMockEditAction('image'))
-      expect(store.editHistory).toHaveLength(2)
-    })
-  })
-
   describe('Snapshots', () => {
     it('guarda snapshot del documento activo', async () => {
       const documentStore = useDocumentStore()
@@ -287,12 +279,12 @@ describe('EditorStore', () => {
       documentStore.documents.push(doc)
       documentStore.activeDocumentId = doc.id
 
-      await editorStore.saveSnapshot(doc.id, doc.arrayBuffer)
+      editorStore.saveSnapshot(doc.id, doc.arrayBuffer, 'Text')
 
       expect(mockAddSnapshot).toHaveBeenCalledWith(doc.id, doc.arrayBuffer)
     })
 
-    it('limita snapshots a máximo 10', async () => {
+    it('deshace la última edición restaurando el snapshot', async () => {
       const documentStore = useDocumentStore()
       const editorStore = useEditorStore()
 
@@ -300,29 +292,14 @@ describe('EditorStore', () => {
       documentStore.documents.push(doc)
       documentStore.activeDocumentId = doc.id
 
-      // Simular que ya hay snapshots
-      for (let i = 0; i < 12; i++) {
-        mockSnapshots.push({ id: `snap-${i}`, data: new ArrayBuffer(10) })
-      }
+      editorStore.saveSnapshot(doc.id, doc.arrayBuffer, 'Text')
 
-      // Verificar que se llamó addSnapshot
-      expect(mockSnapshots.length).toBe(12)
-    })
+      const result = editorStore.undoLastEdit()
 
-    it('deshace última edición restaurando snapshot', async () => {
-      const documentStore = useDocumentStore()
-      const editorStore = useEditorStore()
-
-      const doc = createMockPDFDocument()
-      documentStore.documents.push(doc)
-      documentStore.activeDocumentId = doc.id
-
-      editorStore.addEditAction(createMockEditAction('text'))
-      await editorStore.saveSnapshot(doc.id, doc.arrayBuffer)
-
-      await editorStore.undoLastEdit(doc.id)
-
-      expect(editorStore.editHistory).toHaveLength(0)
+      expect(result).toEqual(
+        expect.objectContaining({ kind: 'document', documentId: doc.id, label: 'Text' })
+      )
+      expect(editorStore.canUndo).toBe(false)
     })
   })
 })

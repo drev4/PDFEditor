@@ -19,10 +19,10 @@ import { pdfFilenameFrom } from './pdf-url.js'
  * `remove(pdfFilenameFrom(form.pdfUrl))`. It is wrong, and wrong in the
  * direction that destroys data.
  *
- * Two forms can reference one key. The editor's save path uploads a new document
- * and repoints the form without deleting the old one, so keys are abandoned and
- * reused in ordinary use, and nothing stops a member building a second form on
- * the same upload.
+ * Two forms can reference one key: nothing stops a member building a second form
+ * on the same upload, and until features/0046 the editor's save path abandoned
+ * one on every save — it uploads a new document and repoints the form, and
+ * nothing removed what it left.
  *
  * Until features/0039 they need not even have belonged to the same organization:
  * `Form.pdfUrl` was an unconstrained client-supplied string that
@@ -38,11 +38,23 @@ import { pdfFilenameFrom } from './pdf-url.js'
  * **features/0039 narrowed who can create an alias and did not remove aliasing**,
  * so this question is still the right one. A `pdfUrl` must now name an `Upload`
  * belonging to the acting organization, which closes the cross-tenant case — but
- * two forms *in one organization* can still share a key, because the editor
- * repoints a form at a newly uploaded document without deleting the old one
- * (`useFormManagement.ts`, `FormSavePanel.vue`) and nothing stops a member
- * building a second form on the same upload. Going back to
+ * two forms *in one organization* can still share a key, because nothing stops a
+ * member building a second form on the same upload. Going back to
  * `remove(pdfFilenameFrom(form.pdfUrl))` would destroy a live form's document.
+ *
+ * ## Who calls this, and the extra trap at the repoint
+ *
+ * Three call sites: `DELETE /api/forms/:id`, account deletion, and — since
+ * features/0046 — `PUT /api/forms/:id`, which collects the document a repoint
+ * replaced. The editor's save uploads edited bytes and moves the form onto them
+ * (`useFormManagement.ts`, `FormSavePanel.vue`), so before that every save left
+ * one more object nothing would ever reference again.
+ *
+ * The repoint has a trap the deletions do not: **the form survives the write.**
+ * Called before the update, `stillReferenced` finds the form still pointing at
+ * the old key, answers `true`, and this collector correctly removes nothing — a
+ * silent no-op that looks like working code. The call has to come after the row
+ * is written, which is also what the ordering rule below requires anyway.
  *
  * ## Rows first, bytes second
  *

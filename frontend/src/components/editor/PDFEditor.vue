@@ -209,18 +209,23 @@
           </div>
           <div class="flex-1">
             <h4 class="tool-title">Edit History</h4>
-            <p class="text-meta text-muted">{{ editorStore.editHistory.length }} changes</p>
+            <p class="text-meta text-muted">{{ undoDepth }} {{ undoDepth === 1 ? 'step' : 'steps' }}</p>
           </div>
         </div>
         <div class="tool-body">
+          <!-- One stack, so this takes back the last thing that happened
+               whatever it was — a text, a page, or a field the author moved.
+               The label says which, because a button that undoes an invisible
+               something is a button people stop pressing. -->
           <Button
-            label="Undo Last Edit"
+            :label="nextUndoLabel ? `Undo ${nextUndoLabel.toLowerCase()}` : 'Undo'"
             icon="pi pi-undo"
             outlined
             @click="undoEdit"
             class="w-full"
             severity="secondary"
-            :disabled="editorStore.editHistory.length === 0"
+            data-testid="undo-button"
+            :disabled="!canUndo"
           />
         </div>
       </div>
@@ -261,6 +266,7 @@ import { useDrawingStore } from '@/stores/drawing.store'
 import { useSearchStore } from '@/stores/search.store'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { useDownloadPDF } from '@/composables/useDownloadPDF'
+import { useEditorUndo } from '@/composables/useEditorUndo'
 import FormSavePanel from '@/components/forms/FormSavePanel.vue'
 
 const documentStore = useDocumentStore()
@@ -297,8 +303,9 @@ const addText = async () => {
   if (!textInput.value || !documentStore.activeDocument?.arrayBuffer) return
 
   try {
-    // Save snapshot before making changes
-    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
+    // The document as it is before the edit — which is what makes the edit
+    // undoable. Saving a snapshot *is* pushing the undo entry now.
+    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer, 'Text')
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     const pages = pdfDoc.getPages()
@@ -327,13 +334,6 @@ const addText = async () => {
     ) as ArrayBuffer
 
     documentStore.activeDocument.arrayBuffer = newArrayBuffer
-
-    editorStore.addEditAction({
-      type: 'text',
-      page: currentPageIndex + 1,
-      data: { text: textInput.value, fontSize: fontSize.value },
-      timestamp: Date.now()
-    })
 
     textInput.value = ''
 
@@ -397,8 +397,7 @@ const deleteCurrentPage = async () => {
   if (documentStore.activeDocument.numPages <= 1) return
 
   try {
-    // Save snapshot before making changes
-    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
+    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer, 'Page removed')
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     const currentPageIndex = documentStore.activeDocument.currentPage - 1
@@ -414,13 +413,6 @@ const deleteCurrentPage = async () => {
 
     documentStore.activeDocument.arrayBuffer = newArrayBuffer
 
-    editorStore.addEditAction({
-      type: 'delete',
-      page: currentPageIndex + 1,
-      data: {},
-      timestamp: Date.now()
-    })
-
     if (documentStore.activeDocument.currentPage > 1) {
       documentStore.setCurrentPage(documentStore.activeDocument.currentPage - 1)
     }
@@ -435,8 +427,9 @@ const addBlankPage = async () => {
   if (!documentStore.activeDocument?.arrayBuffer) return
 
   try {
-    // Save snapshot before making changes
-    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer)
+    // This used to snapshot and push nothing, so adding a page left an
+    // undoable change behind a disabled Undo button (features/0047).
+    editorStore.saveSnapshot(documentStore.activeDocument.id, documentStore.activeDocument.arrayBuffer, 'Blank page')
 
     const pdfDoc = await PDFDocument.load(documentStore.activeDocument.arrayBuffer, { ignoreEncryption: true })
     pdfDoc.addPage()
@@ -456,15 +449,7 @@ const addBlankPage = async () => {
   }
 }
 
-const undoEdit = () => {
-  if (!documentStore.activeDocument) return
-
-  const restoredArrayBuffer = editorStore.undoLastEdit(documentStore.activeDocument.id)
-  if (!restoredArrayBuffer) return
-
-  documentStore.activeDocument.arrayBuffer = restoredArrayBuffer
-  documentStore.triggerPDFReload()
-}
+const { canUndo, undoDepth, nextUndoLabel, undo: undoEdit } = useEditorUndo()
 
 const performSearch = () => {
   if (!searchText.value.trim()) return

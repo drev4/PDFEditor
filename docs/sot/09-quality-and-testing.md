@@ -11,10 +11,10 @@ The cost is that a leaked server from a previous run makes the next run fail to 
 
 | Level | Count | Tooling | Location |
 |---|---|---|---|
-| Frontend unit / component | 56 specs, 479 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
-| Backend route (mocked Prisma) | 30 specs, 383 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
-| **Backend database-backed** | 28 specs, 260 tests — 3 specs (10 tests) skip themselves without `TEST_REDIS_URL`, see below | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
-| End to end | 8 specs, 53 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
+| Frontend unit / component | 62 specs, 564 tests | Vitest, `@testing-library/vue`, `@pinia/testing`, jsdom (`frontend/vitest.config.ts`) | Beside the code, `frontend/src/**/*.spec.ts` |
+| Backend route (mocked Prisma) | 32 specs, 403 tests | Vitest, `supertest`, `vitest-mock-extended` | `backend/tests/*.spec.ts` |
+| **Backend database-backed** | 30 specs, 274 tests — 3 specs (10 tests) skip themselves without `TEST_REDIS_URL`, see below | Vitest, `supertest`, **real PostgreSQL** (`backend/vitest.integration.config.ts`) | `backend/tests/integration/*.spec.ts` |
+| End to end | 8 specs, 55 tests | Playwright, Chromium | `e2e/*.spec.ts`, helpers in `e2e/helpers.ts` |
 
 **Two specs guard a shape rather than a behaviour**, and both are the closest thing this repository has to a lint rule while `npm run lint` lints nothing. `backend/tests/async-handler-coverage.spec.ts` reads the route sources and fails when an `async` handler is not wrapped in `asyncHandler` ([`features/0026`](../../features/0026-async-handler.md)) — because a wrapper somebody has to remember fails exactly like the `try`/`catch` it replaced. It carries a **negative control**: a fixture the scan must flag, asserted in the same file, so a regex that quietly stopped matching cannot report a clean codebase for ever. That control earned itself immediately — the first draft matched the literal `asyncHandler(` and missed `asyncHandler<ApiKeyRequest>(`.
 
@@ -75,6 +75,8 @@ It has one failure mode worth naming, because the project's data-loss defect liv
 npm run test:integration                       # from the repo root
 npm run test:integration --workspace=backend   # or from the workspace
 ```
+
+**One contract asserted in two workspaces.** `backend/tests/pdf-processor.spec.ts` and `frontend/src/utils/pdfFieldEmbedder.spec.ts` embed the *same* stored rectangle and assert the *same* PDF rectangle ([`features/0052`](../../features/0052-stored-positions-round-trip.md)). They are the only pair of specs in this repository deliberately coupled by their expected values, because they cover two implementations of one mapping: pinning each to itself is what let the browser's copy start dividing by the zoom. Change one and the other has to change with it.
 
 - Config: `backend/vitest.integration.config.ts`. Separate from `vitest.config.ts`, which excludes `tests/integration/**` so the mocked suite stays fast and database-free.
 - `DATABASE_URL` defaults to `postgresql://postgres:postgres@localhost:5432/vuepdf_test`. Create it once and apply migrations: `npm run db:migrate:deploy` with that URL.

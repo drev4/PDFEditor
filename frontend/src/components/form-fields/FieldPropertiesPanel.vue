@@ -1,5 +1,87 @@
 <template>
-  <div class="field-properties-panel font-sans" v-if="formFieldsStore.selectedField">
+  <!--
+    More than one field selected (features/0048).
+
+    It deliberately carries **no per-field inputs**. A name or a pattern written
+    into six fields at once is the properties-panel undo problem this repository
+    has already decided not to solve by accident: one entry per keystroke floods
+    the stack, one on blur records a rename and misses the four other properties
+    touched in the same visit. What belongs here is what only makes sense on a
+    set — geometry, and duplication.
+  -->
+  <div class="field-properties-panel font-sans" v-if="formFieldsStore.hasMultiSelection">
+    <div class="panel-header bg-surface border-b border-line px-4 h-11 flex items-center">
+      <h3 class="text-meta font-semibold text-faint uppercase tracking-widest">Selection</h3>
+      <button class="close-btn p-2 hover:bg-surface-sunken rounded-xl transition-colors text-faint" @click="formFieldsStore.clearSelection()">
+        <i class="pi pi-times text-meta"></i>
+      </button>
+    </div>
+
+    <div class="panel-content p-6 space-y-8">
+      <p class="text-body text-muted" data-testid="selection-count">
+        <span class="font-semibold text-ink">{{ formFieldsStore.selectedFieldIds.length }} fields</span>
+        selected. Drag any one of them to move them together, or nudge them with the
+        arrow keys.
+      </p>
+
+      <div class="form-group">
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-3 block">Align</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button
+            v-for="option in alignOptions"
+            :key="option.mode"
+            :data-testid="`align-${option.mode}`"
+            :disabled="!canEditGeometry"
+            :title="canEditGeometry ? undefined : rotatedHint"
+            class="py-2.5 px-2 bg-surface-subtle border border-line rounded-xl text-meta font-semibold text-muted enabled:hover:border-accent enabled:hover:text-accent transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            @click="alignSelection(option.mode)"
+          >{{ option.label }}</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="text-[10px] font-semibold text-faint uppercase tracking-widest mb-3 block">
+          Distribute <span class="text-faint normal-case tracking-normal font-normal">(three or more)</span>
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            v-for="option in distributeOptions"
+            :key="option.axis"
+            :data-testid="`distribute-${option.axis}`"
+            :disabled="!canEditGeometry || formFieldsStore.selectedFieldIds.length < 3"
+            :title="canEditGeometry ? undefined : rotatedHint"
+            class="py-2.5 px-2 bg-surface-subtle border border-line rounded-xl text-meta font-semibold text-muted enabled:hover:border-accent enabled:hover:text-accent transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            @click="distributeSelection(option.axis)"
+          >{{ option.label }}</button>
+        </div>
+      </div>
+
+      <div class="pt-2">
+        <button
+          data-testid="duplicate-selection"
+          class="w-full flex items-center justify-center gap-3 py-4 bg-surface-subtle border border-line hover:border-accent hover:text-accent text-muted rounded-2xl transition-all font-semibold text-meta"
+          @click="duplicateSelection()"
+        >
+          <i class="pi pi-clone"></i>
+          DUPLICATE {{ formFieldsStore.selectedFieldIds.length }} FIELDS
+        </button>
+        <p class="text-meta text-faint mt-3">
+          Copies are new fields with their own names.
+        </p>
+
+        <button
+          data-testid="remove-selection"
+          class="w-full mt-4 flex items-center justify-center gap-3 py-4 bg-danger-soft border border-transparent hover:border-danger text-danger rounded-2xl transition-all font-semibold text-meta"
+          @click="showRemoveSelectionConfirm = true"
+        >
+          <i class="pi pi-trash"></i>
+          REMOVE {{ formFieldsStore.selectedFieldIds.length }} FIELDS
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="field-properties-panel font-sans" v-else-if="formFieldsStore.selectedField">
     <div class="panel-header bg-surface border-b border-line px-4 h-11 flex items-center">
       <div class="flex flex-col gap-1">
         <h3 class="text-meta font-semibold text-faint uppercase tracking-widest">Field Settings</h3>
@@ -162,14 +244,71 @@
         </div>
       </div>
 
+      <!-- Duplicate (features/0048). A configured field is worth more than an
+           empty one, so copying it is the cheapest way to build the next. -->
+      <div class="pt-6">
+        <button
+          data-testid="duplicate-field"
+          class="w-full flex items-center justify-center gap-3 py-3.5 bg-surface-subtle border border-line hover:border-accent hover:text-accent text-muted rounded-2xl transition-all font-semibold text-meta"
+          @click="duplicateSelection()"
+        >
+          <i class="pi pi-clone"></i>
+          DUPLICATE FIELD
+        </button>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pt-10">
-        <button @click="deleteField" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-semibold text-meta border border-danger group">
+        <button @click="deleteField" data-testid="remove-field" class="w-full flex items-center justify-center gap-3 py-4 bg-danger-soft hover:bg-danger text-danger hover:text-white rounded-2xl transition-all duration-300 font-semibold text-meta border border-danger group">
           <i class="pi pi-trash group-hover:scale-110 transition-transform"></i>
-          ARCHIVE FIELD
+          REMOVE FIELD
         </button>
       </div>
     </div>
+
+  <!--
+    Removing a field is the one control here that can touch collected data, so
+    it asks (features/0044). It deliberately does **not** show a count: the
+    number would have to be fetched before this opens, and the form is published
+    - a submission can land while the author reads. The server counts inside the
+    transaction that removes, and the toast afterwards reports what it found.
+  -->
+  <Dialog
+    :visible="showRemoveConfirm"
+    modal
+    :closable="false"
+    :draggable="false"
+    :style="{ width: '420px' }"
+    :pt="{ header: { class: 'hidden' } }"
+    @update:visible="showRemoveConfirm = false"
+  >
+    <div class="pt-1" data-testid="remove-field-confirm">
+      <div class="flex items-center justify-center w-8 h-8 rounded-input bg-danger-soft text-danger mb-3.5">
+        <i class="pi pi-trash text-[15px]" />
+      </div>
+
+      <h2 class="text-section">Remove &ldquo;{{ pendingFieldName }}&rdquo;?</h2>
+
+      <p class="mt-2 text-body text-muted">
+        It stops appearing on the form straight away. Responses already collected
+        through this field are kept: the field is archived rather than deleted, so
+        its column stays in the responses table and in the CSV.
+      </p>
+    </div>
+
+    <template #footer>
+      <div class="flex items-center justify-end gap-2">
+        <Button label="Cancel" text severity="secondary" @click="showRemoveConfirm = false" />
+        <Button
+          label="Remove field"
+          severity="danger"
+          data-testid="remove-field-confirmed"
+          :loading="removing"
+          @click="confirmRemoveField"
+        />
+      </div>
+    </template>
+  </Dialog>
   </div>
 
   <!-- Empty State / Selection Hint -->
@@ -205,16 +344,104 @@
       </div>
     </div>
   </div>
+
+
+  <!--
+    Removing a whole selection (features/0050). Same rule as the single-field
+    dialog above and the same reason it shows no answer count: the split between
+    archived and deleted is the server's answer, taken inside the transaction
+    that removes, and the form is published - a submission can land while the
+    author reads this. What it does say is how many fields are going, because
+    that is the number the author can check against what they selected.
+
+    A root-level sibling rather than a child of the multi-selection branch: the
+    branch is `v-if`/`v-else-if`/`v-else` on the selection, and a dialog living
+    inside one of them would disappear mid-request the moment the fields it is
+    removing left the selection.
+  -->
+  <Dialog
+    :visible="showRemoveSelectionConfirm"
+    modal
+    :closable="false"
+    :draggable="false"
+    :style="{ width: '420px' }"
+    :pt="{ header: { class: 'hidden' } }"
+    @update:visible="showRemoveSelectionConfirm = false"
+  >
+    <div class="pt-1" data-testid="remove-selection-confirm">
+      <div class="flex items-center justify-center w-8 h-8 rounded-input bg-danger-soft text-danger mb-3.5">
+        <i class="pi pi-trash text-[15px]" />
+      </div>
+
+      <h2 class="text-section">Remove {{ pendingSelectionCount }} fields?</h2>
+
+      <p class="mt-2 text-body text-muted">
+        They stop appearing on the form straight away. Any of them that has already
+        collected responses is archived rather than deleted, so its answers and its
+        column in the responses table and the CSV are kept &mdash; you will be told
+        which.
+      </p>
+    </div>
+
+    <template #footer>
+      <div class="flex items-center justify-end gap-2">
+        <Button label="Cancel" text severity="secondary" @click="showRemoveSelectionConfirm = false" />
+        <Button
+          label="Remove fields"
+          severity="danger"
+          data-testid="remove-selection-confirmed"
+          :loading="removingSelection"
+          @click="confirmRemoveSelection"
+        />
+      </div>
+    </template>
+  </Dialog>
+
 </template>
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { usePatternAuthoring } from '@/composables/usePatternAuthoring'
-import { useFormFieldsStore, type FieldType } from '@/stores/formFields.store'
+import {
+  useFormFieldsStore,
+  cloneFields,
+  createLocalFieldId,
+  isLocalFieldId,
+  type FieldType,
+  type FormField
+} from '@/stores/formFields.store'
+import { useEditorStore } from '@/stores/editor.store'
+import { useFieldEditing } from '@/composables/useFieldEditing'
+import type { AlignMode, DistributeAxis } from '@/utils/fieldGeometry'
 import { useToast } from 'primevue/usetoast'
+import Dialog from 'primevue/dialog'
+import Button from 'primevue/button'
 
 const formFieldsStore = useFormFieldsStore()
+const editorStore = useEditorStore()
 const toast = useToast()
+
+/**
+ * The set operations (features/0048). They live in `useFieldEditing` because the
+ * keyboard reaches for the same three, and each of them is one undo entry.
+ */
+const { canEditGeometry, duplicateSelection, alignSelection, distributeSelection } = useFieldEditing()
+
+const rotatedHint = 'Rotate the page back to upright to move these fields'
+
+const alignOptions: Array<{ mode: AlignMode; label: string }> = [
+  { mode: 'left', label: 'Left' },
+  { mode: 'center-x', label: 'Centre' },
+  { mode: 'right', label: 'Right' },
+  { mode: 'top', label: 'Top' },
+  { mode: 'center-y', label: 'Middle' },
+  { mode: 'bottom', label: 'Bottom' }
+]
+
+const distributeOptions: Array<{ axis: DistributeAxis; label: string }> = [
+  { axis: 'horizontal', label: 'Horizontally' },
+  { axis: 'vertical', label: 'Vertically' }
+]
 
 // Local form state
 const fieldName = ref('')
@@ -462,33 +689,212 @@ const removeOption = (index: number) => {
   updateField()
 }
 
-const deleteField = async () => {
-  if (!formFieldsStore.selectedField) return
+const showRemoveConfirm = ref(false)
+const removing = ref(false)
 
-  // Confirm deletion
-  const fieldName = formFieldsStore.selectedField.label || formFieldsStore.selectedField.name
-  if (!confirm(`¿Eliminar el campo "${fieldName}"?`)) {
+const pendingFieldName = computed(() => {
+  const field = formFieldsStore.selectedField
+  return field ? (field.label || field.name) : ''
+})
+
+const deleteField = () => {
+  if (!formFieldsStore.selectedField) return
+  showRemoveConfirm.value = true
+}
+
+/**
+ * Makes a removal undoable — or deliberately does not.
+ *
+ * The bulk save rejects the **whole** payload if it carries an id that is not a
+ * live field of the form, so what may go back on the undo stack depends on what
+ * the server actually did (features/0047):
+ *
+ * - **archived** — the field held responses, so its row is still there under
+ *   `deletedAt` and its id is not live. Nothing is recorded, and the way back is
+ *   the rail's Restore, which returns the row with its answers attached
+ *   (features/0045). Every older entry forgets the field too, or undoing past
+ *   this point would send the archived id and `400` the entire save.
+ * - **hard-deleted** — the field held nothing, so there are no answers to orphan
+ *   and it may come back as a **new local field**. Its dead id is rewritten
+ *   everywhere on the stack, not just in this entry.
+ * - **never saved** — a local id, gone from the browser only, and it returns
+ *   exactly as it was.
+ */
+const recordRemovalForUndo = (
+  field: FormField,
+  fieldsBeforeRemoval: FormField[],
+  removedIndex: number,
+  archived: boolean
+) => {
+  if (archived) {
+    editorStore.forgetFieldId(field.id, null)
     return
   }
 
+  const revivedId = isLocalFieldId(field.id) ? field.id : createLocalFieldId()
+
+  if (revivedId !== field.id) editorStore.forgetFieldId(field.id, revivedId)
+
+  const restored = fieldsBeforeRemoval.map(f =>
+    f.id === field.id ? { ...f, id: revivedId } : f
+  )
+
+  editorStore.pushFieldsUndo(
+    restored,
+    removedIndex === -1 ? null : revivedId,
+    'Field removed'
+  )
+}
+
+const showRemoveSelectionConfirm = ref(false)
+const removingSelection = ref(false)
+
+/**
+ * How many fields the open dialog is about.
+ *
+ * Frozen when it opens rather than read live: the request empties the selection
+ * as it succeeds, and a heading that counts down to "Remove 0 fields?" while the
+ * button spins is the dialog telling the author the wrong thing at the worst
+ * moment.
+ */
+const pendingSelectionCount = ref(0)
+
+watch(showRemoveSelectionConfirm, open => {
+  if (open) pendingSelectionCount.value = formFieldsStore.selectedFieldIds.length
+})
+
+/**
+ * Removing a whole selection, as one undo entry (features/0050).
+ *
+ * The rule per field is `recordRemovalForUndo`'s, unchanged - it is what keeps
+ * the undo stack from carrying an id the bulk save will reject - but it has to
+ * be applied to the whole set **before** anything is pushed, because one gesture
+ * is one entry:
+ *
+ * - **archived** fields cannot come back locally at all. They are dropped from
+ *   the restored list and every older entry forgets their id, or undoing past
+ *   this point would send an archived id and `400` the entire save.
+ * - **hard-deleted** and never-saved fields come back as new local fields, with
+ *   their dead ids rewritten across the stack.
+ *
+ * Getting this wrong fails far from where it is caused: the bulk save rejects
+ * the **whole** payload over one dead id, so every later save of the form fails
+ * until the page is reloaded.
+ */
+const confirmRemoveSelection = async () => {
+  // A second press while the first request is in flight would send the same ids
+  // twice — the second one arrives after the fields are gone and `400`s the
+  // whole thing, on top of a second undo entry for one gesture.
+  if (removingSelection.value) return
+
+  const ids = [...formFieldsStore.selectedFieldIds]
+  if (ids.length === 0) return
+
+  const fieldsBeforeRemoval = cloneFields(formFieldsStore.fields)
+  removingSelection.value = true
+
   try {
-    await formFieldsStore.deleteFieldFromServer(formFieldsStore.selectedField.id)
+    const result = await formFieldsStore.deleteFieldsFromServer(ids)
+    showRemoveSelectionConfirm.value = false
+    if (!result) return
+
+    const archivedIds = new Set(result.archived.map(f => f.id))
+
+    // One pass over the list as it was: archived fields leave it, everything
+    // else stays under a fresh local id.
+    const idSwaps = new Map<string, string>()
+    for (const id of ids) {
+      if (archivedIds.has(id)) continue
+      idSwaps.set(id, isLocalFieldId(id) ? id : createLocalFieldId())
+    }
+
+    for (const id of archivedIds) editorStore.forgetFieldId(id, null)
+    for (const [dead, revived] of idSwaps) {
+      if (dead !== revived) editorStore.forgetFieldId(dead, revived)
+    }
+
+    const restored = fieldsBeforeRemoval
+      .filter(f => !archivedIds.has(f.id))
+      .map(f => (idSwaps.has(f.id) ? { ...f, id: idSwaps.get(f.id)! } : f))
+
+    editorStore.pushFieldsUndo(restored, null, `${ids.length} fields removed`)
+
+    const kept = result.archived.reduce((total, f) => total + f.answerCount, 0)
+    const removedCount = result.deleted.length + result.localOnly.length
+    const archivedCount = result.archived.length
+
+    // One message for a mixed outcome, because the author performed one action.
+    const parts: string[] = []
+    if (removedCount > 0) parts.push(`${removedCount} removed`)
+    if (archivedCount > 0) {
+      parts.push(
+        `${archivedCount} archived, keeping ${kept} ${kept === 1 ? 'response' : 'responses'}`
+      )
+    }
 
     toast.add({
       severity: 'success',
-      summary: 'Campo eliminado',
-      detail: `El campo "${fieldName}" ha sido eliminado`,
-      life: 3000
+      summary: 'Fields removed',
+      detail: `${parts.join(' · ')}.`,
+      life: 5000
     })
   } catch (error) {
-    console.error('Failed to delete field:', error)
+    console.error('Failed to remove the selected fields:', error)
 
     toast.add({
       severity: 'error',
-      summary: 'Error al eliminar',
-      detail: 'No se pudo eliminar el campo. Intenta de nuevo.',
-      life: 3000
+      summary: 'Could not remove the fields',
+      // One transaction on the server, so this is the truth rather than a hope.
+      detail: 'Nothing was changed. Please try again.',
+      life: 4000
     })
+  } finally {
+    removingSelection.value = false
+  }
+}
+
+const confirmRemoveField = async () => {
+  const field = formFieldsStore.selectedField
+  if (!field) return
+
+  const fieldName = field.label || field.name
+  // Captured before the deletion, because the entry is built from the list as
+  // it was — with the removed field put back at the index it held.
+  const fieldsBeforeRemoval = cloneFields(formFieldsStore.fields)
+  const removedIndex = formFieldsStore.fields.findIndex(f => f.id === field.id)
+  removing.value = true
+
+  try {
+    // Which of the two happened is the server's answer, not a guess: a field
+    // holding responses is archived and one holding none is deleted
+    // (features/0044). A field that was never saved has no server row at all,
+    // and the store returns nothing for it.
+    const result = await formFieldsStore.deleteFieldFromServer(field.id)
+    showRemoveConfirm.value = false
+
+    recordRemovalForUndo(field, fieldsBeforeRemoval, removedIndex, result?.archived === true)
+
+    const kept = result?.answerCount ?? 0
+
+    toast.add({
+      severity: 'success',
+      summary: result?.archived ? 'Field archived' : 'Field removed',
+      detail: result?.archived
+        ? `“${fieldName}” no longer appears on the form. ${kept} ${kept === 1 ? 'response is' : 'responses are'} kept.`
+        : `“${fieldName}” was removed. It had collected no responses.`,
+      life: 4000
+    })
+  } catch (error) {
+    console.error('Failed to remove field:', error)
+
+    toast.add({
+      severity: 'error',
+      summary: 'Could not remove the field',
+      detail: 'Nothing was changed. Please try again.',
+      life: 4000
+    })
+  } finally {
+    removing.value = false
   }
 }
 </script>

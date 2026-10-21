@@ -36,7 +36,12 @@
                turning the wrapper as well rotated everything twice: at 90 the
                page showed at 180, and the field overlay - positioned in
                unrotated coordinates - sat nowhere near the page. -->
-          <div class="pdf-canvas-wrapper">
+          <!-- A click that lands on the page rather than on a field clears the
+               selection (features/0048). It is bound here, not on the fields
+               overlay, because that overlay is `pointer-events: none` and sits
+               above `.text-layer` — making it take the pointer would take text
+               selection and search highlighting away from the whole canvas. -->
+          <div class="pdf-canvas-wrapper" @click="clearFieldSelection">
             <!-- Grid Overlay -->
             <canvas
               ref="gridCanvasRef"
@@ -194,6 +199,7 @@ import SearchSpotlight from '../search/SearchSpotlight.vue'
 import FormFieldsOverlay from '../form-fields/FormFieldsOverlay.vue'
 import { useFormFieldsStore } from '@/stores/formFields.store'
 import { usePDFFieldsLoader } from '@/composables/usePDFFieldsLoader'
+import { BASE_SCALE } from '@/utils/pdfCoordinates'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -210,6 +216,13 @@ const drawingStore = useDrawingStore()
 const editorStore = useEditorStore()
 const searchStore = useSearchStore()
 const formFieldsStore = useFormFieldsStore()
+
+const clearFieldSelection = () => {
+  // A field stops the click itself, so anything arriving here came from the
+  // page. The public form has no selection to clear.
+  if (props.readOnly) return
+  formFieldsStore.clearSelection()
+}
 
 // Use composables
 const {
@@ -266,7 +279,9 @@ const handleTextInput = (event: Event) => {
 // Computed properties
 const currentPage = computed(() => documentStore.activeDocument?.currentPage || 1)
 const numPages = computed(() => documentStore.activeDocument?.numPages || 0)
-const scale = computed(() => documentStore.activeDocument?.scale || 1.5)
+// The zoom, whose default is the same number as `BASE_SCALE` — see the note in
+// `document.store.ts`. It is never the divisor for a stored position.
+const scale = computed(() => documentStore.activeDocument?.scale || BASE_SCALE)
 const rotation = computed(() => documentStore.activeDocument?.rotation || 0)
 
 // Navigation methods

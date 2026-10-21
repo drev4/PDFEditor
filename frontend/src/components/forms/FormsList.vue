@@ -121,9 +121,6 @@
       @publish="handlePublish"
       @unpublish="handleUnpublish"
     />
-
-    <!-- Toast -->
-    <Toast position="top-right" />
   </div>
 </template>
 
@@ -134,7 +131,6 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
 import ProgressSpinner from 'primevue/progressspinner'
-import Toast from 'primevue/toast'
 import ShareFormModal from './ShareFormModal.vue'
 import { type Form } from '@/services/forms'
 import { ApiError } from '@/services/api'

@@ -121,7 +121,13 @@ There is no shared constant and no test spanning both. **Changing the editor's r
 
 The rule that follows: **anything that builds a payload from `fields` must decide, explicitly, what it does with the id.** Local ids must never be sent, server ids must never be dropped.
 
+There is a third case now, and it is the one that bites: **an id whose row no longer exists must never be sent either.** The bulk save rejects the entire payload over one unknown id, so a field put back into `fields` by an undo carries a **freshly minted local id** rather than the id of the row the server just deleted — see the undo stack in §8. `createLocalFieldId()` is exported for exactly that, so there is one place ids are minted.
+
 The endpoint answers with `archived: string[]` — fields the user deleted that the server kept because they hold responses. The store parks them in `archivedFieldIds` and `FormSavePanel.vue` shows them as a non-blocking toast, then clears them. A response the frontend receives and silently ignores is how the previous attempt at this fix confused everyone: fields reappeared in the editor with no explanation.
+
+That toast used to be the **only** signal, which meant an archived field was visible for eight seconds and then in no screen at all. Since [`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md) it is the transient half of two: `archivedFieldIds` stays the one-shot "this just happened", and `archivedFields` is the standing list `EditorRail.vue` renders under **Archived**, loaded from `GET /forms/:formId/fields/archived` and re-read only after a save or delete that actually archived something. The responses table marks those columns too, reading the `deletedAt` that endpoint had been returning and the client had been discarding.
+
+**The one rule that is not obvious:** `restoreArchivedField` pushes the restored row into `fields`, and that is not bookkeeping. The bulk save computes removals as *a live field whose id is absent from the payload*, so a restore that only refreshes the sidebar is undone by the next `Save all` — silently. It also deliberately does **not** `markDirty`: the restore already reached the server, and claiming unsaved work would make the leave-the-editor prompt lie.
 
 ## 6. Persistence is decided per store, explicitly
 
@@ -299,9 +305,74 @@ They are now held deliberately, not accidentally. `documentStore.hasUnsavedEdits
 
 **Field geometry works the same way**, and did not used to. Placing, moving or resizing a field wrote to the server on mouseup (`formFieldsStore.saveField`), so one screen had two save models and the user could not know what was stored without remembering which tool they had used. `formFieldsStore.hasUnsavedChanges` is the field-side flag; `Save all` clears it through `saveAllFields`. The editor's warning and its button read both flags as one.
 
+### Undo is one stack, and it covers the fields too
+
+Undo used to mean the document only. `editorStore.undoLastEdit` popped an `EditAction` and returned a snapshot, so a text or an image could be taken back — and **moving, resizing, placing or deleting a field could not be undone by anything**. In an editor where every field is placed by dragging, that is the first key a user reaches for.
+
+There is now **one ordered stack** in `editor.store.ts` ([`features/0047`](../../features/0047-undo-covers-field-edits.md)). A `document` entry owns bytes in `snapshots.store.ts` by id; a `fields` entry owns a copy of the field list. `composables/useEditorUndo.ts` is the only place that knows what applying an undo means, and both controls — the button in `PDFEditor.vue` and `Ctrl/Cmd+Z` in `EditorView.vue` — go through it. Two stacks was the obvious alternative and it is wrong: there is one Undo, and with two stacks the same control does different things depending on state the user cannot see.
+
+Five things about it are easy to get wrong, and four of them are silent.
+
+**The commit point is the end of the gesture, not the mutation.** `moveField` and `resizeField` run on every `mousemove`, so a push from inside them — or a deep watcher — makes one drag sixty undo steps. `FormFieldItem.vue` copies the list at `mousedown`, pushes at `mouseup`, and pushes **nothing** when the position did not actually change, because a mouse-down that only selects is not an edit.
+
+**Saving a snapshot *is* pushing the entry.** They were two calls, and `addBlankPage` made only the first — so the page was added, the bytes were kept and the Undo button stayed disabled, because it read a history the caller had forgotten to append to. The two cannot drift apart now: `saveSnapshot(documentId, bytes, label)` does both.
+
+**A snapshot is addressed by id, never by "the newest for this document".** `getLatestSnapshot` is gone. It is what made undo one level deep — `undoLastEdit` popped its own history and left the snapshot in place, so the second press returned the same bytes as the first and looked like a broken button. Eviction removes an entry and its bytes together, so nothing can outlive what it needs.
+
+**A deleted field must not come back with the id it had.** This is the sharp one, because it fails far from where it is caused. `POST /forms/:formId/fields/bulk` rejects the **whole** payload over an id that is not a live field of the form, so one dead id anywhere on the stack breaks every later `Save all` of that form — not just that field — until the page is reloaded. What is allowed depends on what the server actually did, which is why `FieldPropertiesPanel.vue` reads the answer rather than guessing:
+
+| The server | Undo | Because |
+|---|---|---|
+| hard-deleted it (`archived: false`) | brings it back as a **new local field** | it held no answers, so a new id orphans nothing |
+| archived it (`archived: true`) | records nothing | the way back is the rail's **Restore**, which returns the row with its id and its answers ([`features/0045`](../../features/0045-archived-fields-are-visible-and-restorable.md)) |
+| was never asked (a local id) | brings it back unchanged | there was never a row |
+
+And the correction reaches **backwards**: `forgetFieldId` rewrites or removes that id in every older entry, and `rememberField` is its mirror for a restore. Without the second one, undoing past a restore drops the field from the list again — and the next save reads that absence as a removal and re-archives what the user just recovered, with a `200` and no error anywhere.
+
+**A save invalidates field history.** `saveAllFields` hands back server ids for fields that were local a moment earlier, so an older entry holds ids that no longer mean anything — and restoring it would send *no* id for a field that now has a row, which the bulk save reads as "create" and duplicates. The store watches `hasUnsavedChanges` fall and drops the field entries, keeping the document ones. It watches the flag rather than the action so the dependency runs one way and there is no cycle between the two stores.
+
+An undo always marks the form dirty, deliberately without checking whether the result matches what was last saved. A false positive is one save that writes what is already there; a false negative is the leave-the-editor prompt staying quiet while somebody walks away from their work.
+
+**Not built, and filed:** redo, undo of the property panel's own fields (the browser's undo already works inside those inputs), and undo surviving a reload — the stack is in memory, like the snapshots always were.
+
+### A selection is a set, and the keyboard reaches it
+
+Placing thirty aligned checkboxes — the form this product exists for — used to be thirty mouse gestures with nothing to help. Fields are selected as a **set** now, and there are keys ([`features/0048`](../../features/0048-multi-select-duplicate-and-keyboard-nudge.md)).
+
+`formFields.store.ts` holds `selectedFieldIds` beside `selectedFieldId`, and the invariant between them is the thing to keep: **the primary is the field whose properties the panel shows, and it is always a member of the set while the set is non-empty.** `setSelection` is the one function that writes either of them, which is also where ids that name no field are dropped — a selection surviving a delete or a restored snapshot is a panel editing a field that is gone. A selection is confined to **one page**: reaching for a field on another page replaces it rather than producing a set that align and distribute cannot act on.
+
+`Shift`/`Ctrl`/`Cmd`-click on a field toggles it in and out, and there is a **marquee** ([`features/0050`](../../features/0050-marquee-selection-and-multi-field-delete.md)) — but it is a **mode**, and that is the whole design of it rather than an implementation detail.
+
+The fields overlay is `pointer-events: none` at `z-index: 8`, directly above `.text-layer` at `z-index: 7`, which owns the PDF's selectable text and everything `usePDFSearch` highlights. An overlay that took `mousedown` on empty page area would take both away from the whole canvas, permanently, for everybody who never draws a band. So the overlay takes the pointer **only while the `select` tool in `DrawingToolbar.vue` is armed** (`formFieldsStore.isSelectMode`, the `.select-mode` class), the same way it already did for placing a field, and `Escape` gives it back. `FormFieldsOverlay.spec.ts` asserts the default state, because that is the assertion that fails the day somebody simplifies the mode away.
+
+Three consequences worth carrying: the band is normalised and hit-tests by **intersection** (`bandBetween` and `idsWithinBand` in `utils/fieldGeometry.ts` — a band drawn down the middle of a column of checkboxes contains none of them and must catch them all); it works in **overlay pixels**, dividing the pointer by `displayScale` and reading the fields through the same `rotateFieldRect` that draws them, which is what makes it work unchanged on a turned page; and a band that catches nothing **clears** the selection, because it is the same gesture as clicking empty page. For the same layering reason as the mode, clearing by clicking the page is bound on the canvas **wrapper** in `PDFViewer.vue` — a listener there takes nothing from the layers underneath, and a field stops its own click.
+
+Three things about the set operations are worth knowing before changing them.
+
+**A duplicate never carries its original's id.** `saveAllFields` sends `id` for every field whose id is not local, so a copy keeping a server id is a second update to one row: the bulk save applies both, the later wins, and one of the two fields is simply never created — with a `200` and nothing in any log. `duplicateFields` mints a local id and a fresh name from `generateUniqueFieldName`, because an AcroForm identifies a field by name and `addField` does not check for a collision the way `updateField` does.
+
+**A burst of arrow keys is one undo entry, and that is a data-loss guard rather than a nicety.** The stack is capped at ten and evicts from the front, freeing the bytes of any `document` entry it drops — so one entry per keypress would not merely fill the stack, it would destroy every document snapshot the session holds and make the text and image edits behind them unundoable, silently. `useFieldKeyboard.ts` opens a step on the first press and closes it after a pause (`BURST_IDLE_MS`) or a change of selection. Note that it closes on a **pause, not on `keyup`**: ten taps in a row are one act of nudging and would evict the history just as effectively as key repeat. `Ctrl/Cmd+D` duplicates, `Escape` clears the selection, and the arrow keys are exempt inside an `input`, a `textarea` or a `contenteditable` — the same three checks the `Ctrl+Z` handler makes, because the caret owns those keys while somebody is renaming a field.
+
+**Snap to grid works on a field now, and the step is not the one it looks like** ([`features/0051`](../../features/0051-snap-to-grid-for-fields.md)). The toggle in `PDFEditor.vue` had existed for a long time and did nothing to a field: the magnet lived in `useDragAndDrop.ts`, which `FormFieldItem.vue` has never used — it has its own drag and resize. The arithmetic is now one pure function, `snapToStep` in `utils/fieldGeometry.ts`, and **the two callers pass different steps**, which is the thing to keep straight:
+
+| Caller | What it moves | Space | Step |
+|---|---|---|---|
+| `useDragAndDrop.ts` | the text and image previews | canvas pixels | `gridSize` |
+| `FormFieldItem.vue` | fields | stored, base-scale units | `gridSize / scaleFactor` |
+
+The grid is drawn every `gridSize` **canvas** pixels (`useGridOverlay.ts`), so rounding a field's stored coordinate to `gridSize` — the one-line version — puts it on a grid that coincides with the visible one only at the base zoom. Two more rules come with it: the **delta** is snapped rather than each field, for the same reason the delta is clamped rather than each field, and resizing snaps only the edges its handle moves, **after** the `minSize` clamp rather than before it. The keyboard is deliberately exempt — the arrow keys are the precise tool, and a 1px nudge that jumps 20px is not a nudge — and so are align and distribute, which align fields to each other rather than to the page. Arming the magnet turns the grid on, because a magnet whose lines are invisible looks like the editor moving fields on its own.
+
+**Geometry is refused while the page is rotated**, exactly as dragging already was: nudging, aligning and distributing all name a *screen* direction and write a *stored* axis, and on a turned page those are not the same thing. `useFieldEditing.ts` holds that rule once and both callers — the panel and the keyboard — read it.
+
+The split between the two composables follows the store/composable rule and one hard constraint: `editor.store.ts` imports `formFields.store.ts`, so the field store cannot push undo entries itself without a cycle. The store mutates; `useFieldEditing.ts` captures, calls it, and records exactly one entry. `utils/fieldGeometry.ts` is pure — align and distribute are the easiest thing here to get subtly wrong and the easiest to test, so they are tested apart from any store, in stored coordinates.
+
+The multi-selection panel deliberately carries **no per-field inputs**. A name typed into six fields at once is the properties-panel undo problem this repository has already decided not to solve by accident.
+
+**Removing the selection is one request, one undo entry and one message** ([`features/0050`](../../features/0050-marquee-selection-and-multi-field-delete.md)). It is not a loop over the single-field delete, and the reason changed with [`features/0049`](../../features/0049-every-field-write-re-embeds-the-pdf.md): every field write re-embeds the stored PDF, so thirty deletions would be thirty rewrites of one document, one behind another, while the author waits. `POST /forms/:formId/fields/delete` does it in one transaction and one embed. What the client still has to do per field is the **undo** rule of [`features/0047`](../../features/0047-undo-covers-field-edits.md), applied to the set *before* anything is pushed: a hard-deleted field returns under a fresh local id, an archived one does not return at all (its way back is the rail's Restore), and every older entry forgets both — one dead id in one old entry `400`s every later save of the form until the page is reloaded. Fields that were never saved are dropped locally and are not in the request, because they have no row and an unknown id fails the whole thing.
+
 ### One thing ends an editor session
 
-`useFormManagement().resetEditorSession()` closes the document, clears the fields, and forgets the form — the three together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form.
+`useFormManagement().resetEditorSession()` closes the document, clears the fields, forgets the form and empties the undo stack — the four together. They live in stores that outlive the route and each other, and ending only one of them has been a bug every time: closing the document on its own left the fields behind, so the next PDF opened with the previous form's fields drawn on it, and saving would have written them into the new form. Everything that abandons a document goes through it: the editor's close button, discarding on the way out, `New form`, and opening an existing form. Undo belongs to a session too — an entry kept across a close would offer to restore one document's bytes, or one form's fields, into the next.
 
 Because the edits are held, three things have to exist together and are easy to drop one of:
 
@@ -313,7 +384,23 @@ The in-app guard is `UnsavedChangesDialog.vue`, in the product's own styling rat
 
 It also covers a second way to lose work that is not an edit at all. A PDF that has been opened but never given a field has **no form row**, so closing the editor discarded the document itself. `saveDocumentToDatabase()` stores it with no fields — the document is the work — and `createFormForCurrentDocument` now uploads the open document's bytes whenever a form is created. Without that, `autoInitializeForm` produced a form with a null `pdfUrl`: listed on the dashboard, and failing to open with *"This form has no PDF"*.
 
-`persistEditedDocument` uploads through the existing `POST /api/upload` and repoints the form with `PATCH /api/forms/:id`; no new endpoint, because those two already do this. It does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced ([`docs/BACKLOG.md`](../BACKLOG.md)).
+`persistEditedDocument` uploads through the existing `POST /api/upload` and repoints the form with `PUT /api/forms/:id` (`formsService.update`); no new endpoint, because those two already do this. It does not re-save the extracted fields — the bytes already carry the embedded AcroForm, so that would duplicate every field — and it does not delete the file it replaced, deliberately: **the server does that on the repoint** ([`features/0046`](../../features/0046-editor-save-collects-the-replaced-document.md)). Only the API can answer whether another form still points at those bytes, so this client neither asks nor names bytes to destroy — and a `DELETE /api/uploads/:key` would also never run for the tab that is closed between the upload and the repoint.
+
+### The base scale and the zoom are both called "scale"
+
+A field's position is stored **once**, in canvas pixels at a base scale of `1.5` with the page upright, and that number is now `BASE_SCALE`, exported from `utils/pdfCoordinates.ts` ([`features/0052`](../../features/0052-stored-positions-round-trip.md)). It was a bare literal in nine places before that.
+
+**`documentStore.activeDocument.scale` is not it.** That is the *zoom* — `setScale` writes it from the viewer's buttons and clamps it to 0.5–3.0 — and it is used as `scale / BASE_SCALE` to decide where a stored position is *drawn*. The two are equal by default, which is precisely why mistaking one for the other survives every manual check: it is invisible until somebody zooms.
+
+Three places had made that mistake and are fixed: `useDownloadPDF.ts` and `useFormFieldsExport.ts` divided stored positions by the zoom before embedding, so a document downloaded after zooming in carried every field in the wrong place; `usePDFFieldsLoader.ts` multiplied by the zoom while reading an AcroForm *into* storage, so extracting while zoomed in wrote every position scaled by whatever the author happened to be looking through. `utils/pdfFieldEmbedder.ts` no longer takes a scale from its callers at all — a stored position has exactly one scale in it, so the function does not need to be told.
+
+**A screen delta becomes a stored delta by dividing by both ratios** ([`features/0053`](../../features/0053-a-dragged-field-follows-the-pointer.md)). There is a third number beside those two: `displayScale`, `canvas.clientWidth / canvas.width` in `PDFViewer.vue`, which is what `canvas { max-width: 100% }` does to a page wider than its column. The overlay applies it as one `transform: scale(...)`, so a field is drawn at `stored × scaleFactor × displayScale` and one screen pixel is `1 / (scaleFactor × displayScale)` stored ones. `FormFieldItem.vue` converts the delta once, at the top of `onDrag` and `onResize`, and everything downstream — the edge clamp, the grid snap, `minSize`, the per-field offsets of a multi-selection — works in stored units.
+
+Dragging used to add the screen delta straight to a stored coordinate, so a field crawled behind the cursor when zoomed in and ran ahead of it in a narrow window. **Dividing by the zoom alone is the half-fix to avoid**: at the default zoom `scaleFactor` is 1 and `displayScale` is whatever the window makes it, so that version stays wrong in the configuration most people use while looking correct to anybody testing by zooming. The arrow keys are exempt from all of this by definition — they nudge in stored units and have no screen delta.
+
+**There are two embedders and they are pinned to each other by a shared worked example.** `pdf-processor.ts` on the server and `utils/pdfFieldEmbedder.ts` in the browser implement the same mapping; `backend/tests/pdf-processor.spec.ts` and `utils/pdfFieldEmbedder.spec.ts` assert the *same* stored rectangle produces the *same* PDF rectangle, on a deliberately non-square page. Before that each was pinned only to itself, which is how they drifted. The backend keeps its own `DEFAULT_SCALE` because the workspaces share no package, and a shared package for one number is worse than a comment in each.
+
+One property of the round trip is worth knowing before it looks like a bug: `pdf-lib` **expands** a widget rectangle by half its border on each side, so a bordered field comes back 0.75 stored pixels up and left and 1.5 wider and taller. It is fixed and it does not accumulate — nothing writes an extracted position back over a stored one except `syncFieldsFromPDF`, and only for a form that has never had a field.
 
 ### Page rotation
 

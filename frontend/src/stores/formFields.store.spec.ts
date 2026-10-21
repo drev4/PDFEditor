@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useFormFieldsStore, type FormField } from './formFields.store'
+import { useEditorStore } from './editor.store'
 import { fieldsService } from '@/services/fields'
 
 vi.mock('@/services/fields')
@@ -190,12 +191,55 @@ describe('FormFields Store', () => {
       const serverFieldId = '550e8400-e29b-41d4-a716-446655440000'
       store.fields.push({ ...mockField, id: serverFieldId })
 
-      vi.mocked(fieldsService.delete).mockResolvedValue()
+      vi.mocked(fieldsService.delete).mockResolvedValue({
+        message: 'Field archived',
+        archived: true,
+        answerCount: 3
+      })
 
-      await store.deleteFieldFromServer(serverFieldId)
+      const result = await store.deleteFieldFromServer(serverFieldId)
 
       expect(fieldsService.delete).toHaveBeenCalledWith('form-1', serverFieldId)
       expect(store.fields).toHaveLength(0)
+      // The server's answer reaches the caller: only it knows whether the field
+      // was archived and how many responses that kept (features/0044).
+      expect(result).toEqual({ message: 'Field archived', archived: true, answerCount: 3 })
+    })
+  })
+
+  /**
+   * Undo hands the store a field list it was holding, and the save then has to
+   * be sendable (features/0047). The failure this guards against is not local:
+   * `POST /forms/:id/fields/bulk` rejects the whole payload over one id that is
+   * not a live field, so every later save of the form fails until a reload.
+   */
+  describe('Undo and the save payload', () => {
+    it('sends no id for a field the undo revived, and says the work is unsaved', async () => {
+      const store = useFormFieldsStore()
+      const editorStore = useEditorStore()
+      store.setCurrentForm('form-1')
+
+      const deadServerId = '550e8400-e29b-41d4-a716-446655440000'
+      store.loadFieldsFromForm([
+        { ...mockField, id: deadServerId, options: undefined, validation: undefined }
+      ] as never)
+
+      // What the properties panel does once the server reports a hard delete.
+      const revived = store.fields.map(f => ({ ...f, id: 'field-revived' }))
+      editorStore.pushFieldsUndo(revived, null, 'Field removed')
+      store.deleteField(deadServerId)
+      store.hasUnsavedChanges = false
+
+      editorStore.undoLastEdit()
+
+      expect(store.hasUnsavedChanges).toBe(true)
+
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({ fields: [], archived: [] } as never)
+      await store.saveAllFields()
+
+      const payload = vi.mocked(fieldsService.bulkSave).mock.calls[0]?.[1] ?? []
+      expect(payload).toHaveLength(1)
+      expect(payload[0]).not.toHaveProperty('id')
     })
   })
 
@@ -212,4 +256,109 @@ describe('FormFields Store', () => {
       expect(byPage[2]).toHaveLength(1)
     })
   })
+
+  // Archived fields (features/0045). The tests that matter here are about the
+  // restored field landing in `fields`: the bulk save reads its removals as
+  // "a live field whose id is missing from the payload", so a restore that
+  // only refreshes the sidebar is undone by the next save with no error.
+  describe('Archived fields', () => {
+    const archivedRow = {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      formId: 'form-1',
+      type: 'text' as const,
+      name: 'old_question',
+      label: 'Old question',
+      required: false,
+      position: { x: 5, y: 6, width: 80, height: 20, page: 2 },
+      order: 3,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      deletedAt: '2026-02-01T00:00:00.000Z',
+      answerCount: 4
+    }
+
+    it('loads the archived list for the current form', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      vi.mocked(fieldsService.listArchived).mockResolvedValue([archivedRow] as any)
+
+      await store.loadArchivedFields()
+
+      expect(fieldsService.listArchived).toHaveBeenCalledWith('form-1')
+      expect(store.archivedFields).toHaveLength(1)
+      expect(store.archivedFields[0]?.answerCount).toBe(4)
+    })
+
+    it('does not ask for a list when no form is open', async () => {
+      const store = useFormFieldsStore()
+
+      await store.loadArchivedFields()
+
+      expect(fieldsService.listArchived).not.toHaveBeenCalled()
+    })
+
+    it('puts a restored field into the editor list, with its server id', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      store.archivedFields = [archivedRow] as any
+      vi.mocked(fieldsService.restore).mockResolvedValue({ ...archivedRow, deletedAt: null } as any)
+
+      await store.restoreArchivedField(archivedRow.id)
+
+      expect(fieldsService.restore).toHaveBeenCalledWith('form-1', archivedRow.id)
+      expect(store.fields.map(f => f.id)).toContain(archivedRow.id)
+      expect(store.fields[0]?.position).toEqual(archivedRow.position)
+      expect(store.archivedFields).toEqual([])
+    })
+
+    // The regression this whole feature turns on: a restored field that is not
+    // in `fields` is left out of the next bulk save payload, and the server
+    // archives it again.
+    it('sends the restored field back with the next save', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      vi.mocked(fieldsService.restore).mockResolvedValue({ ...archivedRow, deletedAt: null } as any)
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({ fields: [], archived: [] } as any)
+
+      await store.restoreArchivedField(archivedRow.id)
+      await store.saveAllFields()
+
+      const payload = vi.mocked(fieldsService.bulkSave).mock.calls[0]?.[1] ?? []
+      expect(payload.map(f => f.id)).toContain(archivedRow.id)
+    })
+
+    it('does not mark the document dirty - the restore already reached the server', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      vi.mocked(fieldsService.restore).mockResolvedValue({ ...archivedRow, deletedAt: null } as any)
+
+      await store.restoreArchivedField(archivedRow.id)
+
+      expect(store.hasUnsavedChanges).toBe(false)
+    })
+
+    it('reloads the archived list after a save that archived something', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      store.addField(mockField)
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({ fields: [], archived: [archivedRow.id] } as any)
+      vi.mocked(fieldsService.listArchived).mockResolvedValue([archivedRow] as any)
+
+      await store.saveAllFields()
+
+      expect(fieldsService.listArchived).toHaveBeenCalledWith('form-1')
+      expect(store.archivedFields).toHaveLength(1)
+    })
+
+    it('does not spend a request when a save archived nothing', async () => {
+      const store = useFormFieldsStore()
+      store.setCurrentForm('form-1')
+      store.addField(mockField)
+      vi.mocked(fieldsService.bulkSave).mockResolvedValue({ fields: [], archived: [] } as any)
+
+      await store.saveAllFields()
+
+      expect(fieldsService.listArchived).not.toHaveBeenCalled()
+    })
+  })
+
 })

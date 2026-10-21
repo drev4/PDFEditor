@@ -1,4 +1,5 @@
 import { PDFDocument, PDFForm, PDFPage, rgb, type Color } from 'pdf-lib'
+import { BASE_SCALE } from './pdfCoordinates'
 
 export type EmbedFieldType = 'text' | 'textarea' | 'checkbox' | 'radio' | 'dropdown'
 
@@ -28,16 +29,28 @@ export interface EmbedFieldOptions {
 
 const DEFAULT_BORDER_COLOR = rgb(0.6, 0.6, 0.6)
 
+/**
+ * Stored position to PDF points.
+ *
+ * The divisor is `BASE_SCALE` and **not a parameter** (features/0052). It used
+ * to be one, defaulting to 1.5, and both call sites passed
+ * `documentStore.activeDocument.scale` — the *zoom* — so a document downloaded
+ * after zooming in carried every field in the wrong place. A stored position
+ * has exactly one scale in it, so this function does not need to be told.
+ *
+ * The same arithmetic lives in `pdf-processor.ts` on the server. Neither is the
+ * "real" one; they are pinned to each other by the worked example their two
+ * specs share.
+ */
 function canvasToPDFCoords(
   field: EmbedField,
-  pageHeight: number,
-  scale: number
+  pageHeight: number
 ): { x: number; y: number; width: number; height: number } {
   return {
-    x: field.position.x / scale,
-    y: pageHeight - (field.position.y / scale) - (field.position.height / scale),
-    width: field.position.width / scale,
-    height: field.position.height / scale
+    x: field.position.x / BASE_SCALE,
+    y: pageHeight - (field.position.y / BASE_SCALE) - (field.position.height / BASE_SCALE),
+    width: field.position.width / BASE_SCALE,
+    height: field.position.height / BASE_SCALE
   }
 }
 
@@ -148,8 +161,7 @@ async function addFieldToPDF(
 
 export async function embedFieldsInPDF(
   pdfDoc: PDFDocument,
-  fields: EmbedField[],
-  scale: number = 1.5
+  fields: EmbedField[]
 ): Promise<void> {
   const form = pdfDoc.getForm()
   const pages = pdfDoc.getPages()
@@ -169,7 +181,7 @@ export async function embedFieldsInPDF(
     }
 
     const pageHeight = page.getHeight()
-    const { x, y, width, height } = canvasToPDFCoords(field, pageHeight, scale)
+    const { x, y, width, height } = canvasToPDFCoords(field, pageHeight)
     await addFieldToPDF(form, page, field, x, y, width, height)
   }
 }

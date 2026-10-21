@@ -78,9 +78,27 @@
             v-for="col in dynamicColumns"
             :key="col.fieldId"
             :field="col.fieldId"
-            :header="col.header"
             style="min-width: 150px"
           >
+            <!--
+              An archived column keeps its answers and its original label, and
+              says that it is no longer collected. Without the mark it is
+              indistinguishable from a live question, and the person reading the
+              table has no way to know the form stopped asking.
+            -->
+            <template #header>
+              <span class="inline-flex items-center gap-1.5">
+                <span>{{ col.header }}</span>
+                <span
+                  v-if="col.archived"
+                  class="text-micro text-faint font-normal normal-case"
+                  :data-testid="`archived-column-${col.fieldId}`"
+                  v-tooltip.top="ARCHIVED_HINT"
+                >
+                  <i class="pi pi-inbox text-[10px]" /> archived
+                </span>
+              </span>
+            </template>
             <template #body="{ data, field }">
               <div class="truncate max-w-xs text-row" v-tooltip.top="String(data[field as string] || '')">
                 {{ data[field as string] || '—' }}
@@ -136,7 +154,16 @@
             :key="field.id"
             class="py-3.5 border-b border-line-soft last:border-0"
           >
-            <p class="col-label mb-1.5">{{ field.label || field.name }}</p>
+            <p class="col-label mb-1.5">
+              {{ field.label || field.name }}
+              <span
+                v-if="field.deletedAt"
+                class="text-micro text-faint font-normal normal-case ml-1"
+                v-tooltip.top="ARCHIVED_HINT"
+              >
+                · archived
+              </span>
+            </p>
             <div class="text-body whitespace-pre-wrap">{{ getAnswerValue(field.id) }}</div>
           </div>
         </div>
@@ -219,12 +246,23 @@ function onPage(event: { rows: number; first: number }) {
 
 // Dynamic columns based on every field these responses have answers for,
 // archived ones included.
+//
+// `archived` rides along because the endpoint already tells us: it returns
+// every field of the form without a `deletedAt` filter, precisely so an answer
+// to a removed question keeps a labelled column. Until features/0045 the flag
+// arrived and was thrown away, so a column nobody collects any more looked
+// exactly like a live one.
 const dynamicColumns = computed(() => {
   return responseFields.value.map(field => ({
     fieldId: (field.id as string),
-    header: (field.label || field.name)
+    header: (field.label || field.name),
+    archived: !!field.deletedAt
   }))
 })
+
+const ARCHIVED_HINT =
+  'This question was removed from the form. Answers already collected are kept; '
+  + 'no new ones arrive in this column.'
 
 // Flatten responses for DataTable
 const formattedResponses = computed(() => {

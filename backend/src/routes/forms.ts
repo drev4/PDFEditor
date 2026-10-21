@@ -13,6 +13,7 @@ import { pdfFilenameFrom, signPdfUrl } from '../services/pdf-url.js'
 import { assertUploadBelongsTo } from '../services/uploads.js'
 import { pdfStorage } from '../services/pdf-storage.js'
 import { collectOrphanDocuments, keysReferencedBy } from '../services/pdf-gc.js'
+import { requestEmbed } from '../services/embed-queue.js'
 import { logger } from '../services/logger.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 
@@ -235,6 +236,35 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
     data.pdfUrl = await assertUploadBelongsTo(existing.organizationId, data.pdfUrl)
   }
 
+  // The document this request replaces, if it replaces one (features/0046).
+  //
+  // The editor's save uploads the edited bytes and repoints the form here
+  // (`useFormManagement.ts`, `FormSavePanel.vue`), so before this every save
+  // left one more object nothing would ever reference again.
+  //
+  // Read now, collected after the write, and both halves are deliberate:
+  //  - **Keys, not URLs.** `assertUploadBelongsTo` canonicalises, and a client
+  //    may echo back the signed URL it read from this API, so the two strings
+  //    can differ while naming one object. `pdfFilenameFrom` — the one parser —
+  //    decides, and an unchanged key means there is nothing to collect and no
+  //    reason to touch storage at all.
+  //  - **Never `remove(replaced)`.** Two forms in one organization can point at
+  //    one upload, because an upload is not consumed by being used
+  //    (`services/uploads.ts`), so only `collectOrphanDocuments` may decide —
+  //    it asks whether any *surviving* form still references the key.
+  //
+  // The **condition** is its own name because two different things need it and
+  // they are not the same question (features/0049): what to collect, and
+  // whether to re-embed. `replaced` is empty for a form that had no document at
+  // all, because there is nothing to orphan — but that form still needs its
+  // fields embedded into the document it just gained. Deriving the embed from
+  // `replaced.length` would skip exactly that case, silently.
+  const documentChanged =
+    data.pdfUrl !== undefined &&
+    pdfFilenameFrom(data.pdfUrl) !== pdfFilenameFrom(existing.pdfUrl)
+
+  const replaced = documentChanged ? keysReferencedBy([existing]) : []
+
   // Publishing is what the plan meters, not creating — see
   // `services/entitlements.ts`. This route can publish too, because
   // `updateFormSchema` accepts `status`; gating only PATCH /:id/status would
@@ -254,6 +284,28 @@ formsRouter.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res,
         data: data as any,
         include: formCounts
       })
+
+  // Rows first, bytes second, and **after** the write rather than before it.
+  // Before, the form itself is still pointing at the old key, so
+  // `stillReferenced` answers `true` and the call removes nothing — a silent
+  // no-op that looks like working code. And the ordering is the same one
+  // `DELETE /:id` and `services/pdf-gc.ts` argue for: a rollback after the
+  // bytes are gone leaves a live form with no document and is unrecoverable,
+  // while a commit followed by a failed removal is an orphan, which is logged
+  // and fixable. `collectOrphanDocuments` never throws, so a storage outage
+  // cannot turn the author's save into a `500`.
+  if (replaced.length > 0) await collectOrphanDocuments(replaced)
+
+  // The editor's save is an upload followed by this repoint, so without this
+  // the bytes the author just saved carried whatever AcroForm their original
+  // file happened to have, and the form's own fields reached the document only
+  // at the next bulk save (features/0049).
+  //
+  // Gated on the document rather than on the request: this route also takes the
+  // title, the description and the status, and rewriting the whole PDF because
+  // somebody fixed a typo is work nobody asked for — a queued job per rename,
+  // on a deployment with a worker.
+  if (documentChanged) await requestEmbed(id)
 
   res.json({ form: toApiForm(form) })
 }))

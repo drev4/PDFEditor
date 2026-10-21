@@ -4,6 +4,9 @@
       <component :is="Component" />
     </transition>
   </RouterView>
+  <!-- Global feedback surfaces: PrimeVue broadcasts every event to every
+       mounted instance, so these must exist exactly once. -->
+  <Toast position="top-right" />
   <ConfirmDialog />
 </template>
 
@@ -11,6 +14,7 @@
 import { RouterView } from 'vue-router'
 import { onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth.store'
+import Toast from 'primevue/toast'
 import ConfirmDialog from 'primevue/confirmdialog'
 
 const authStore = useAuthStore()
