@@ -36,7 +36,7 @@ test.describe('Form Management', () => {
   });
 
   test('should display correct page title', async ({ page }) => {
-    await expect(page).toHaveTitle(/PDF|VuePDF/i);
+    await expect(page).toHaveTitle(/DocAIFlow/i);
   });
 });
 
