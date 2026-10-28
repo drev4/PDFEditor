@@ -161,7 +161,13 @@ async function renderEvent(responseId: string) {
 
   return {
     form: { id: response.form.id, title: response.form.title, shareId: response.form.shareId },
-    response: { id: response.id, submittedAt: response.submittedAt, answers }
+    response: {
+      id: response.id,
+      submittedAt: response.submittedAt,
+      // Declared, not verified (features/0054); `null` when the form did not ask.
+      respondentName: response.respondentName,
+      answers
+    }
   }
 }
 

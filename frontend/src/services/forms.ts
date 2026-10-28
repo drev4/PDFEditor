@@ -55,6 +55,11 @@ export interface Form {
    * user agent (features/0032). Off unless the author turned it on.
    */
   collectsRespondentMetadata: boolean
+  /**
+   * Whether a submission must carry the respondent's declared name
+   * (features/0054). Off unless the author turned it on.
+   */
+  asksRespondentName: boolean
   viewCount: number
   createdAt: string
   updatedAt: string
@@ -92,12 +97,18 @@ export interface PublicForm {
    * above, which is a plan entitlement, this is a fact about the reader.
    */
   collectsMetadata: boolean
+  /**
+   * Whether this respondent is asked for their name before submitting
+   * (features/0054). Like `collectsMetadata`, a fact about the reader.
+   */
+  asksRespondentName: boolean
 }
 
 interface PublicFormResponse {
   form: Form
   showBranding?: boolean
   collectsMetadata?: boolean
+  asksRespondentName?: boolean
 }
 
 export interface CreateFormData {
@@ -113,6 +124,7 @@ export interface UpdateFormData {
   pdfUrl?: string
   settings?: Record<string, unknown>
   collectsRespondentMetadata?: boolean
+  asksRespondentName?: boolean
 }
 
 export const formsService = {
@@ -158,7 +170,11 @@ export const formsService = {
       // claim an address is stored when it is not — the safe failure for a
       // privacy statement is to under-claim, and the safe failure for a paid
       // entitlement is to keep showing the mark.
-      collectsMetadata: response.collectsMetadata ?? false
+      collectsMetadata: response.collectsMetadata ?? false,
+      // Absent means not asked. If the server does ask, the submission answers
+      // `400` naming `respondentName`, which the review dialog shows — a loud
+      // failure, rather than a notice claiming a name is stored when it is not.
+      asksRespondentName: response.asksRespondentName ?? false
     }
   }
 }

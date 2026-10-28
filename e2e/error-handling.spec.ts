@@ -175,12 +175,12 @@ test.describe('User Experience', () => {
     await page.goto('/login');
 
     // Should show app name/logo (use first match to avoid strict mode violation)
-    await expect(page.locator('text=/PDF|VuePDF/i').first()).toBeVisible();
+    await expect(page.locator('text=DocAIFlow').first()).toBeVisible();
 
     await page.goto('/register');
 
     // Should show app name/logo on register page too
-    await expect(page.locator('text=/PDF|VuePDF/i').first()).toBeVisible();
+    await expect(page.locator('text=DocAIFlow').first()).toBeVisible();
   });
 
   test('should have accessible form labels', async ({ page }) => {

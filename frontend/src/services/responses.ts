@@ -5,6 +5,8 @@ export interface SubmitResponseData {
   formId: string
   shareId: string
   answers: Record<string, any> // { fieldId: value }
+  /** Sent only when the form asks for it (features/0054). */
+  respondentName?: string
 }
 
 export interface SubmitResponseResult {
@@ -31,6 +33,8 @@ export interface FormResponse {
   submittedAt: string
   ipAddress: string | null
   userAgent: string | null
+  /** Declared by the respondent, not verified (features/0054). */
+  respondentName: string | null
   answers: Answer[]
 }
 

@@ -8,13 +8,17 @@ import { assertResponseWithinLimit } from '../services/entitlements.js'
 import { queueResponseCreated } from '../services/webhook-queue.js'
 import { logger } from '../services/logger.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
+import { normalizeRespondentName } from '../services/respondent-name.js'
 
 export const responsesRouter = Router()
 
 const submitResponseSchema = z.object({
   formId: z.string().uuid(),
   shareId: z.string(),
-  answers: z.record(z.string(), z.any()) // { fieldId: value }
+  answers: z.record(z.string(), z.any()), // { fieldId: value }
+  // Validated by `normalizeRespondentName` below rather than here, because
+  // whether it is required depends on the form (features/0054).
+  respondentName: z.unknown().optional()
 })
 
 // POST /api/responses - Submit form response (no auth required)
@@ -27,7 +31,7 @@ responsesRouter.post('/', responseRateLimit, asyncHandler(async (req: Request, r
     })
   }
 
-  const { formId, shareId, answers } = validation.data
+  const { formId, shareId, answers, respondentName: submittedName } = validation.data
 
   // Verify form exists and is published
   const form = await prisma.form.findFirst({
@@ -126,6 +130,19 @@ responsesRouter.post('/', responseRateLimit, asyncHandler(async (req: Request, r
     }
   }
 
+  // The declared name (features/0054). Required when the form asks for it, and
+  // **ignored** when it does not: the column governs what a submission stores,
+  // not what a client may send — the same rule as the respondent metadata below.
+  let respondentName: string | null = null
+  if (form.asksRespondentName) {
+    const result = normalizeRespondentName(submittedName)
+    if (result.ok) {
+      respondentName = result.name
+    } else {
+      validationErrors.respondentName = result.error
+    }
+  }
+
   if (Object.keys(validationErrors).length > 0) {
     return res.status(400).json({
       error: 'Validation failed',
@@ -177,6 +194,7 @@ responsesRouter.post('/', responseRateLimit, asyncHandler(async (req: Request, r
           formId,
           ipAddress,
           userAgent,
+          respondentName,
           answers: {
             create: validAnswerEntries.map(([fieldId, value]) => {
               // Ensure value is always a string and not undefined/null
