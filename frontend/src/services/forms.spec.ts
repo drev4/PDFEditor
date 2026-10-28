@@ -127,5 +127,15 @@ describe('Forms Service', () => {
 
       expect(published.collectsMetadata).toBe(true)
     })
+
+    // features/0054: absent means not asked, so the notice never says a name
+    // is stored when the server did not say it asks for one.
+    it('treats a missing asksRespondentName as not asking, and passes it through', async () => {
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm })
+      expect((await formsService.getPublic('share-123')).asksRespondentName).toBe(false)
+
+      vi.mocked(api.get).mockResolvedValue({ form: mockForm, asksRespondentName: true })
+      expect((await formsService.getPublic('share-123')).asksRespondentName).toBe(true)
+    })
   })
 })

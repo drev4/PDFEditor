@@ -131,6 +131,9 @@
       >
         Your answers are sent to the organization that published this form, and
         they are who to contact about them.
+        <template v-if="asksRespondentName">
+          You will be asked for your name, which is stored as you type it and is not verified.
+        </template>
         <template v-if="collectsMetadata">
           Your IP address and browser are recorded with your submission.
         </template>
@@ -160,6 +163,9 @@
         :fields="fields"
         :answers="responsesStore.getAllResponses()"
         :is-submitting="isSubmitting"
+        :asks-name="asksRespondentName"
+        v-model:respondent-name="respondentName"
+        :name-error="submitValidationErrors.respondentName ?? null"
         @confirm="handleConfirmSubmit"
       />
     </div>
@@ -167,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ProgressSpinner from 'primevue/progressspinner'
 import { usePublicForm } from '../composables/usePublicForm'
@@ -179,13 +185,25 @@ import { buildApiUrl } from '@/utils/apiUrl'
 import PDFViewer from '@/components/pdf/PDFViewer.vue'
 import PublicFormFieldsOverlay from '@/components/form-fields/PublicFormFieldsOverlay.vue'
 import SubmitPreviewModal from '@/components/forms/SubmitPreviewModal.vue'
+import { normalizeRespondentName } from '@/utils/respondentName'
 
 const route = useRoute()
 const router = useRouter()
 const documentStore = useDocumentStore()
 
-const { form, showBranding, collectsMetadata, fields, pdfUrl, title, description, isLoading, error, loadForm } =
-  usePublicForm()
+const {
+  form,
+  showBranding,
+  collectsMetadata,
+  asksRespondentName,
+  fields,
+  pdfUrl,
+  title,
+  description,
+  isLoading,
+  error,
+  loadForm
+} = usePublicForm()
 const { isSubmitting, error: submitError, validationErrors: submitValidationErrors, submit } = useResponseSubmit()
 const { errors: clientErrors, validateField, validate } = useFormValidation()
 const responsesStore = usePublicResponsesStore()
@@ -193,6 +211,19 @@ const responsesStore = usePublicResponsesStore()
 const shareId = computed(() => route.params.shareId as string)
 const loadingPdf = ref(false)
 const showPreview = ref(false)
+// The declared name (features/0054). Component state only, deliberately not in
+// the draft the responses store keeps in localStorage: it is personal data, and
+// a shared computer should not offer it to the next person who opens the link.
+const respondentName = ref('')
+
+// A refusal from the server is about the name it was sent; once the respondent
+// edits it, the local check speaks again.
+watch(respondentName, () => {
+  if (submitValidationErrors.value.respondentName) {
+    const { respondentName: _refused, ...rest } = submitValidationErrors.value
+    submitValidationErrors.value = rest
+  }
+})
 
 // Progress, as the PublicForm artboard shows it. An answer counts as given if
 // it is a non-empty string or a ticked checkbox; `false` on an unticked
@@ -332,7 +363,8 @@ async function handleConfirmSubmit() {
     await submit({
       formId: form.value.id,
       shareId: shareId.value,
-      answers
+      answers,
+      ...(asksRespondentName.value ? { respondentName: normalizeRespondentName(respondentName.value) } : {})
     })
 
     // Clear responses and redirect to confirmation
@@ -340,8 +372,9 @@ async function handleConfirmSubmit() {
     responsesStore.clearDraft()
     router.push(`/form/${shareId.value}/confirmation`)
   } catch (err) {
-    // Error is handled by the composable
-    showPreview.value = false
+    // Error is handled by the composable. A refused name keeps the dialog open,
+    // because the input it belongs to is in there.
+    if (!submitValidationErrors.value.respondentName) showPreview.value = false
     console.error('Submit failed:', err)
   }
 }

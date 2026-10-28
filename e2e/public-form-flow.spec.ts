@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createPublishedForm, type SeededForm } from './helpers';
+import { API_URL, createPublishedForm, type SeededForm } from './helpers';
 
 // This suite used to point at a hardcoded shareId ('53SGWRKS0N8E') that existed
 // on nobody's machine, so both tests failed everywhere. Each test now creates
@@ -46,6 +46,40 @@ test.describe('Public Form Submission', () => {
         // The route is /form/:shareId/confirmation - the old /form/confirm never matched.
         await page.waitForURL(/\/form\/[^/]+\/confirmation/, { timeout: 30000 });
         await expect(page.locator('text=Response Submitted')).toBeVisible();
+    });
+
+    // features/0054, end to end: the author turns the setting on, the notice
+    // says so, confirming is blocked until a name is typed, and the stored
+    // response carries the normalised name.
+    test('asks for a declared name when the form requires one', async ({ page, request }) => {
+        const headers = { Authorization: `Bearer ${form.token}` };
+        const updated = await request.put(`${API_URL}/forms/${form.formId}`, {
+            headers,
+            data: { asksRespondentName: true }
+        });
+        expect(updated.ok(), `update failed: ${await updated.text()}`).toBeTruthy();
+
+        await page.goto(`/form/${form.shareId}`);
+        await page.waitForSelector('.pdf-viewer-container', { timeout: 30000 });
+        await expect(page.locator('.public-field-item').first()).toBeVisible({ timeout: 30000 });
+
+        await expect(page.locator('[data-testid="respondent-notice"]')).toContainText('not verified');
+
+        await page.locator('.text-input').first().fill('E2E answer');
+        await page.locator('[data-testid="public-submit-button"]').click();
+
+        const confirm = page.locator('[data-testid="confirm-submit-button"]');
+        await expect(confirm).toBeDisabled();
+
+        await page.locator('[data-testid="respondent-name-input"]').fill('  Ada   Lovelace ');
+        await expect(confirm).toBeEnabled();
+        await confirm.click();
+
+        await page.waitForURL(/\/form\/[^/]+\/confirmation/, { timeout: 30000 });
+
+        const listed = await request.get(`${API_URL}/forms/${form.formId}/responses`, { headers });
+        const { responses } = await listed.json();
+        expect(responses[0].respondentName).toBe('Ada Lovelace');
     });
 
     test('should persist drafts in localStorage', async ({ page }) => {

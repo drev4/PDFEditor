@@ -5,6 +5,7 @@ interface ResponseWithAnswers {
   formId: string
   ipAddress: string | null
   userAgent: string | null
+  respondentName: string | null
   submittedAt: Date
   answers: Answer[]
 }
@@ -20,16 +21,25 @@ export function exportResponsesToCSV(
   form: Form & { fields: Field[] },
   responses: ResponseWithAnswers[]
 ): string {
-  const headers = ['Date Submitted', 'IP Address', ...form.fields.map(f => f.label || f.name)]
+  // "Declared name", never "Name" or "Submitted by": it is what the respondent
+  // typed, and nothing verified it (features/0054). Always present, so a
+  // column's position does not depend on a form setting that can change.
+  const headers = [
+    'Date Submitted',
+    'Declared name',
+    'IP Address',
+    ...form.fields.map(f => f.label || f.name)
+  ]
 
   const csvRows = responses.map(resp => {
     const date = resp.submittedAt.toISOString()
+    const name = resp.respondentName ? escapeCsvValue(resp.respondentName) : ''
     const ip = resp.ipAddress || ''
     const answers = form.fields.map(field => {
       const ans = resp.answers.find(a => a.fieldId === field.id)
       return ans ? escapeCsvValue(String(ans.value)) : ''
     })
-    return [date, ip, ...answers].join(',')
+    return [date, name, ip, ...answers].join(',')
   })
 
   const headerRow = headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',')

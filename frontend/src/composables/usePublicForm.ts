@@ -28,6 +28,12 @@ export function usePublicForm() {
    */
   const collectsMetadata = ref(false)
 
+  /**
+   * Whether the respondent is asked for their declared name (features/0054).
+   * Starts `false`, like `collectsMetadata`, for the same reason.
+   */
+  const asksRespondentName = ref(false)
+
   const fields = computed(() => form.value?.fields || [])
   const pdfUrl = computed(() => form.value?.pdfUrl || null)
   const title = computed(() => form.value?.title || '')
@@ -42,6 +48,7 @@ export function usePublicForm() {
       form.value = published.form
       showBranding.value = published.showBranding
       collectsMetadata.value = published.collectsMetadata
+      asksRespondentName.value = published.asksRespondentName
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 404) {
         error.value = 'Form not found or not published'
@@ -62,12 +69,14 @@ export function usePublicForm() {
     isLoading.value = false
     showBranding.value = true
     collectsMetadata.value = false
+    asksRespondentName.value = false
   }
 
   return {
     form,
     showBranding,
     collectsMetadata,
+    asksRespondentName,
     fields,
     pdfUrl,
     title,

@@ -48,6 +48,32 @@
           </div>
         </div>
       </div>
+
+      <!-- The declared name (features/0054). Labelled as what it is: the name
+           the respondent gives, which nobody checks. Held in the parent's
+           state only, never in the saved draft. -->
+      <div v-if="asksName" class="space-y-2 pt-5 mt-2 border-t border-line">
+        <label for="respondent-name" class="block text-body font-medium text-ink">
+          Your name
+        </label>
+        <InputText
+          id="respondent-name"
+          :model-value="respondentName"
+          :invalid="!!shownNameError"
+          :maxlength="RESPONDENT_NAME_MAX_LENGTH + 20"
+          class="w-full"
+          autocomplete="name"
+          data-testid="respondent-name-input"
+          @update:model-value="onNameInput"
+          @blur="nameTouched = true"
+        />
+        <small v-if="shownNameError" class="text-danger" data-testid="respondent-name-error">
+          {{ shownNameError }}
+        </small>
+        <small v-else class="text-meta text-muted">
+          Sent with your answers as you type it. It is not verified.
+        </small>
+      </div>
     </div>
 
     <template #footer>
@@ -65,6 +91,7 @@
           severity="success" 
           class="px-6"
           :loading="isSubmitting"
+          :disabled="asksName && !!clientNameError"
           data-testid="confirm-submit-button"
           @click="$emit('confirm')" 
         />
@@ -76,19 +103,45 @@
 <script setup lang="ts">
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
+import { computed, ref, watch } from 'vue'
 import type { Field } from '@/services/forms'
+import { RESPONDENT_NAME_MAX_LENGTH, respondentNameError } from '@/utils/respondentName'
 
 const props = defineProps<{
   visible: boolean
   fields: Field[]
   answers: Record<string, any>
   isSubmitting?: boolean
+  /** Whether the form asks for a declared name (features/0054). */
+  asksName?: boolean
+  respondentName?: string
+  /** The server's verdict on the name, from a `400`. Wins over the local one. */
+  nameError?: string | null
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
+  (e: 'update:respondentName', value: string): void
   (e: 'confirm'): void
 }>()
+
+// The local check only speaks once the respondent has left the input, so an
+// empty field does not open with an error; the confirm button is disabled
+// either way.
+const nameTouched = ref(false)
+const clientNameError = computed(() => respondentNameError(props.respondentName ?? ''))
+const shownNameError = computed(() =>
+  props.nameError || (nameTouched.value ? clientNameError.value : null)
+)
+
+watch(() => props.visible, visible => {
+  if (visible) nameTouched.value = false
+})
+
+function onNameInput(value: string | undefined) {
+  emit('update:respondentName', value ?? '')
+}
 
 function hasAnswer(fieldId: string) {
   const val = props.answers[fieldId]

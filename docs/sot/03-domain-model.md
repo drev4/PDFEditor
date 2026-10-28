@@ -88,6 +88,12 @@ Three properties of it are easy to get wrong.
 
 **The migration touched no existing row.** `20260902112033_add_collects_respondent_metadata` is a single additive `ALTER TABLE ... ADD COLUMN ... DEFAULT false`. Addresses already collected are still there, deliberately: nobody asked for them to be destroyed, and an author relying on them should not lose them to a schema change. Erasing them is a separate act, filed in [`docs/BACKLOG.md`](../BACKLOG.md). What existing forms do change is their behaviour from now on — they stop collecting, which is the direction that collects less.
 
+### The respondent's declared name
+
+`Form.asksRespondentName` (default `false`) decides whether a submission **must carry and stores** `Response.respondentName` ([`features/0054`](../../features/0054-declared-respondent-name.md)). Same shape as the metadata flag above, and the same three properties hold: it governs what is stored and never who may read anything; when it is `false` a name sent by a client is **ignored and `null` is written**; and the migration (`20261028120000_add_respondent_name`) is two additive `ADD COLUMN`s that touched no existing row.
+
+**The value is a snapshot string, declared and not verified.** It is not a foreign key, it is never matched against `User`, and every surface labels it *Declared name*. Normalisation (trim, collapse whitespace, no control characters, 1–120 characters) lives in one function, `backend/src/services/respondent-name.ts`; the SPA mirrors it in `frontend/src/utils/respondentName.ts` for feedback only. It is erased with its `Response`, which already cascades from `Form`.
+
 ## Cascade map
 
 `onDelete` behaviour, read out of the schema. This table is the most important thing in this document, because two of these rows are how the product loses customer data.

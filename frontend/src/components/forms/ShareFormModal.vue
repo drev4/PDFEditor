@@ -60,6 +60,32 @@
         />
       </div>
 
+      <!-- The declared name (features/0054). Same pattern as the switch above:
+           a property of what happens when somebody uses the link. -->
+      <div class="flex items-start justify-between gap-4 p-4 rounded-lg bg-surface-subtle">
+        <div>
+          <p class="font-semibold text-ink">Ask for the respondent's name</p>
+          <p class="text-body text-muted">
+            Respondents must type their name before submitting. It appears with
+            each response and in the CSV as a declared name — nobody verifies it.
+          </p>
+          <p
+            v-if="nameSettingError"
+            class="mt-1 text-body text-danger"
+            role="alert"
+            data-testid="asks-name-error"
+          >
+            {{ nameSettingError }}
+          </p>
+        </div>
+        <InputSwitch
+          v-model="asksName"
+          :disabled="isTogglingName"
+          data-testid="asks-name-switch"
+          @change="handleToggleName"
+        />
+      </div>
+
       <!-- Analytics -->
       <div v-if="form.status === 'published'" class="grid grid-cols-2 gap-4">
         <div class="p-4 rounded-lg bg-accent-soft border border-accent">
@@ -176,6 +202,14 @@ const collectsMetadata = ref(false)
 const isTogglingMetadata = ref(false)
 const metadataError = ref<string | null>(null)
 
+/**
+ * Whether respondents are asked for their declared name (features/0054).
+ * Calls the service directly for the reason given above `collectsMetadata`.
+ */
+const asksName = ref(false)
+const isTogglingName = ref(false)
+const nameSettingError = ref<string | null>(null)
+
 // Update isPublished when form changes
 watch(() => props.form?.status, (status) => {
   isPublished.value = status === 'published'
@@ -185,6 +219,37 @@ watch(() => props.form?.collectsRespondentMetadata, (value) => {
   collectsMetadata.value = value === true
   metadataError.value = null
 }, { immediate: true })
+
+watch(() => props.form?.asksRespondentName, (value) => {
+  asksName.value = value === true
+  nameSettingError.value = null
+}, { immediate: true })
+
+async function handleToggleName() {
+  if (!props.form) return
+
+  const wanted = asksName.value
+  isTogglingName.value = true
+  nameSettingError.value = null
+
+  try {
+    await formsService.update(props.form.id, { asksRespondentName: wanted })
+    toast.add({
+      severity: 'success',
+      summary: wanted ? 'Asking for names' : 'No longer asking for names',
+      detail: wanted
+        ? 'New submissions must include the respondent’s declared name.'
+        : 'New submissions will not include a name. Names already collected are unchanged.',
+      life: 3000
+    })
+  } catch (error) {
+    // Back to where it was, so the switch never shows a state the server does not hold.
+    asksName.value = !wanted
+    nameSettingError.value = error instanceof Error ? error.message : 'Could not change this setting'
+  } finally {
+    isTogglingName.value = false
+  }
+}
 
 async function handleToggleMetadata() {
   if (!props.form) return
