@@ -36,7 +36,10 @@ const updateFormSchema = z.object({
   // from the client and validates in no way — and the flag deciding whether
   // personal data is stored must not be a key nobody checks, absent on every
   // existing row and impossible to query.
-  collectsRespondentMetadata: z.boolean().optional()
+  collectsRespondentMetadata: z.boolean().optional(),
+  // Explicit for the same reason (features/0054): it decides whether a
+  // submission must carry, and stores, the respondent's declared name.
+  asksRespondentName: z.boolean().optional()
 })
 
 /**
@@ -414,7 +417,11 @@ formsRouter.get('/public/:shareId', asyncHandler(async (req, res, next) => {
     // It is safe under the rule the comment above states, and worth checking
     // against it rather than assuming: this says nothing about the owner's plan,
     // limits, usage or identity. It says what happens to the person reading it.
-    collectsMetadata: form.collectsRespondentMetadata
+    collectsMetadata: form.collectsRespondentMetadata,
+    // Whether this respondent will be asked for their name (features/0054).
+    // Same contract and same check against the rule above as `collectsMetadata`:
+    // it describes what happens to the person reading it, nothing about the owner.
+    asksRespondentName: form.asksRespondentName
   })
 }))
 

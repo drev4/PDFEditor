@@ -286,6 +286,7 @@ async function writeResponses(out: Writable, organizationId: string): Promise<vo
         submittedAt: true,
         ipAddress: true,
         userAgent: true,
+        respondentName: true,
         answers: { select: { fieldId: true, value: true } }
       }
     })
@@ -302,6 +303,9 @@ async function writeResponses(out: Writable, organizationId: string): Promise<vo
         // means for the customer's own obligations.
         ipAddress: response.ipAddress,
         userAgent: response.userAgent,
+        // Typed by the respondent (features/0054); same reasoning as the two
+        // lines above — collected from them, so it is in the controller's file.
+        respondentName: response.respondentName,
         answers: response.answers.map(answer => ({
           fieldId: answer.fieldId,
           value: answer.value

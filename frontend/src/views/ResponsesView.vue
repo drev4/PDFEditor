@@ -74,6 +74,15 @@
             </template>
           </Column>
 
+          <!-- "Declared", because nothing verified it (features/0054). -->
+          <Column field="respondentName" header="Declared name" style="min-width: 150px">
+            <template #body="{ data }">
+              <div class="truncate max-w-xs text-row" data-testid="respondent-name-cell">
+                {{ data.respondentName || '—' }}
+              </div>
+            </template>
+          </Column>
+
           <Column
             v-for="col in dynamicColumns"
             :key="col.fieldId"
@@ -145,6 +154,10 @@
           <div>
             <p class="col-label mb-1">IP address</p>
             <p class="num text-mono">{{ selectedResponse.ipAddress || '—' }}</p>
+          </div>
+          <div class="col-span-2">
+            <p class="col-label mb-1">Declared name</p>
+            <p class="text-row">{{ selectedResponse.respondentName || '—' }}</p>
           </div>
         </div>
 
@@ -271,7 +284,8 @@ const formattedResponses = computed(() => {
       id: resp.id,
       submittedAt: resp.submittedAt,
       ipAddress: resp.ipAddress,
-      userAgent: resp.userAgent
+      userAgent: resp.userAgent,
+      respondentName: resp.respondentName
     }
 
     // Map each answer to its fieldId key

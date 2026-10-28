@@ -392,6 +392,11 @@ model Form {
   /// `req.ip` on the request in flight and never reads this column or the ones
   /// it controls. Turning this off does not weaken abuse protection.
   collectsRespondentMetadata Boolean @default(false) @map("collects_respondent_metadata")
+  /// Whether a submission to this form must carry the respondent's declared
+  /// name (features/0054). Same shape as `collectsRespondentMetadata`: it
+  /// governs what a submission stores and requires, never who may read
+  /// anything. When it is `false` a name sent by a client is ignored, not stored.
+  asksRespondentName Boolean @default(false) @map("asks_respondent_name")
   fields      Field[]
   createdBy   User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -428,6 +433,11 @@ model Response {
   ipAddress   String?  @map("ip_address")
   userAgent   String?  @map("user_agent")
   pdfUrl      String?  @map("pdf_url")
+  /// The name the respondent typed (features/0054). **Declared, not verified**:
+  /// a snapshot string, never a link to a `User`, and no screen may present it
+  /// as an identity. Null when the form did not ask, and on every response
+  /// submitted before the column existed.
+  respondentName String? @map("respondent_name")
   answers     Answer[]
   form        Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
 

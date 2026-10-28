@@ -172,8 +172,8 @@ The role rules and the `404` / `403` split are in [07-security-and-privacy](./07
 | PATCH | `/forms/:id/status` | Bearer + ownership | `{status: 'draft' \| 'published' \| 'closed'}`. **`402`** when publishing would exceed the plan's limit |
 | DELETE | `/forms/:id` | Bearer + ownership | **Cascades to fields and every response.** Irreversible, no soft delete, no export prompt |
 | GET | `/forms/public/:shareId` | — | `200 {form, showBranding}`. Published forms only, **live** fields only. Increments `viewCount`. **Never returns `userId`**, and carries nothing about the owner's plan except `showBranding` — see below. Answers `404` — not `402` — when the owning organization has spent the month's responses, so the form is unavailable before anyone fills it in |
-| GET | `/forms/:id/responses` | Bearer + ownership | Query `limit`, `offset`. Returns `{responses, fields, pagination: {total, limit, offset}}`. `fields` includes **archived** fields, so an answer to a removed question keeps a labelled column |
-| GET | `/forms/:id/responses/export` | Bearer + ownership | CSV download, `Content-Disposition: attachment`, UTF-8 BOM, built by `csv-exporter.ts`. Columns include **archived** fields, under their original label |
+| GET | `/forms/:id/responses` | Bearer + ownership | Query `limit`, `offset`. Returns `{responses, fields, pagination: {total, limit, offset}}`. `fields` includes **archived** fields, so an answer to a removed question keeps a labelled column. Each response carries `respondentName` (string or `null`) |
+| GET | `/forms/:id/responses/export` | Bearer + ownership | CSV download, `Content-Disposition: attachment`, UTF-8 BOM, built by `csv-exporter.ts`. Fixed columns `Date Submitted`, `Declared name`, `IP Address`, then one per field. Columns include **archived** fields, under their original label |
 
 Ownership is `verifyFormOwnership` (`middleware/formOwnership.ts`): **404, not 403**, when the form exists but belongs to another user, so the API does not confirm the existence of other people's resources.
 
@@ -190,6 +190,8 @@ It is safe under the rule `showBranding` established and worth checking against 
 The client treats the two flags' absence in **opposite** directions, and that is deliberate: a missing `showBranding` keeps the mark (under-claiming a paid entitlement gives it away), while a missing `collectsMetadata` claims nothing is stored (a privacy notice that over-claims is the worse failure).
 
 The form endpoints accept and return `collectsRespondentMetadata` as an explicit field — never a key inside `settings`, which is `z.record(z.unknown())` and validated in no way.
+
+`asksRespondentName` ([`features/0054`](../../features/0054-declared-respondent-name.md)) follows the same pattern on both sides: an explicit boolean on `PUT /forms/:id` and on authenticated form reads, and one derived boolean of the same name on the public payload, beside `collectsMetadata`. It says whether the respondent will be asked for their declared name. The client treats its absence as **not asked**.
 
 ## Fields — `routes/form-fields.ts`
 
@@ -303,7 +305,7 @@ That third rule is the surprising one: `^(?=.*[A-Z]).+$` is a valid JavaScript r
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/responses` | **Public** | Body `{formId (uuid), shareId, answers: Record<fieldId, unknown>}`. Rate limited per IP; `429` when exceeded |
+| POST | `/responses` | **Public** | Body `{formId (uuid), shareId, answers: Record<fieldId, unknown>, respondentName?}`. `respondentName` is required when the form's `asksRespondentName` is true — missing, blank, over 120 characters or containing control characters is `400` with `details.respondentName` — and ignored (not stored) when it is false ([`features/0054`](../../features/0054-declared-respondent-name.md)). Rate limited per IP; `429` when exceeded |
 
 Validation, in order, before anything is persisted:
 
@@ -380,7 +382,7 @@ Keys are minted from the internal API (below), belong to an **organization** rat
 |---|---|
 | `GET /api/v1/forms` | `{ data: Form[], pagination }` — the calling organization's forms, newest first |
 | `GET /api/v1/forms/:id` | One form plus its live `fields`; `404` if it belongs to anybody else |
-| `GET /api/v1/forms/:id/responses` | `{ data: Response[], pagination }`, answers keyed by **field name** |
+| `GET /api/v1/forms/:id/responses` | `{ data: Response[], pagination }`, answers keyed by **field name**. Each response is `{ id, submittedAt, respondentName, answers }`; `respondentName` is the declared, unverified name or `null` — added by [`features/0054`](../../features/0054-declared-respondent-name.md), an additive change |
 | `GET /api/v1/forms/:id/responses.csv` | The same export the SPA downloads, unpaginated |
 
 `Form` is `{ id, title, description, status, shareId, createdAt, updatedAt }` and `Field` is `{ id, name, label, type, required, order, options?, archived }`. **Field ids are stable across saves** ([`features/0001`](../../features/0001-stable-field-ids-and-safe-bulk-save.md)), which is what makes them safe for an integration to store. `archived: true` means the question is no longer asked but its past answers remain.
@@ -431,7 +433,7 @@ Managed from the **internal** API, with a session, because a credential that cou
   "createdAt": "2026-09-01T12:00:00.000Z",
   "data": {
     "form": { "id": "…", "title": "…", "shareId": "…" },
-    "response": { "id": "…", "submittedAt": "…", "answers": { "<field name>": "value" } }
+    "response": { "id": "…", "submittedAt": "…", "respondentName": "… or null", "answers": { "<field name>": "value" } }
   }
 }
 ```

@@ -140,7 +140,12 @@ v1FormsRouter.get('/:id', asyncHandler(async (req: ApiKeyRequest, res, next) => 
  * author later removed the question would be a quiet loss of a customer's data.
  */
 function publicResponse(
-  response: { id: string; submittedAt: Date; answers: { fieldId: string; value: string }[] },
+  response: {
+    id: string
+    submittedAt: Date
+    respondentName: string | null
+    answers: { fieldId: string; value: string }[]
+  },
   fieldNames: Map<string, string>
 ) {
   const answers: Record<string, string> = {}
@@ -150,7 +155,14 @@ function publicResponse(
     if (name) answers[name] = answer.value
   }
 
-  return { id: response.id, submittedAt: response.submittedAt, answers }
+  return {
+    id: response.id,
+    submittedAt: response.submittedAt,
+    // Declared by the respondent, not verified (features/0054). Always present,
+    // `null` when the form did not ask — an additive change to this contract.
+    respondentName: response.respondentName,
+    answers
+  }
 }
 
 // GET /api/v1/forms/:id/responses
