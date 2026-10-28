@@ -16,5 +16,11 @@
     "package": "prisma",
     "reason": "Indirect: the Prisma CLI is a production dependency of @prisma/client, and is flagged only for depending on @prisma/config. Same reachability argument and same expiry as the deepmerge-ts entry.",
     "expires": "2026-12-01"
+  },
+  {
+    "id": "GHSA-mrhx-c7xc-m3w5",
+    "package": "zod",
+    "reason": "Unbounded validation issues in $ZodArray (zod/v4/core). Present in the image but never loaded by it: every import in backend/src is the package root ('zod'), whose entry re-exports ./v3/external only; requiring it loads zod/v3/* and nothing under zod/v4 (verified 2026-10-28 by listing require.cache after require('zod')). The v3 array parser does also validate every element, but request bodies are capped by express.json()'s default 100 kB, so the work is bounded. The fix exists only in zod 4.6.6+, a major with an API migration, filed in docs/BACKLOG.md. Re-check when zod is upgraded.",
+    "expires": "2026-12-01"
   }
 ]

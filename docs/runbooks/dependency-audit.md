@@ -97,6 +97,10 @@ Verified again inside `node:22-bookworm-slim`, because a pass on a developer's W
 docker run --rm vuepdf-audit-runtime node -e "require('bcrypt').compareSync('…','\$2b\$10\$…')"
 ```
 
+## Triage of 2026-10-28
+
+New advisories turned the gate red on `develop` with no dependency change in the repository. Twelve blocking findings, all but one fixed inside their declared ranges by a lockfile-only update: `express` 4.22.3 (with `body-parser` 1.20.9, `proxy-addr` 2.0.8 and `qs` 6.16.2), `multer` 2.5.0, `undici` 8.12.3 (pulled by `re2`'s `node-gyp`; `re2` itself unchanged, so the Node floor did not move), and `postcss` 8.5.32 with `source-map-js` 1.2.2. The remaining one, `zod` GHSA-mrhx-c7xc-m3w5, has no fix on the 3.x line and is excepted with its reachability argument; the migration to 4 is filed in [`docs/BACKLOG.md`](../BACKLOG.md). Backend, integration and frontend suites, both type checks and the frontend build were green after the update.
+
 ## When Dependabot opens a pull request
 
 1. Read the diff. Do not auto-merge — see `.github/dependabot.yml` for why.
