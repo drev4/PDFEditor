@@ -53,9 +53,9 @@
     "backend"
   ],
   "devDependencies": {
-    "@playwright/test": "^1.58.0",
+    "@playwright/test": "^1.65.0",
     "concurrently": "^9.1.2",
-    "semver": "^7.8.5"
+    "semver": "^7.8.6"
   },
   "engines": {
     "node": ">=22.22.2"
